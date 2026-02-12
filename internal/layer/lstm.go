@@ -72,8 +72,8 @@ func NewLSTM(inSize, outSize int) *LSTM {
 	recurrentWeights := make([]float64, outSize*4*outSize)
 	biases := make([]float64, outSize*4)
 
-	// Create deterministic RNG for reproducible initialization
-	rng := NewRNG(42)
+	// Create deterministic RNG with layer-specific seed for different initial weights
+	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 142))
 
 	// Initialize weights with simple loop for performance
 	for i := 0; i < outSize*4; i++ {

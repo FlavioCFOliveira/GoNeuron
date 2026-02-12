@@ -112,11 +112,14 @@ func (n *Network) TrainBatch(batchX [][]float64, batchY [][]float64) float64 {
 	// Parallel overhead dominates for small batches
 	const parallelThreshold = 16
 
-	if batchSize >= parallelThreshold {
-		return n.trainBatchParallel(batchX, batchY)
-	}
-
+	// Force sequential for now due to bug in parallel training
 	return n.trainBatchSequential(batchX, batchY)
+
+	// if batchSize >= parallelThreshold {
+	// 	return n.trainBatchParallel(batchX, batchY)
+	// }
+
+	// return n.trainBatchSequential(batchX, batchY)
 }
 
 // trainBatchSequential performs training on a batch of samples sequentially.
@@ -255,16 +258,16 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 			gradLen := len(l.Gradients())
 			layerGrads := avgGrads[offset : offset+gradLen]
 
-			// Average and apply in-place
+			// Average gradients in-place
 			for i := 0; i < gradLen; i++ {
 				layerGrads[i] /= float64(batchSize)
 			}
 
-			// Get current params
+			// Apply gradient step in-place to layer's gradients buffer
+			// Then use Step to get updated params and set them back
 			params := l.Params()
-
-			// Apply gradient step in-place
-			n.opt.StepInPlace(params, layerGrads)
+			updated := n.opt.Step(params, layerGrads)
+			l.SetParams(updated)
 
 			offset += gradLen
 		}

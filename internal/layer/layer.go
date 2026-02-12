@@ -64,8 +64,8 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 
 	// Xavier/Glorot initialization
 	scale := math.Sqrt(2.0 / (float64(in) + float64(out)))
-	// Create deterministic RNG for reproducible initialization
-	rng := NewRNG(42)
+	// Create deterministic RNG with layer-specific seed for different initial weights
+	rng := NewRNG(uint64(in*1000 + out*100 + 42))
 	for i := range weights {
 		weights[i] = rng.RandFloat()*2*scale - scale
 	}
