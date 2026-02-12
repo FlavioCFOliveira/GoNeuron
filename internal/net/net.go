@@ -291,6 +291,11 @@ func (n *Network) Gradients() []float64 {
 	return gradients
 }
 
+// Layers returns the network's layers slice.
+func (n *Network) Layers() []layer.Layer {
+	return n.layers
+}
+
 // Save saves the network to a file using gob encoding.
 // The optimizer state is not saved (will use default).
 func (n *Network) Save(filename string) error {
@@ -472,11 +477,25 @@ func ExtractLayerConfig(l layer.Layer) LayerConfig {
 		cfg.Params = dense.Params()
 	}
 
+	// For LSTM layers
+	if lstm, ok := l.(*layer.LSTM); ok {
+		cfg.Type = "LSTM"
+		cfg.InSize = lstm.InSize()
+		cfg.OutSize = lstm.OutSize()
+		cfg.Params = lstm.Params()
+	}
+
 	return cfg
 }
 
 // CreateLayer creates a new layer from the configuration.
 func (c *LayerConfig) CreateLayer() (layer.Layer, error) {
+	if c.Type == "LSTM" {
+		lstm := layer.NewLSTM(c.InSize, c.OutSize)
+		lstm.SetParams(c.Params)
+		return lstm, nil
+	}
+
 	if c.Type != "Dense" {
 		return nil, fmt.Errorf("unsupported layer type: %s", c.Type)
 	}

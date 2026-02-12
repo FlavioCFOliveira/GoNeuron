@@ -475,3 +475,8 @@ func (l *LSTM) InSize() int {
 func (l *LSTM) OutSize() int {
 	return l.outSize
 }
+
+// Hidden returns the current hidden state of the LSTM.
+func (l *LSTM) Hidden() []float64 {
+	return l.hiddenBuf
+}
