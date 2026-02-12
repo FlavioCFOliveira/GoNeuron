@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"math"
-	"math/rand"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
@@ -13,8 +12,6 @@ import (
 )
 
 func main() {
-	rand.Seed(42)
-
 	fmt.Println("=== XOR Training Example ===")
 
 	// Create a simple XOR network: 2 inputs -> 3 hidden -> 1 output
@@ -29,12 +26,9 @@ func main() {
 	fmt.Println("Loss function: MSE")
 	fmt.Println("Optimizer: SGD with learning rate 0.1")
 
-	// Initialize layers with small random weights
+	// Create layers with deterministic initialization (seed=42)
 	l1 := layer.NewDense(in, hidden, activations.ReLU{})
-	initDense(l1, in, hidden, true) // Positive biases to prevent dying ReLU neurons
-
 	l2 := layer.NewDense(hidden, out, activations.Sigmoid{})
-	initDense(l2, hidden, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2},
@@ -112,22 +106,5 @@ func main() {
 		fmt.Println("\nSUCCESS: All predictions match between original and loaded network!")
 	} else {
 		fmt.Println("\nFAILURE: Predictions differ between original and loaded network!")
-	}
-}
-
-func initDense(d *layer.Dense, in, out int, positiveBiases bool) {
-	// Xavier/Glorot initialization: scale = sqrt(2 / (in + out))
-	scale := math.Sqrt(2.0 / float64(in+out))
-
-	for i := 0; i < out; i++ {
-		for j := 0; j < in; j++ {
-			d.SetWeight(i, j, rand.Float64()*2*scale-scale)
-		}
-		if positiveBiases {
-			// Use positive biases to keep ReLU neurons alive
-			d.SetBias(i, rand.Float64()*0.5+0.1)
-		} else {
-			d.SetBias(i, rand.Float64()*0.2-0.1)
-		}
 	}
 }

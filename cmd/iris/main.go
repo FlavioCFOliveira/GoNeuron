@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
@@ -15,7 +14,7 @@ import (
 // Iris dataset: 3 classes (Setosa, Versicolor, Virginica)
 // Each sample has 4 features (sepal length, sepal width, petal length, petal width)
 func main() {
-	rand.Seed(42)
+	fmt.Println("Training Iris classifier (4-8-6-3 network)...")
 
 	// Iris dataset: 4 inputs -> 3 outputs (one-hot encoded)
 	in := 4
@@ -23,17 +22,10 @@ func main() {
 	hidden2 := 6
 	out := 3
 
-	// Initialize layers
-	// Using Sigmoid for all layers to avoid Softmax complexity
-	// For better results with multi-class, you could use softmax in a custom output layer
+	// Initialize layers with deterministic initialization (seed=42)
 	l1 := layer.NewDense(in, hidden1, activations.ReLU{})
 	l2 := layer.NewDense(hidden1, hidden2, activations.ReLU{})
 	l3 := layer.NewDense(hidden2, out, activations.Sigmoid{})
-
-	// Xavier initialization for each layer
-	initDense(l1, in, hidden1, false)
-	initDense(l2, hidden1, hidden2, false)
-	initDense(l3, hidden2, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2, l3},
@@ -46,7 +38,6 @@ func main() {
 	trainX, trainY := generateIrisData()
 
 	// Training loop
-	fmt.Println("Training Iris classifier (4-8-6-3 network)...")
 	for epoch := 0; epoch < 2000; epoch++ {
 		totalLoss := 0.0
 		for i := range trainX {
@@ -138,18 +129,4 @@ func maxIndex(slice []float64) int {
 		}
 	}
 	return maxIdx
-}
-
-func initDense(d *layer.Dense, in, out int, positiveBiases bool) {
-	scale := math.Sqrt(2.0 / float64(in+out))
-	for i := 0; i < out; i++ {
-		for j := 0; j < in; j++ {
-			d.SetWeight(i, j, rand.Float64()*2*scale-scale)
-		}
-		if positiveBiases {
-			d.SetBias(i, rand.Float64()*0.5+0.1)
-		} else {
-			d.SetBias(i, rand.Float64()*0.2-0.1)
-		}
-	}
 }

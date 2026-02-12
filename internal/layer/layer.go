@@ -4,8 +4,23 @@ package layer
 import (
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"math"
-	"math/rand"
 )
+
+// RNG is a simple, fast random number generator using LCG for deterministic behavior.
+type RNG struct {
+	seed uint64
+}
+
+// NewRNG creates a new RNG with the given seed.
+func NewRNG(seed uint64) *RNG {
+	return &RNG{seed: seed}
+}
+
+// RandFloat returns a random float64 in [0, 1).
+func (r *RNG) RandFloat() float64 {
+	r.seed = r.seed*6364136223846793005 + 1
+	return float64(r.seed>>33) / float64(1<<31)
+}
 
 // Layer is a neural network layer.
 type Layer interface {
@@ -14,6 +29,10 @@ type Layer interface {
 	Params() []float64
 	SetParams([]float64)
 	Gradients() []float64
+	SetGradients([]float64)
+
+	// Reset clears any internal state for the layer (e.g., LSTM hidden states).
+	Reset()
 }
 
 // Dense is a fully connected layer optimized for performance.
@@ -45,11 +64,13 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 
 	// Xavier/Glorot initialization
 	scale := math.Sqrt(2.0 / (float64(in) + float64(out)))
+	// Create deterministic RNG for reproducible initialization
+	rng := NewRNG(42)
 	for i := range weights {
-		weights[i] = rand.Float64()*2*scale - scale
+		weights[i] = rng.RandFloat()*2*scale - scale
 	}
 	for i := range biases {
-		biases[i] = rand.Float64()*0.2 - 0.1
+		biases[i] = rng.RandFloat()*0.2 - 0.1
 	}
 
 	return &Dense{
@@ -140,11 +161,12 @@ func (d *Dense) Backward(grad []float64) []float64 {
 }
 
 // Params returns all dense layer parameters flattened.
+// This creates a copy of the parameters.
 func (d *Dense) Params() []float64 {
 	total := len(d.weights) + len(d.biases)
-	params := make([]float64, 0, total)
-	params = append(params, d.weights...)
-	params = append(params, d.biases...)
+	params := make([]float64, total)
+	copy(params, d.weights)
+	copy(params[len(d.weights):], d.biases)
 	return params
 }
 
@@ -155,22 +177,40 @@ func (d *Dense) SetParams(params []float64) {
 }
 
 // Gradients returns all dense layer gradients flattened.
+// This creates a copy of the gradients.
 func (d *Dense) Gradients() []float64 {
 	total := len(d.gradWBuf) + len(d.gradBBuf)
-	gradients := make([]float64, 0, total)
-	gradients = append(gradients, d.gradWBuf...)
-	gradients = append(gradients, d.gradBBuf...)
+	gradients := make([]float64, total)
+	copy(gradients, d.gradWBuf)
+	copy(gradients[len(d.gradWBuf):], d.gradBBuf)
 	return gradients
 }
 
-// GetWeights returns the weights slice directly.
+// SetGradients sets gradients from a flattened slice (in-place).
+// This is used by the optimizer to set averaged gradients.
+func (d *Dense) SetGradients(gradients []float64) {
+	copy(d.gradWBuf, gradients[:len(d.gradWBuf)])
+	copy(d.gradBBuf, gradients[len(d.gradWBuf):])
+}
+
+// GetWeights returns the weights slice directly (no copy).
 func (d *Dense) GetWeights() []float64 {
 	return d.weights
 }
 
-// GetBiases returns the biases slice directly.
+// GetBiases returns the biases slice directly (no copy).
 func (d *Dense) GetBiases() []float64 {
 	return d.biases
+}
+
+// GetGradWeights returns the gradient weights slice directly (no copy).
+func (d *Dense) GetGradWeights() []float64 {
+	return d.gradWBuf
+}
+
+// GetGradBiases returns the gradient biases slice directly (no copy).
+func (d *Dense) GetGradBiases() []float64 {
+	return d.gradBBuf
 }
 
 // SetWeight sets a single weight at (row, col).
@@ -206,4 +246,9 @@ func (d *Dense) OutSize() int {
 // Activation returns the activation function used by this layer.
 func (d *Dense) Activation() activations.Activation {
 	return d.act
+}
+
+// Reset clears the dense layer's internal state (no-op for Dense).
+func (d *Dense) Reset() {
+	// Dense layer has no internal state to reset
 }

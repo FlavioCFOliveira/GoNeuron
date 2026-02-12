@@ -20,6 +20,10 @@ type Network struct {
 	layers []layer.Layer
 	loss   loss.Loss
 	opt    opt.Optimizer
+
+	// Pre-allocated gradient buffer for training
+	// This avoids allocations in the training loop
+	lossGradBuf []float64
 }
 
 // New creates a new neural network with the given layers.
@@ -50,19 +54,20 @@ func (n *Network) Backward(grad []float64) []float64 {
 }
 
 // Step performs one optimization step using the stored optimizer.
-// This is optimized for performance with minimal allocations.
+// This computes updated parameters and sets them back to layers.
 func (n *Network) Step() {
 	for _, l := range n.layers {
 		params := l.Params()
 		gradients := l.Gradients()
-
 		// Compute updated parameters
 		updated := n.opt.Step(params, gradients)
+		// Set updated parameters back to layer
 		l.SetParams(updated)
 	}
 }
 
 // Train performs a training step on a single sample.
+// This is optimized for performance with minimal allocations.
 func (n *Network) Train(x []float64, y []float64) float64 {
 	// Forward pass
 	yPred := n.Forward(x)
@@ -71,7 +76,19 @@ func (n *Network) Train(x []float64, y []float64) float64 {
 	l := n.loss.Forward(yPred, y)
 
 	// Compute gradient of loss w.r.t. prediction
-	grad := n.loss.Backward(yPred, y)
+	// Use pre-allocated buffer if possible
+	yPredLen := len(yPred)
+	if cap(n.lossGradBuf) < yPredLen {
+		n.lossGradBuf = make([]float64, yPredLen)
+	}
+	grad := n.lossGradBuf[:yPredLen]
+
+	// Use BackwardInPlace if available to avoid allocation
+	if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
+		backwardInPlace.BackwardInPlace(yPred, y, grad)
+	} else {
+		grad = n.loss.Backward(yPred, y)
+	}
 
 	// Backward pass
 	_ = n.Backward(grad)
@@ -103,23 +120,51 @@ func (n *Network) TrainBatch(batchX [][]float64, batchY [][]float64) float64 {
 }
 
 // trainBatchSequential performs training on a batch of samples sequentially.
+// Gradients are accumulated and averaged over the batch.
 func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) float64 {
-	batchSize := len(batchX)
+	batchSize := float64(len(batchX))
 	var totalLoss float64
+
+	// Get gradient buffers from all layers
+	allGradients := make([][]float64, len(n.layers))
+	for i, l := range n.layers {
+		allGradients[i] = l.Gradients()
+	}
 
 	// Forward and backward pass for all samples
 	// Accumulate gradients over the batch
-	for i := 0; i < batchSize; i++ {
+	for i := 0; i < len(batchX); i++ {
 		yPred := n.Forward(batchX[i])
 		totalLoss += n.loss.Forward(yPred, batchY[i])
 
-		grad := n.loss.Backward(yPred, batchY[i])
+		// Compute loss gradient
+		yPredLen := len(yPred)
+		if cap(n.lossGradBuf) < yPredLen {
+			n.lossGradBuf = make([]float64, yPredLen)
+		}
+		grad := n.lossGradBuf[:yPredLen]
+
+		if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
+			backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
+		} else {
+			grad = n.loss.Backward(yPred, batchY[i])
+		}
+
+		// Backward pass (accumulates gradients into layer gradient buffers)
 		_ = n.Backward(grad)
+	}
+
+	// Average gradients by dividing each by batch size
+	// Apply to each layer's gradient buffer in-place
+	for _, grads := range allGradients {
+		for i := range grads {
+			grads[i] /= batchSize
+		}
 	}
 
 	// Single optimization step (averaged over batch)
 	n.Step()
-	return totalLoss / float64(batchSize)
+	return totalLoss / batchSize
 }
 
 // trainBatchParallel performs training on a batch of samples using parallel processing.
@@ -130,9 +175,16 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 	// Get number of workers (CPU cores)
 	numWorkers := min(batchSize, runtime.NumCPU())
 
-	// Allocate per-sample loss and gradients
+	// Pre-allocate gradient buffers for each sample
+	// We need to copy gradients after each sample's backward pass
+	// because the layer gradient buffers will be overwritten
+	totalParams := len(n.Params())
+	sampleGradients := make([][]float64, batchSize)
+	for i := 0; i < batchSize; i++ {
+		sampleGradients[i] = make([]float64, totalParams)
+	}
+
 	losses := make([]float64, batchSize)
-	gradients := make([][]float64, batchSize)
 
 	// Worker function - process samples in parallel
 	var wg sync.WaitGroup
@@ -145,14 +197,25 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 			// Compute loss
 			losses[i] = n.loss.Forward(yPred, batchY[i])
 
-			// Compute gradient of loss w.r.t. prediction
-			grad := n.loss.Backward(yPred, batchY[i])
+			// Compute loss gradient
+			yPredLen := len(yPred)
+			if cap(n.lossGradBuf) < yPredLen {
+				n.lossGradBuf = make([]float64, yPredLen)
+			}
+			grad := n.lossGradBuf[:yPredLen]
+
+			if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
+				backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
+			} else {
+				grad = n.loss.Backward(yPred, batchY[i])
+			}
 
 			// Backward pass
 			_ = n.Backward(grad)
 
 			// Save a copy of gradients for this sample
-			gradients[i] = append([]float64{}, n.Gradients()...)
+			// Use the pre-allocated buffer instead of allocating
+			copy(sampleGradients[i], n.Gradients())
 		}
 	}
 
@@ -176,27 +239,32 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 	}
 
 	// Average gradients by dividing each by batch size
-	// Then apply to optimizer
-	if batchSize > 0 && len(gradients) > 0 {
-		avgGrads := make([]float64, len(gradients[0]))
-		for i := 0; i < batchSize; i++ {
+	if batchSize > 0 && len(sampleGradients) > 0 {
+		avgGrads := sampleGradients[0] // Reuse first buffer as accumulator
+
+		// Sum all gradients into avgGrads
+		for i := 1; i < batchSize; i++ {
 			for j := range avgGrads {
-				avgGrads[j] += gradients[i][j] / float64(batchSize)
+				avgGrads[j] += sampleGradients[i][j]
 			}
 		}
 
-		// Apply averaged gradients to each layer
+		// Average and apply to each layer
 		offset := 0
 		for _, l := range n.layers {
 			gradLen := len(l.Gradients())
 			layerGrads := avgGrads[offset : offset+gradLen]
 
-			// Get current params for optimizer
+			// Average and apply in-place
+			for i := 0; i < gradLen; i++ {
+				layerGrads[i] /= float64(batchSize)
+			}
+
+			// Get current params
 			params := l.Params()
 
-			// Apply gradient step
-			updated := n.opt.Step(params, layerGrads)
-			l.SetParams(updated)
+			// Apply gradient step in-place
+			n.opt.StepInPlace(params, layerGrads)
 
 			offset += gradLen
 		}
@@ -205,7 +273,7 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 	return totalLoss / float64(batchSize)
 }
 
-// Params returns all network parameters flattened.
+// Params returns all network parameters flattened (copy).
 func (n *Network) Params() []float64 {
 	var params []float64
 	for _, l := range n.layers {
@@ -214,7 +282,7 @@ func (n *Network) Params() []float64 {
 	return params
 }
 
-// Gradients returns all network gradients flattened.
+// Gradients returns all network gradients flattened (copy).
 func (n *Network) Gradients() []float64 {
 	var gradients []float64
 	for _, l := range n.layers {
@@ -455,4 +523,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-

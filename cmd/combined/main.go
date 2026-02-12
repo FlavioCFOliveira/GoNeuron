@@ -13,8 +13,6 @@ import (
 
 // Combined network examples: combining different layer types
 func main() {
-	rand.Seed(42)
-
 	fmt.Println("=== Combined Network Examples ===")
 
 	// Example 1: CNN + Dense for image classification
@@ -36,14 +34,14 @@ func exampleCNNtoDense() {
 	stride := 1
 	padding := 1
 
-	// Conv layer extracts features
+	// Conv layer extracts features (deterministic initialization with seed=42)
 	conv := layer.NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Tanh{})
 
 	// After conv with padding=1, size stays same: 16x16
 	// Output: 8 channels * 16 * 16 = 2048 features
 	convOutput := outChannels * 16 * 16
 
-	// Dense layer for classification
+	// Dense layer for classification (deterministic initialization)
 	dense1 := layer.NewDense(convOutput, 64, activations.Tanh{})
 	dense2 := layer.NewDense(64, 2, activations.Sigmoid{}) // 2 classes
 
@@ -89,10 +87,10 @@ func exampleDeepCNN() {
 
 	inChannels := 1
 
-	// First conv layer: 1 -> 8 channels
+	// First conv layer: 1 -> 8 channels (deterministic initialization)
 	conv1 := layer.NewConv2D(inChannels, 8, 3, 1, 1, activations.Tanh{})
 
-	// Second conv layer: 8 -> 16 channels
+	// Second conv layer: 8 -> 16 channels (deterministic initialization)
 	conv2 := layer.NewConv2D(8, 16, 3, 1, 1, activations.Tanh{})
 
 	// Output after two convs with padding=1: 16 channels * 16 * 16 = 4096

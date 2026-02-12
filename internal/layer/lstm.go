@@ -72,6 +72,9 @@ func NewLSTM(inSize, outSize int) *LSTM {
 	recurrentWeights := make([]float64, outSize*4*outSize)
 	biases := make([]float64, outSize*4)
 
+	// Create deterministic RNG for reproducible initialization
+	rng := NewRNG(42)
+
 	// Initialize weights with simple loop for performance
 	for i := 0; i < outSize*4; i++ {
 		// Initialize biases - forget gate gets bias = 1 (prevent forgetting)
@@ -80,10 +83,10 @@ func NewLSTM(inSize, outSize int) *LSTM {
 		}
 
 		for j := 0; j < inSize; j++ {
-			inputWeights[i*inSize+j] = randFloat()*2*scale - scale
+			inputWeights[i*inSize+j] = rng.RandFloat()*2*scale - scale
 		}
 		for j := 0; j < outSize; j++ {
-			recurrentWeights[i*outSize+j] = randFloat()*2*scale - scale
+			recurrentWeights[i*outSize+j] = rng.RandFloat()*2*scale - scale
 		}
 	}
 
@@ -125,15 +128,6 @@ func NewLSTM(inSize, outSize int) *LSTM {
 		storedHiddenStates: make([][]float64, 0),
 		timeStep:          0,
 	}
-}
-
-// randFloat is a simple, fast random number generator.
-// Uses Linear Congruential Generator (LCG) for performance.
-var randSeed uint64 = 42
-
-func randFloat() float64 {
-	randSeed = randSeed*6364136223846793005 + 1
-	return float64(randSeed>>33) / float64(1<<31)
 }
 
 // Reset resets the LSTM state for a new sequence.
@@ -435,13 +429,13 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 	return l.inputBuf
 }
 
-// Params returns all LSTM parameters flattened.
+// Params returns all LSTM parameters flattened (copy).
 func (l *LSTM) Params() []float64 {
 	total := len(l.inputWeights) + len(l.recurrentWeights) + len(l.biases)
-	params := make([]float64, 0, total)
-	params = append(params, l.inputWeights...)
-	params = append(params, l.recurrentWeights...)
-	params = append(params, l.biases...)
+	params := make([]float64, total)
+	copy(params, l.inputWeights)
+	copy(params[len(l.inputWeights):], l.recurrentWeights)
+	copy(params[len(l.inputWeights)+len(l.recurrentWeights):], l.biases)
 	return params
 }
 
@@ -455,14 +449,21 @@ func (l *LSTM) SetParams(params []float64) {
 	copy(l.biases, params[totalInput+totalRecurrent:])
 }
 
-// Gradients returns all LSTM gradients flattened.
+// Gradients returns all LSTM gradients flattened (copy).
 func (l *LSTM) Gradients() []float64 {
 	total := len(l.gradInputWeights) + len(l.gradRecurrentWeights) + len(l.gradBiases)
-	gradients := make([]float64, 0, total)
-	gradients = append(gradients, l.gradInputWeights...)
-	gradients = append(gradients, l.gradRecurrentWeights...)
-	gradients = append(gradients, l.gradBiases...)
+	gradients := make([]float64, total)
+	copy(gradients, l.gradInputWeights)
+	copy(gradients[len(l.gradInputWeights):], l.gradRecurrentWeights)
+	copy(gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):], l.gradBiases)
 	return gradients
+}
+
+// SetGradients sets gradients from a flattened slice (in-place).
+func (l *LSTM) SetGradients(gradients []float64) {
+	copy(l.gradInputWeights, gradients[:len(l.gradInputWeights)])
+	copy(l.gradRecurrentWeights, gradients[len(l.gradInputWeights):len(l.gradInputWeights)+len(l.gradRecurrentWeights)])
+	copy(l.gradBiases, gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):])
 }
 
 // InSize returns the input size of the LSTM.

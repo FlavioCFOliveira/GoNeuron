@@ -2,8 +2,8 @@
 package layer
 
 import (
+	"fmt"
 	"math"
-	"math/rand"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
@@ -18,9 +18,13 @@ type Conv2D struct {
 	stride      int
 	padding     int
 
-	// Input dimensions (set during forward)
+	// Input dimensions (set during forward if not explicitly set)
 	inputHeight int
 	inputWidth  int
+
+	// Explicitly set dimensions (if set, overrides automatic inference)
+	setInputHeight int
+	setInputWidth  int
 
 	// Weights: [outChannels, inChannels, kernelSize, kernelSize]
 	// Stored as contiguous slice for cache efficiency
@@ -57,6 +61,9 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 	weights := make([]float64, outChannels*inChannels*kernelSize*kernelSize)
 	biases := make([]float64, outChannels)
 
+	// Create deterministic RNG for reproducible initialization
+	rng := NewRNG(42)
+
 	// Initialize weights
 	for o := 0; o < outChannels; o++ {
 		for c := 0; c < inChannels; c++ {
@@ -65,21 +72,21 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 					idx := o*inChannels*kernelSize*kernelSize +
 						c*kernelSize*kernelSize +
 						kh*kernelSize + kw
-					weights[idx] = rand.Float64()*2*scale - scale
+					weights[idx] = rng.RandFloat()*2*scale - scale
 				}
 			}
 		}
 		// Initialize bias
-		biases[o] = rand.Float64()*0.2 - 0.1
+		biases[o] = rng.RandFloat()*0.2 - 0.1
 	}
 
 	return &Conv2D{
-		inChannels:  inChannels,
-		outChannels: outChannels,
-		kernelSize:  kernelSize,
-		stride:      stride,
-		padding:     padding,
-		activation:  activation,
+		inChannels:     inChannels,
+		outChannels:    outChannels,
+		kernelSize:     kernelSize,
+		stride:         stride,
+		padding:        padding,
+		activation:     activation,
 
 		weights:     weights,
 		biases:      biases,
@@ -96,6 +103,13 @@ func (c *Conv2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 	return outH, outW
 }
 
+// SetInputDimensions explicitly sets the input dimensions for the next forward pass.
+// This allows non-square inputs and avoids automatic inference.
+func (c *Conv2D) SetInputDimensions(height, width int) {
+	c.setInputHeight = height
+	c.setInputWidth = width
+}
+
 // Forward performs a forward pass through the convolutional layer.
 // input: flattened [inChannels, inputHeight, inputWidth]
 // Returns: flattened [outChannels, outputHeight, outputWidth]
@@ -106,12 +120,36 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 		panic("Conv2D: input length not divisible by inChannels")
 	}
 	channelSize := totalInput / c.inChannels
-	// Assume square input for now
-	c.inputHeight = int(math.Sqrt(float64(channelSize)))
-	c.inputWidth = c.inputHeight
+
+	// Use explicitly set dimensions if available, otherwise infer
+	var inputHeight, inputWidth int
+	if c.setInputHeight > 0 && c.setInputWidth > 0 {
+		inputHeight = c.setInputHeight
+		inputWidth = c.setInputWidth
+		// Verify the dimensions match the input length
+		if inputHeight*inputWidth != channelSize {
+			panic(fmt.Sprintf("Conv2D: input dimensions %dx%d don't match channelSize %d", inputHeight, inputWidth, channelSize))
+		}
+	} else {
+		// Infer dimensions - try square first, then rectangular
+		inputHeight = int(math.Sqrt(float64(channelSize)))
+		if inputHeight*inputHeight == channelSize {
+			inputWidth = inputHeight
+		} else {
+			// Try to find rectangular dimensions
+			inputWidth = channelSize / inputHeight
+			if inputHeight*inputWidth != channelSize {
+				// Fall back to a reasonable approximation
+				// This may not be exact for all inputs
+				inputWidth = channelSize / inputHeight
+			}
+		}
+		c.inputHeight = inputHeight
+		c.inputWidth = inputWidth
+	}
 
 	// Compute output dimensions
-	outH, outW := c.computeOutputSize(c.inputHeight, c.inputWidth)
+	outH, outW := c.computeOutputSize(inputHeight, inputWidth)
 
 	// Ensure buffers are sized correctly
 	requiredOutput := c.outChannels * outH * outW
@@ -127,6 +165,10 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 		c.savedInput = make([]float64, len(input))
 	}
 	copy(c.savedInput, input)
+
+	// Cache dimensions for backward pass
+	c.inputHeight = inputHeight
+	c.inputWidth = inputWidth
 
 	// Convolution: for each output position and channel
 	// Input layout: [inChannels, inputHeight, inputWidth]
@@ -147,8 +189,8 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 							inW := ow*c.stride + kw - c.padding
 
 							var val float64
-							if inH >= 0 && inH < c.inputHeight && inW >= 0 && inW < c.inputWidth {
-								idx := ic*c.inputHeight*c.inputWidth + inH*c.inputWidth + inW
+							if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
+								idx := ic*inputHeight*inputWidth + inH*inputWidth + inW
 								val = input[idx]
 							}
 
@@ -245,12 +287,12 @@ func (c *Conv2D) Backward(grad []float64) []float64 {
 	return gradInput
 }
 
-// Params returns all convolutional layer parameters flattened.
+// Params returns all convolutional layer parameters flattened (copy).
 func (c *Conv2D) Params() []float64 {
 	total := len(c.weights) + len(c.biases)
-	params := make([]float64, 0, total)
-	params = append(params, c.weights...)
-	params = append(params, c.biases...)
+	params := make([]float64, total)
+	copy(params, c.weights)
+	copy(params[len(c.weights):], c.biases)
 	return params
 }
 
@@ -261,13 +303,19 @@ func (c *Conv2D) SetParams(params []float64) {
 	copy(c.biases, params[totalWeights:])
 }
 
-// Gradients returns all convolutional layer gradients flattened.
+// Gradients returns all convolutional layer gradients flattened (copy).
 func (c *Conv2D) Gradients() []float64 {
 	total := len(c.gradWeights) + len(c.gradBiases)
-	gradients := make([]float64, 0, total)
-	gradients = append(gradients, c.gradWeights...)
-	gradients = append(gradients, c.gradBiases...)
+	gradients := make([]float64, total)
+	copy(gradients, c.gradWeights)
+	copy(gradients[len(c.gradWeights):], c.gradBiases)
 	return gradients
+}
+
+// SetGradients sets gradients from a flattened slice (in-place).
+func (c *Conv2D) SetGradients(gradients []float64) {
+	copy(c.gradWeights, gradients[:len(c.gradWeights)])
+	copy(c.gradBiases, gradients[len(c.gradWeights):])
 }
 
 // InSize returns the number of input channels.

@@ -15,8 +15,6 @@ import (
 // Regression examples: predicting continuous values
 // Uses normalized data and appropriate activation functions
 func main() {
-	rand.Seed(42)
-
 	fmt.Println("=== Regression Examples ===")
 
 	// Example 1: Simple linear regression with normalized data
@@ -43,9 +41,6 @@ func exampleLinearRegression() {
 
 	l1 := layer.NewDense(in, hidden, activations.Tanh{})
 	l2 := layer.NewDense(hidden, out, activations.Sigmoid{})
-
-	initDense(l1, in, hidden, false)
-	initDense(l2, hidden, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2},
@@ -88,10 +83,6 @@ func exampleQuadraticRegression() {
 	l2 := layer.NewDense(h1, h2, activations.ReLU{})
 	l3 := layer.NewDense(h2, out, activations.Sigmoid{})
 
-	initDense(l1, in, h1, false)
-	initDense(l2, h1, h2, false)
-	initDense(l3, h2, out, false)
-
 	network := net.New(
 		[]layer.Layer{l1, l2, l3},
 		loss.MSE{},
@@ -132,10 +123,6 @@ func exampleMultiInputRegression() {
 	l1 := layer.NewDense(in, h1, activations.Tanh{})
 	l2 := layer.NewDense(h1, h2, activations.Tanh{})
 	l3 := layer.NewDense(h2, out, activations.Sigmoid{})
-
-	initDense(l1, in, h1, false)
-	initDense(l2, h1, h2, false)
-	initDense(l3, h2, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2, l3},
@@ -178,9 +165,6 @@ func exampleHuberRegression() {
 
 	l1 := layer.NewDense(in, hidden, activations.Tanh{})
 	l2 := layer.NewDense(hidden, out, activations.Sigmoid{})
-
-	initDense(l1, in, hidden, false)
-	initDense(l2, hidden, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2},
@@ -276,18 +260,4 @@ func generateDataWithOutliersNormalized(n int) ([][]float64, [][]float64) {
 		y[i] = []float64{yVal}
 	}
 	return X, y
-}
-
-func initDense(d *layer.Dense, in, out int, positiveBiases bool) {
-	scale := math.Sqrt(2.0 / float64(in+out))
-	for i := 0; i < out; i++ {
-		for j := 0; j < in; j++ {
-			d.SetWeight(i, j, rand.Float64()*2*scale-scale)
-		}
-		if positiveBiases {
-			d.SetBias(i, rand.Float64()*0.5+0.1)
-		} else {
-			d.SetBias(i, rand.Float64()*0.2-0.1)
-		}
-	}
 }

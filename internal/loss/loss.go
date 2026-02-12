@@ -3,12 +3,19 @@ package loss
 
 import "math"
 
+// BackwardInPlacer is an optional interface for loss functions that support
+// in-place gradient computation to avoid allocations.
+type BackwardInPlacer interface {
+	BackwardInPlace(yPred, yTrue, grad []float64)
+}
+
 // Loss is a loss function with derivative.
 type Loss interface {
 	// Forward computes the loss between predicted and true values.
 	Forward(yPred, yTrue []float64) float64
 
 	// Backward computes the gradient of the loss w.r.t. prediction.
+	// This creates a new slice and should be avoided in hot loops.
 	Backward(yPred, yTrue []float64) []float64
 }
 
@@ -98,6 +105,18 @@ func (c CrossEntropy) Backward(yPred, yTrue []float64) []float64 {
 	return grad
 }
 
+// BackwardInPlace computes gradient and stores it in the grad slice.
+func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float64) {
+	n := len(yPred)
+	if n != len(yTrue) || n != len(grad) {
+		panic("CrossEntropy: slices must have same length")
+	}
+
+	for i := 0; i < n; i++ {
+		grad[i] = yPred[i] - yTrue[i]
+	}
+}
+
 // Huber loss for robust regression.
 type Huber struct {
 	Delta float64 // Threshold for quadratic/linear transition
@@ -144,4 +163,21 @@ func (h Huber) Backward(yPred, yTrue []float64) []float64 {
 		}
 	}
 	return grad
+}
+
+// BackwardInPlace computes gradient and stores it in the grad slice.
+func (h Huber) BackwardInPlace(yPred, yTrue, grad []float64) {
+	n := len(yPred)
+	if n != len(yTrue) || n != len(grad) {
+		panic("Huber: slices must have same length")
+	}
+
+	for i := 0; i < n; i++ {
+		diff := yPred[i] - yTrue[i]
+		if math.Abs(diff) <= h.Delta {
+			grad[i] = diff
+		} else {
+			grad[i] = h.Delta * math.Copysign(1, diff)
+		}
+	}
 }

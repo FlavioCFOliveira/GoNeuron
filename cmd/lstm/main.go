@@ -20,8 +20,6 @@ type Sequence struct {
 
 // LSTM examples demonstrating sequence modeling
 func main() {
-	rand.Seed(42)
-
 	fmt.Println("=== LSTM Examples ===")
 
 	// Example 1: Simple sequence prediction (y = x + previous output)

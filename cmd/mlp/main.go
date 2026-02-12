@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
@@ -15,8 +14,6 @@ import (
 // MLP (Multi-Layer Perceptron) example
 // Demonstrates training networks with different hidden layer configurations
 func main() {
-	rand.Seed(42)
-
 	fmt.Println("=== MLP Examples ===")
 
 	// Example 1: Small network (2-4-1) for XOR
@@ -38,9 +35,6 @@ func exampleXOR() {
 
 	l1 := layer.NewDense(in, hidden, activations.ReLU{})
 	l2 := layer.NewDense(hidden, out, activations.Sigmoid{})
-
-	initDense(l1, in, hidden, true)
-	initDense(l2, hidden, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2},
@@ -79,10 +73,6 @@ func exampleXLOR() {
 	l2 := layer.NewDense(h1, h2, activations.ReLU{})
 	l3 := layer.NewDense(h2, out, activations.Sigmoid{})
 
-	initDense(l1, in, h1, true)
-	initDense(l2, h1, h2, true)
-	initDense(l3, h2, out, false)
-
 	network := net.New(
 		[]layer.Layer{l1, l2, l3},
 		loss.MSE{},
@@ -118,10 +108,6 @@ func exampleBinaryClassification() {
 	l1 := layer.NewDense(in, h1, activations.ReLU{})
 	l2 := layer.NewDense(h1, h2, activations.ReLU{})
 	l3 := layer.NewDense(h2, out, activations.Sigmoid{})
-
-	initDense(l1, in, h1, true)
-	initDense(l2, h1, h2, true)
-	initDense(l3, h2, out, false)
 
 	network := net.New(
 		[]layer.Layer{l1, l2, l3},
@@ -187,18 +173,4 @@ func evaluate(net *net.Network, X [][]float64, y [][]float64) float64 {
 		}
 	}
 	return float64(correct) / float64(len(X))
-}
-
-func initDense(d *layer.Dense, in, out int, positiveBiases bool) {
-	scale := math.Sqrt(2.0 / float64(in+out))
-	for i := 0; i < out; i++ {
-		for j := 0; j < in; j++ {
-			d.SetWeight(i, j, rand.Float64()*2*scale-scale)
-		}
-		if positiveBiases {
-			d.SetBias(i, rand.Float64()*0.5+0.1)
-		} else {
-			d.SetBias(i, rand.Float64()*0.2-0.1)
-		}
-	}
 }
