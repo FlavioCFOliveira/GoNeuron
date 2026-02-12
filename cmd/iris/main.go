@@ -23,8 +23,9 @@ func main() {
 	out := 3
 
 	// Initialize layers with deterministic initialization (seed=42)
-	l1 := layer.NewDense(in, hidden1, activations.ReLU{})
-	l2 := layer.NewDense(hidden1, hidden2, activations.ReLU{})
+	// Using Tanh to avoid dying neuron problem with ReLU
+	l1 := layer.NewDense(in, hidden1, activations.Tanh{})
+	l2 := layer.NewDense(hidden1, hidden2, activations.Tanh{})
 	l3 := layer.NewDense(hidden2, out, activations.Sigmoid{})
 
 	network := net.New(
@@ -37,14 +38,15 @@ func main() {
 	// Class 0: Setosa, Class 1: Versicolor, Class 2: Virginica
 	trainX, trainY := generateIrisData()
 
-	// Training loop
-	for epoch := 0; epoch < 2000; epoch++ {
+	// Training loop - more epochs for better convergence
+	fmt.Println("Training for 3000 epochs...")
+	for epoch := 0; epoch < 3000; epoch++ {
 		totalLoss := 0.0
 		for i := range trainX {
 			loss := network.Train(trainX[i], trainY[i])
 			totalLoss += loss
 		}
-		if epoch%200 == 0 {
+		if epoch%300 == 0 {
 			acc := evaluate(network, trainX, trainY)
 			fmt.Printf("Epoch %d, Loss: %.4f, Accuracy: %.1f%%\n",
 				epoch, totalLoss/float64(len(trainX)), acc*100)

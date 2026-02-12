@@ -22,12 +22,13 @@ func main() {
 	out := 1
 
 	fmt.Printf("Network architecture: %d-%d-%d\n", in, hidden, out)
-	fmt.Println("Activation functions: ReLU (hidden), Sigmoid (output)")
+	fmt.Println("Activation functions: Tanh (hidden), Sigmoid (output)")
 	fmt.Println("Loss function: MSE")
 	fmt.Println("Optimizer: SGD with learning rate 0.1")
 
 	// Create layers with deterministic initialization (seed=42)
-	l1 := layer.NewDense(in, hidden, activations.ReLU{})
+	// Using Tanh instead of ReLU for XOR to avoid dying neuron problem
+	l1 := layer.NewDense(in, hidden, activations.Tanh{})
 	l2 := layer.NewDense(hidden, out, activations.Sigmoid{})
 
 	network := net.New(

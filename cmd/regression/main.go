@@ -77,10 +77,11 @@ func exampleLinearRegression() {
 
 func exampleQuadraticRegression() {
 	// Network: 1 input -> 16 hidden -> 8 hidden -> 1 output
+	// Using Tanh for hidden layers to avoid dying neuron problem with ReLU
 	in, h1, h2, out := 1, 16, 8, 1
 
-	l1 := layer.NewDense(in, h1, activations.ReLU{})
-	l2 := layer.NewDense(h1, h2, activations.ReLU{})
+	l1 := layer.NewDense(in, h1, activations.Tanh{})
+	l2 := layer.NewDense(h1, h2, activations.Tanh{})
 	l3 := layer.NewDense(h2, out, activations.Sigmoid{})
 
 	network := net.New(
@@ -235,7 +236,7 @@ func generateMultiInputDataNormalized(n int) ([][]float64, [][]float64) {
 		x1 := rand.Float64()
 		x2 := rand.Float64()
 		noise := (rand.Float64() - 0.5) * 0.05
-		z := (x1 + x2) / 2 + noise // Average in [0, 1]
+		z := (x1+x2)/2 + noise // Average in [0, 1]
 		X[i] = []float64{x1, x2}
 		y[i] = []float64{z}
 	}

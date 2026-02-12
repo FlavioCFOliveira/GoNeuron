@@ -31,9 +31,10 @@ func main() {
 
 func exampleXOR() {
 	// XOR: 2 inputs -> 4 hidden -> 1 output
+	// Using Tanh for hidden layer to avoid dying neuron problem with ReLU
 	in, hidden, out := 2, 4, 1
 
-	l1 := layer.NewDense(in, hidden, activations.ReLU{})
+	l1 := layer.NewDense(in, hidden, activations.Tanh{})
 	l2 := layer.NewDense(hidden, out, activations.Sigmoid{})
 
 	network := net.New(
@@ -67,10 +68,11 @@ func exampleXOR() {
 
 func exampleXLOR() {
 	// Extended XOR: 2 inputs -> 8 hidden -> 8 hidden -> 1 output
+	// Using Tanh for hidden layers to avoid dying neuron problem with ReLU
 	in, h1, h2, out := 2, 8, 8, 1
 
-	l1 := layer.NewDense(in, h1, activations.ReLU{})
-	l2 := layer.NewDense(h1, h2, activations.ReLU{})
+	l1 := layer.NewDense(in, h1, activations.Tanh{})
+	l2 := layer.NewDense(h1, h2, activations.Tanh{})
 	l3 := layer.NewDense(h2, out, activations.Sigmoid{})
 
 	network := net.New(
