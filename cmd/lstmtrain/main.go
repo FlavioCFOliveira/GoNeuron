@@ -135,7 +135,7 @@ func main() {
 	fmt.Println("Actual vs Predicted Values:")
 	fmt.Println("----------------------------------------")
 
-	acc10, acc20, acc30 := 0, 0, 0
+	sampleAcc10, sampleAcc20, sampleAcc30 := 0, 0, 0
 	for i := 0; i < min(10, len(testSamples)); i++ {
 		sample := testSamples[i]
 		lstmLayer.Reset()
@@ -145,13 +145,13 @@ func main() {
 		errorPct := math.Abs(sample.Target-pred) * 100 // Values are already normalized [0,1]
 
 		if errorPct < 10 {
-			acc10++
+			sampleAcc10++
 		}
 		if errorPct < 20 {
-			acc20++
+			sampleAcc20++
 		}
 		if errorPct < 30 {
-			acc30++
+			sampleAcc30++
 		}
 
 		status := ""
@@ -168,6 +168,7 @@ func main() {
 	}
 
 	// Full accuracy
+	fullAcc10, fullAcc20, fullAcc30 := 0, 0, 0
 	for _, sample := range testSamples {
 		lstmLayer.Reset()
 		hidden := lstmLayer.Forward([]float64{sample.Input})
@@ -176,20 +177,20 @@ func main() {
 		errorPct := math.Abs(sample.Target-pred) * 100
 
 		if errorPct < 10 {
-			acc10++
+			fullAcc10++
 		}
 		if errorPct < 20 {
-			acc20++
+			fullAcc20++
 		}
 		if errorPct < 30 {
-			acc30++
+			fullAcc30++
 		}
 	}
 
 	fmt.Printf("\nFull Accuracy on Test Set (%d samples):\n", len(testSamples))
-	fmt.Printf("  Within 10%%: %d/%d (%.1f%%)\n", acc10, len(testSamples), float64(acc10)/float64(len(testSamples))*100)
-	fmt.Printf("  Within 20%%: %d/%d (%.1f%%)\n", acc20, len(testSamples), float64(acc20)/float64(len(testSamples))*100)
-	fmt.Printf("  Within 30%%: %d/%d (%.1f%%)\n", acc30, len(testSamples), float64(acc30)/float64(len(testSamples))*100)
+	fmt.Printf("  Within 10%%: %d/%d (%.1f%%)\n", fullAcc10, len(testSamples), float64(fullAcc10)/float64(len(testSamples))*100)
+	fmt.Printf("  Within 20%%: %d/%d (%.1f%%)\n", fullAcc20, len(testSamples), float64(fullAcc20)/float64(len(testSamples))*100)
+	fmt.Printf("  Within 30%%: %d/%d (%.1f%%)\n", fullAcc30, len(testSamples), float64(fullAcc30)/float64(len(testSamples))*100)
 	fmt.Println()
 
 	// Step 7: Save trained model

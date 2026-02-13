@@ -135,7 +135,7 @@ func main() {
 
 	// Step 5: Evaluate model
 	fmt.Println("--- Step 5: Evaluating Model ---")
-	trainMSE, trainMAE, trainR2 := evaluateLSTM(network, testSequences)
+	trainMSE, trainMAE, trainR2 := evaluateLSTM(network, trainSequences)
 	fmt.Printf("Training MSE: %.6f\n", trainMSE)
 	fmt.Printf("Training MAE: %.6f\n", trainMAE)
 	fmt.Printf("Training R2:  %.6f\n", trainR2)
