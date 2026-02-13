@@ -476,3 +476,374 @@ func TestHuberQuadraticBehaviorForSmallErrors(t *testing.T) {
 		t.Errorf("Huber loss for small error: got %v, want %v", loss, expected)
 	}
 }
+
+// TestL1LossForward tests L1 loss forward pass.
+func TestL1LossForward(t *testing.T) {
+	l1 := L1Loss{}
+
+	tests := []struct {
+		name     string
+		yPred    []float64
+		yTrue    []float64
+		expected float64
+	}{
+		{"Perfect prediction", []float64{1.0, 2.0, 3.0}, []float64{1.0, 2.0, 3.0}, 0.0},
+		{"Single error", []float64{1.0, 2.0}, []float64{1.5, 2.0}, 0.25}, // (0.5 + 0) / 2 = 0.25
+		{"Multiple errors", []float64{1.0, 2.0, 3.0}, []float64{0.0, 1.0, 2.0}, 1.0}, // (1+1+1)/3 = 1
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := l1.Forward(tt.yPred, tt.yTrue)
+			if math.Abs(result-tt.expected) > 1e-10 {
+				t.Errorf("L1Loss.Forward() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestL1LossBackward tests L1 loss backward pass.
+func TestL1LossBackward(t *testing.T) {
+	l1 := L1Loss{}
+
+	tests := []struct {
+		name     string
+		yPred    []float64
+		yTrue    []float64
+		expected []float64
+	}{
+		{"Positive difference", []float64{2.0}, []float64{1.0}, []float64{1.0 / 1.0}}, // (2-1) > 0, grad = 1/n
+		{"Negative difference", []float64{1.0}, []float64{2.0}, []float64{-1.0 / 1.0}}, // (1-2) < 0, grad = -1/n
+		{"Zero difference", []float64{1.0}, []float64{1.0}, []float64{0.0}},           // diff = 0, grad = 0
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			grad := l1.Backward(tt.yPred, tt.yTrue)
+
+			if len(grad) != len(tt.expected) {
+				t.Errorf("Grad length = %d, want %d", len(grad), len(tt.expected))
+				return
+			}
+
+			for i := range grad {
+				if math.Abs(grad[i]-tt.expected[i]) > 1e-10 {
+					t.Errorf("grad[%d] = %v, want %v", i, grad[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+// TestL1LossBackwardInPlace tests in-place gradient computation.
+func TestL1LossBackwardInPlace(t *testing.T) {
+	l1 := L1Loss{}
+
+	yPred := []float64{1.0, 2.0, 3.0}
+	yTrue := []float64{0.0, 2.0, 4.0}
+	grad := make([]float64, 3)
+
+	l1.BackwardInPlace(yPred, yTrue, grad)
+
+	// Expected: 1/n * sign(y-p)
+	// [1, 0, -1] / 3 = [1/3, 0, -1/3]
+	expected := []float64{1.0 / 3.0, 0.0, -1.0 / 3.0}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-10 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
+
+// TestBCELossForward tests BCE loss forward pass.
+func TestBCELossForward(t *testing.T) {
+	bce := BCELoss{}
+
+	tests := []struct {
+		name     string
+		yPred    []float64
+		yTrue    []float64
+		expected float64
+	}{
+		{"Perfect prediction", []float64{0.99, 0.01}, []float64{1.0, 0.0}, 0.01005}, // Close to 0 but not exactly
+		{"Uniform distribution", []float64{0.5, 0.5}, []float64{0.5, 0.5}, 0.6931},  // ln(2) ≈ 0.693
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := bce.Forward(tt.yPred, tt.yTrue)
+			if math.Abs(result-tt.expected) > 1e-4 {
+				t.Errorf("BCELoss.Forward() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestBCELossBackward tests BCE loss backward pass.
+func TestBCELossBackward(t *testing.T) {
+	bce := BCELoss{}
+
+	yPred := []float64{0.7, 0.3}
+	yTrue := []float64{1.0, 0.0}
+
+	grad := bce.Backward(yPred, yTrue)
+
+	// For BCE: grad = (pred - y) / (pred * (1-pred)) / n
+	// Sample 1: (0.7 - 1) / (0.7 * 0.3) / 2 = -0.3 / 0.21 / 2 = -0.714...
+	// Sample 2: (0.3 - 0) / (0.3 * 0.7) / 2 = 0.3 / 0.21 / 2 = 0.714...
+
+	expected := []float64{-0.3 / 0.42, 0.3 / 0.42}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-6 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
+
+// TestBCEWithLogitsLossForward tests BCEWithLogitsLoss forward pass.
+func TestBCEWithLogitsLossForward(t *testing.T) {
+	bce := BCEWithLogitsLoss{}
+
+	// For logits [1.0, -1.0] and targets [1.0, 0.0]
+	// Loss should be numerically stable
+	yPred := []float64{1.0, -1.0}
+	yTrue := []float64{1.0, 0.0}
+
+	result := bce.Forward(yPred, yTrue)
+
+	// Check that loss is positive
+	if result <= 0 {
+		t.Errorf("BCEWithLogitsLoss.Forward() should be positive, got %v", result)
+	}
+}
+
+// TestBCEWithLogitsLossBackward tests BCEWithLogitsLoss backward pass.
+func TestBCEWithLogitsLossBackward(t *testing.T) {
+	bce := BCEWithLogitsLoss{}
+
+	yPred := []float64{0.0, 0.0} // sigmoid(0) = 0.5
+	yTrue := []float64{1.0, 0.0}
+
+	grad := bce.Backward(yPred, yTrue)
+
+	// For BCEWithLogits: grad = (sigmoid(x) - y) / n
+	// Sample 1: (0.5 - 1) / 2 = -0.25
+	// Sample 2: (0.5 - 0) / 2 = 0.25
+
+	expected := []float64{-0.25, 0.25}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-10 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
+
+// TestNLLLossForward tests NLL loss forward pass.
+func TestNLLLossForward(t *testing.T) {
+	nll := NLLLoss{}
+
+	// For probabilities and one-hot targets
+	// y_pred = [0.9, 0.05, 0.05], y_true = [1, 0, 0]
+	// Loss = -log(0.9) / 3 ≈ 0.105
+	yPred := []float64{0.9, 0.05, 0.05}
+	yTrue := []float64{1.0, 0.0, 0.0}
+
+	result := nll.Forward(yPred, yTrue)
+
+	// Should be approximately -log(0.9) / 3 ≈ 0.105
+	expected := -math.Log(0.9) / 3.0
+	if math.Abs(result-expected) > 1e-6 {
+		t.Errorf("NLLLoss.Forward() = %v, want %v", result, expected)
+	}
+}
+
+// TestNLLLossBackward tests NLL loss backward pass.
+func TestNLLLossBackward(t *testing.T) {
+	nll := NLLLoss{}
+
+	yPred := []float64{0.9, 0.05, 0.05}
+	yTrue := []float64{1.0, 0.0, 0.0}
+
+	grad := nll.Backward(yPred, yTrue)
+
+	// For NLL: grad[i] = -y_true[i] / (y_pred[i] * n)
+	// Sample 1: -1 / (0.9 * 3) = -0.370...
+	// Others: 0
+
+	if math.Abs(grad[0]-(-1.0/(0.9*3.0))) > 1e-10 {
+		t.Errorf("grad[0] = %v, want %v", grad[0], -1.0/(0.9*3.0))
+	}
+
+	if grad[1] != 0 || grad[2] != 0 {
+		t.Errorf("grad[1] and grad[2] should be 0 for one-hot target")
+	}
+}
+
+// TestCosineEmbeddingLossForward tests cosine embedding loss forward pass.
+func TestCosineEmbeddingLossForward(t *testing.T) {
+	loss := NewCosineEmbeddingLoss(0.0)
+
+	// Similar pair (y=1): loss = 1 - cos
+	// Dissimilar pair (y=-1): loss = max(0, cos - margin)
+
+	yPred := []float64{0.5, -0.5} // cos=0.5 similar, cos=-0.5 dissimilar
+	yTrue := []float64{1.0, -1.0}
+
+	result := loss.Forward(yPred, yTrue)
+
+	// Sample 1: 1 - 0.5 = 0.5
+	// Sample 2: max(0, -0.5 - 0) = 0
+	// Average: 0.5 / 2 = 0.25
+
+	if math.Abs(result-0.25) > 1e-10 {
+		t.Errorf("CosineEmbeddingLoss.Forward() = %v, want 0.25", result)
+	}
+}
+
+// TestCosineEmbeddingLossBackward tests cosine embedding loss backward pass.
+func TestCosineEmbeddingLossBackward(t *testing.T) {
+	loss := NewCosineEmbeddingLoss(0.0)
+
+	// Use positive cosine for dissimilar to have active margin
+	yPred := []float64{0.5, 0.3}
+	yTrue := []float64{1.0, -1.0}
+
+	grad := loss.Backward(yPred, yTrue)
+
+	// Similar: grad = -1/n = -0.5
+	// Dissimilar with cos(0.3) > margin(0): grad = 1/n = 0.5
+
+	expected := []float64{-0.5, 0.5}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-10 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
+
+// TestHingeEmbeddingLossForward tests hinge embedding loss forward pass.
+func TestHingeEmbeddingLossForward(t *testing.T) {
+	loss := NewHingeEmbeddingLoss(1.0)
+
+	// y=1: loss = x
+	// y=-1: loss = max(0, margin - x)
+
+	yPred := []float64{0.5, 1.5} // x=0.5 for positive, x=1.5 for negative
+	yTrue := []float64{1.0, -1.0}
+
+	result := loss.Forward(yPred, yTrue)
+
+	// Sample 1: 0.5
+	// Sample 2: max(0, 1.0 - 1.5) = 0
+	// Average: 0.5 / 2 = 0.25
+
+	if math.Abs(result-0.25) > 1e-10 {
+		t.Errorf("HingeEmbeddingLoss.Forward() = %v, want 0.25", result)
+	}
+}
+
+// TestHingeEmbeddingLossBackward tests hinge embedding loss backward pass.
+func TestHingeEmbeddingLossBackward(t *testing.T) {
+	loss := NewHingeEmbeddingLoss(1.0)
+
+	yPred := []float64{0.5, 0.5}
+	yTrue := []float64{1.0, -1.0}
+
+	grad := loss.Backward(yPred, yTrue)
+
+	// y=1: grad = 1/n
+	// y=-1 and x < margin: grad = -1/n
+
+	expected := []float64{0.5, -0.5}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-10 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
+
+// TestMarginRankingLossForward tests margin ranking loss forward pass.
+func TestMarginRankingLossForward(t *testing.T) {
+	loss := NewMarginRankingLoss(1.0)
+
+	// For margin ranking, yPred contains [x1, x2] pairs
+	// yTrue contains targets (+1 or -1) for each pair
+	// Pair 0: x1=1.0, x2=0.5, y=1: margin_diff = -1*(1-0.5)+1 = 0.5 > 0, loss = 0.5
+	// Pair 1: x1=0.5, x2=1.0, y=-1: margin_diff = -(-1)*(0.5-1)+1 = 0.5 > 0, loss = 0.5
+
+	yPred := []float64{1.0, 0.5, 0.5, 1.0}
+	yTrue := []float64{1.0, -1.0} // One target per pair
+
+	result := loss.Forward(yPred, yTrue)
+
+	// Average: (0.5 + 0.5) / 2 = 0.5
+
+	if math.Abs(result-0.5) > 1e-10 {
+		t.Errorf("MarginRankingLoss.Forward() = %v, want 0.5", result)
+	}
+}
+
+// TestMarginRankingLossBackward tests margin ranking loss backward pass.
+func TestMarginRankingLossBackward(t *testing.T) {
+	loss := NewMarginRankingLoss(1.0)
+
+	yPred := []float64{1.0, 0.5, 0.5, 1.0}
+	yTrue := []float64{1.0, -1.0} // One target per pair
+
+	grad := loss.Backward(yPred, yTrue)
+
+	// Pairs are [0,1] and [2,3]
+	// Pair 0 (x1=1.0, x2=0.5, y=1): grad[0] -= 1/2, grad[1] += 1/2 => [-0.5, 0.5, 0, 0]
+	// Pair 1 (x1=0.5, x2=1.0, y=-1): grad[2] -= (-1)/2, grad[3] += (-1)/2 => [-0.5, 0.5, 0.5, -0.5]
+
+	expected := []float64{-0.5, 0.5, 0.5, -0.5}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-10 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
+
+// TestKLDivLossForward tests KL divergence forward pass.
+func TestKLDivLossForward(t *testing.T) {
+	kld := KLDivLoss{}
+
+	// KL(divergence) between two distributions
+	// For identical distributions, KL = 0
+	yPred := []float64{0.5, 0.5}
+	yTrue := []float64{0.5, 0.5}
+
+	result := kld.Forward(yPred, yTrue)
+
+	if result > 1e-10 {
+		t.Errorf("KLDivLoss.Forward() for identical dists should be ~0, got %v", result)
+	}
+}
+
+// TestKLDivLossBackward tests KL divergence backward pass.
+func TestKLDivLossBackward(t *testing.T) {
+	kld := KLDivLoss{}
+
+	yPred := []float64{0.6, 0.4}
+	yTrue := []float64{0.5, 0.5}
+
+	grad := kld.Backward(yPred, yTrue)
+
+	// grad[i] = -y_true[i] / (y_pred[i] * n)
+	// grad[0] = -0.5 / (0.6 * 2) = -0.4167
+	// grad[1] = -0.5 / (0.4 * 2) = -0.625
+
+	expected := []float64{-0.5 / (0.6 * 2.0), -0.5 / (0.4 * 2.0)}
+
+	for i := range grad {
+		if math.Abs(grad[i]-expected[i]) > 1e-10 {
+			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
+		}
+	}
+}
