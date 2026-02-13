@@ -52,16 +52,19 @@ func (s Sigmoid) Derivative(x float64) float64 {
 }
 
 // LeakyReLU activation function to prevent dying neurons.
+// PyTorch reference: torch.nn.LeakyReLU(negative_slope=0.01)
 type LeakyReLU struct {
 	Alpha float64 // Slope for x <= 0
 }
 
 // NewLeakyReLU creates a LeakyReLU with the given alpha value.
+// PyTorch default: negative_slope=0.01
 func NewLeakyReLU(alpha float64) *LeakyReLU {
 	return &LeakyReLU{Alpha: alpha}
 }
 
-// Activate computes max(alpha*x, x)
+// Activate computes x if x > 0, else alpha*x
+// PyTorch: f(x) = max(0, x) + alpha * min(0, x)
 func (l *LeakyReLU) Activate(x float64) float64 {
 	if x > 0 {
 		return x
@@ -70,11 +73,53 @@ func (l *LeakyReLU) Activate(x float64) float64 {
 }
 
 // Derivative returns 1 if x > 0, else alpha
+// PyTorch: f'(x) = 1 if x > 0, alpha if x <= 0
 func (l *LeakyReLU) Derivative(x float64) float64 {
 	if x > 0 {
 		return 1
 	}
 	return l.Alpha
+}
+
+// PReLU (Parametric ReLU) activation function.
+// PyTorch reference: torch.nn.PReLU(num_parameters=1)
+// Unlike LeakyReLU, PReLU has a learnable alpha parameter.
+type PReLU struct {
+	Alpha float64 // Learnable slope for x <= 0
+}
+
+// NewPReLU creates a PReLU with the given initial alpha value.
+// PyTorch default: a=0.25
+func NewPReLU(alpha float64) *PReLU {
+	return &PReLU{Alpha: alpha}
+}
+
+// Activate computes x if x > 0, else alpha*x
+// Same formula as LeakyReLU but Alpha is typically a learnable parameter
+func (p *PReLU) Activate(x float64) float64 {
+	if x > 0 {
+		return x
+	}
+	return p.Alpha * x
+}
+
+// Derivative returns 1 if x > 0, else alpha
+// Same formula as LeakyReLU
+func (p *PReLU) Derivative(x float64) float64 {
+	if x > 0 {
+		return 1
+	}
+	return p.Alpha
+}
+
+// GetAlpha returns the current alpha value (useful for gradient descent).
+func (p *PReLU) GetAlpha() float64 {
+	return p.Alpha
+}
+
+// SetAlpha updates the alpha value (used during training).
+func (p *PReLU) SetAlpha(alpha float64) {
+	p.Alpha = alpha
 }
 
 // Tanh activation function.
