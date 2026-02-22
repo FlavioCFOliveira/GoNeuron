@@ -169,8 +169,11 @@ func main() {
 	fmt.Printf("Loaded %d training samples and %d test samples (%dx%d images)\n", len(xTrain), len(xTest), rows, cols)
 
 	// 2. Define Architecture
+	conv1 := layer.NewConv2D(1, 16, 3, 1, 1, activations.ReLU{})
+	conv1.SetInputDimensions(28, 28)
+
 	layers := []layer.Layer{
-		layer.NewConv2D(1, 16, 3, 1, 1, activations.ReLU{}),
+		conv1,
 		layer.NewMaxPool2D(16, 2, 2, 0),
 		layer.NewConv2D(16, 32, 3, 1, 1, activations.ReLU{}),
 		layer.NewMaxPool2D(32, 2, 2, 0),
@@ -182,7 +185,7 @@ func main() {
 
 	// 3. Initialize Network
 	optimizer := opt.NewAdam(0.001)
-	network := net.New(layers, loss.CrossEntropy{}, optimizer)
+	network := net.New(layers, loss.NLLLoss{}, optimizer)
 
 	// 4. Training
 	fmt.Println("Starting training...")

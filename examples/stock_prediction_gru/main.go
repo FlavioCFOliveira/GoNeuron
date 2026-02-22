@@ -1,4 +1,4 @@
-// Stock Prediction example using GRU architecture.
+// Stock Prediction example using GRU architecture with SequenceUnroller.
 package main
 
 import (
@@ -7,7 +7,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"runtime"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
@@ -16,19 +15,11 @@ import (
 	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
-// StockData represents a single row from the CSV file
 type StockData struct {
-	Date     string
-	Close    float64
+	Date  string
+	Close float64
 }
 
-// SequenceSample represents a single training/sample with input window and target
-type SequenceSample struct {
-	Input  []float64 // Window of previous days' prices
-	Target float64   // Next day's price to predict
-}
-
-// NormalizationParams holds min/max values for Min-Max scaling
 type NormalizationParams struct {
 	Min float64
 	Max float64
@@ -60,8 +51,12 @@ func loadStockData(filepath string) ([]StockData, error) {
 func minMaxScale(prices []float64) ([]float64, NormalizationParams) {
 	minVal, maxVal := prices[0], prices[0]
 	for _, p := range prices {
-		if p < minVal { minVal = p }
-		if p > maxVal { maxVal = p }
+		if p < minVal {
+			minVal = p
+		}
+		if p > maxVal {
+			maxVal = p
+		}
 	}
 	scaled := make([]float64, len(prices))
 	for i, p := range prices {
@@ -70,71 +65,55 @@ func minMaxScale(prices []float64) ([]float64, NormalizationParams) {
 	return scaled, NormalizationParams{Min: minVal, Max: maxVal}
 }
 
-func createSequences(prices []float64, lookback int) []SequenceSample {
-	var sequences []SequenceSample
-	for i := 0; i <= len(prices)-lookback-1; i++ {
-		seq := SequenceSample{
-			Input:  make([]float64, lookback),
-			Target: prices[i+lookback],
-		}
-		copy(seq.Input, prices[i:i+lookback])
-		sequences = append(sequences, seq)
-	}
-	return sequences
-}
-
-func createGRUNetwork(lookback int, gruUnits int) *net.Network {
-	layers := []layer.Layer{
-		layer.NewGRU(lookback, gruUnits),
-		layer.NewDense(gruUnits, 1, activations.Linear{}),
-	}
-	return net.New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.01})
-}
-
 func main() {
 	fmt.Println("=== Stock Price Prediction using GRU ===")
 	const (
 		lookback   = 10
 		gruUnits   = 32
-		epochs     = 50
+		epochs     = 100
 		trainRatio = 0.8
 	)
 
 	data, err := loadStockData("examples/stock_prediction_gru/datasets/GOOG.csv")
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	prices := make([]float64, len(data))
-	for i, d := range data { prices[i] = d.Close }
+	for i, d := range data {
+		prices[i] = d.Close
+	}
 
 	scaledPrices, normParams := minMaxScale(prices)
-	sequences := createSequences(scaledPrices, lookback)
-	splitIdx := int(float64(len(sequences)) * trainRatio)
-	trainSeq, testSeq := sequences[:splitIdx], sequences[splitIdx:]
 
-	network := createGRUNetwork(lookback, gruUnits)
-
-	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := 0.0
-		for _, seq := range trainSeq {
-			network.Layers()[0].Reset()
-			totalLoss += network.Train(seq.Input, []float64{seq.Target})
-		}
-		if epoch%10 == 0 || epoch == 1 {
-			fmt.Printf("Epoch %d, Loss: %.6f\n", epoch, totalLoss/float64(len(trainSeq)))
-		}
+	var x [][]float64
+	var y [][]float64
+	for i := 0; i <= len(scaledPrices)-lookback-1; i++ {
+		x = append(x, scaledPrices[i:i+lookback])
+		y = append(y, []float64{scaledPrices[i+lookback]})
 	}
+
+	splitIdx := int(float64(len(x)) * trainRatio)
+	xTrain, xTest := x[:splitIdx], x[splitIdx:]
+	yTrain, yTest := y[:splitIdx], y[splitIdx:]
+
+	layers := []layer.Layer{
+		layer.NewSequenceUnroller(layer.NewGRU(1, gruUnits), lookback, false),
+		layer.NewDense(gruUnits, 1, activations.Linear{}),
+	}
+
+	optimizer := opt.NewAdam(0.001)
+	network := net.New(layers, loss.MSE{}, optimizer)
+
+	fmt.Println("Training...")
+	network.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 20})
 
 	// Evaluation
 	var mse float64
-	for _, seq := range testSeq {
-		network.Layers()[0].Reset()
-		pred := network.Forward(seq.Input)[0]
-		diff := (pred - seq.Target) * (normParams.Max - normParams.Min)
+	for i := range xTest {
+		pred := network.Forward(xTest[i])[0]
+		diff := (pred - yTest[i][0]) * (normParams.Max - normParams.Min)
 		mse += diff * diff
 	}
-	fmt.Printf("\nTest RMSE: $%.2f\n", math.Sqrt(mse/float64(len(testSeq))))
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	fmt.Printf("Memory Alloc: %v KB\n", m.Alloc/1024)
+	fmt.Printf("\nTest RMSE: $%.2f\n", math.Sqrt(mse/float64(len(xTest))))
 }

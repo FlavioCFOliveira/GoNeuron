@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -14,31 +15,36 @@ import (
 )
 
 func main() {
-	// 1. Synthetic Sentiment Dataset (Small for demonstration)
-	positive := []string{
-		"i love this movie",
-		"great film very happy",
-		"excellent acting and story",
-		"it was fantastic and amazing",
-		"highly recommended for everyone",
-		"the best movie of the year",
-		"i really enjoyed this masterpiece",
-		"wonderful experience and great plot",
-		"superb performance by the cast",
-		"this is a must watch film",
+	// 1. Expanded Synthetic Sentiment Dataset
+	posSentences := []string{
+		"i love this movie", "great film very happy", "excellent acting and story",
+		"it was fantastic and amazing", "highly recommended for everyone",
+		"the best movie of the year", "i really enjoyed this masterpiece",
+		"wonderful experience and great plot", "superb performance by the cast",
+		"this is a must watch film", "absolutely brilliant cinematography",
+		"a truly touching and beautiful story", "i could watch this every day",
+		"the direction was flawless", "pure joy to watch", "captivating from start to finish",
+		"a landmark in cinema history", "unforgettable characters and dialogue",
+		"the soundtrack was perfect", "it exceeded all my expectations",
+		"a gem of a film with heart", "truly inspiring and uplifting",
+		"one of the greatest stories ever told", "the acting was top notch",
+		"beautifully filmed and acted",
 	}
 
-	negative := []string{
-		"i hate this movie",
-		"terrible film very sad",
-		"bad acting and story",
-		"it was boring and awful",
-		"not recommended for anyone",
-		"the worst movie of the year",
-		"i really disliked this garbage",
-		"horrible experience and bad plot",
-		"poor performance by the cast",
-		"this is a waste of time",
+	negSentences := []string{
+		"i hate this movie", "terrible film very sad", "bad acting and story",
+		"it was boring and awful", "not recommended for anyone",
+		"the worst movie of the year", "i really disliked this garbage",
+		"horrible experience and bad plot", "poor performance by the cast",
+		"this is a waste of time", "dull and uninspired writing",
+		"complete disaster of a movie", "i wanted to leave the theater",
+		"the logic makes no sense", "painfully slow and annoying",
+		"cliched and predictable throughout", "save your money and skip it",
+		"the special effects were cheap", "worst acting i have ever seen",
+		"it was a total disappointment",
+		"poorly directed and confusing", "avoid at all costs",
+		"not worth the price of admission", "a boring mess of a movie",
+		"everything about it was bad",
 	}
 
 	// 2. Vocabulary and Tokenization
@@ -47,10 +53,11 @@ func main() {
 	vocab["<UNK>"] = 1
 	idx := 2
 
-	allSentences := append(positive, negative...)
+	allSentences := append(posSentences, negSentences...)
 	for _, s := range allSentences {
 		words := strings.Fields(strings.ToLower(s))
 		for _, w := range words {
+			w = strings.Trim(w, ".,!?:;")
 			if _, ok := vocab[w]; !ok {
 				vocab[w] = idx
 				idx++
@@ -59,14 +66,15 @@ func main() {
 	}
 
 	vocabSize := len(vocab)
-	maxLen := 5
+	maxLen := 10
 
 	tokenize := func(s string) []float64 {
 		words := strings.Fields(strings.ToLower(s))
 		tokens := make([]float64, maxLen)
 		for i := 0; i < maxLen; i++ {
 			if i < len(words) {
-				if id, ok := vocab[words[i]]; ok {
+				w := strings.Trim(words[i], ".,!?:;")
+				if id, ok := vocab[w]; ok {
 					tokens[i] = float64(id)
 				} else {
 					tokens[i] = 1.0 // <UNK>
@@ -82,44 +90,59 @@ func main() {
 	x := make([][]float64, 0)
 	y := make([][]float64, 0)
 
-	for _, s := range positive {
+	for _, s := range posSentences {
 		x = append(x, tokenize(s))
 		y = append(y, []float64{1.0, 0.0}) // One-hot: [Pos, Neg]
 	}
-	for _, s := range negative {
+	for _, s := range negSentences {
 		x = append(x, tokenize(s))
 		y = append(y, []float64{0.0, 1.0}) // One-hot: [Pos, Neg]
 	}
 
 	// Shuffle
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(42)
 	rand.Shuffle(len(x), func(i, j int) {
 		x[i], x[j] = x[j], x[i]
 		y[i], y[j] = y[j], y[i]
 	})
 
-	fmt.Printf("Vocab Size: %d, Samples: %d\n", vocabSize, len(x))
+	fmt.Printf("Vocab Size: %d, Samples: %d, Max Length: %d\n", vocabSize, len(x), maxLen)
 
-	// 4. Define Architecture: Embedding -> LSTM -> Dense
+	// 4. Define Architecture: Embedding -> Unrolled GRU -> Dense
 	layers := []layer.Layer{
-		layer.NewEmbedding(vocabSize, 16),
-		layer.NewLSTM(16, 32),
+		layer.NewEmbedding(vocabSize, 16), // [maxLen, 16]
+		layer.NewFlatten(),                // SequenceUnroller expects [T * InSize]
+		layer.NewSequenceUnroller(layer.NewGRU(16, 32), maxLen, false), // Returns [32]
 		layer.NewDense(32, 2, activations.LogSoftmax{}),
 	}
 
-	optimizer := opt.NewAdam(0.01)
-	model := net.New(layers, loss.CrossEntropy{}, optimizer)
+	optimizer := opt.NewAdam(0.001)
+	model := net.New(layers, loss.NLLLoss{}, optimizer)
 
-	// 5. Training
-	fmt.Println("Starting training...")
-	model.Fit(x, y, 50, 4, net.Logger{Interval: 10})
+	// 5. Training with Callbacks
+	fmt.Println("\nStarting training...")
+	start := time.Now()
 
-	// 6. Test on new sentences
+	scheduler := opt.NewReduceLROnPlateau(optimizer, 0.5, 5, 0.0001, 0.00001)
+	callbacks := []net.Callback{
+		net.Logger{Interval: 10},
+		net.NewEarlyStopping(10, 0.0001),
+		net.NewSchedulerCallback(scheduler),
+	}
+
+	model.Fit(x, y, 200, 4, callbacks...)
+	fmt.Printf("Training finished in %v\n", time.Since(start))
+
+	// 6. Evaluation
 	testSentences := []string{
 		"it was a great movie",
 		"i hated the film",
-		"amazing story",
-		"waste of time",
+		"absolutely amazing masterpiece",
+		"a waste of my time and money",
+		"brilliant acting and direction",
+		"boring and predictable plot",
+		"truly wonderful and inspiring",
+		"terrible waste of talent",
 	}
 
 	fmt.Println("\nTesting Model:")
@@ -130,6 +153,9 @@ func main() {
 		if pred[1] > pred[0] {
 			sentiment = "Negative"
 		}
-		fmt.Printf("Sentence: '%s' -> Predicted: %s (Scores: %.2f, %.2f)\n", s, sentiment, pred[0], pred[1])
+		pPos := math.Exp(pred[0])
+		pNeg := math.Exp(pred[1])
+		fmt.Printf("Sentence: '%-30s' -> Predicted: %-8s (Confidence: %.2f%%)\n",
+			s, sentiment, math.Max(pPos, pNeg)*100)
 	}
 }

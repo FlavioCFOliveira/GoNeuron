@@ -1,4 +1,4 @@
-// Stock Prediction example using BiLSTM architecture.
+// Stock Prediction example using Bidirectional LSTM architecture.
 package main
 
 import (
@@ -7,7 +7,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"runtime"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
@@ -19,11 +18,6 @@ import (
 type StockData struct {
 	Date  string
 	Close float64
-}
-
-type SequenceSample struct {
-	Input  []float64
-	Target float64
 }
 
 type NormalizationParams struct {
@@ -61,37 +55,12 @@ func minMaxScale(prices []float64) ([]float64, NormalizationParams) {
 	return scaled, NormalizationParams{Min: minVal, Max: maxVal}
 }
 
-func createSequences(prices []float64, lookback int) []SequenceSample {
-	var sequences []SequenceSample
-	for i := 0; i <= len(prices)-lookback-1; i++ {
-		seq := SequenceSample{
-			Input:  make([]float64, lookback),
-			Target: prices[i+lookback],
-		}
-		copy(seq.Input, prices[i:i+lookback])
-		sequences = append(sequences, seq)
-	}
-	return sequences
-}
-
-func createBiLSTMNetwork(lookback int, lstmUnits int) *net.Network {
-	forward := layer.NewLSTM(lookback, lstmUnits)
-	backward := layer.NewLSTM(lookback, lstmUnits)
-	bilstm := layer.NewBidirectional(forward, backward)
-
-	layers := []layer.Layer{
-		bilstm,
-		layer.NewDense(lstmUnits*2, 1, activations.Linear{}),
-	}
-	return net.New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.01})
-}
-
 func main() {
 	fmt.Println("=== Stock Price Prediction using BiLSTM ===")
 	const (
 		lookback   = 10
 		lstmUnits  = 32
-		epochs     = 30
+		epochs     = 50
 		trainRatio = 0.8
 	)
 
@@ -102,34 +71,39 @@ func main() {
 	for i, d := range data { prices[i] = d.Close }
 
 	scaledPrices, normParams := minMaxScale(prices)
-	sequences := createSequences(scaledPrices, lookback)
-	splitIdx := int(float64(len(sequences)) * trainRatio)
-	trainSeq, testSeq := sequences[:splitIdx], sequences[splitIdx:]
 
-	network := createBiLSTMNetwork(lookback, lstmUnits)
-
-	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := 0.0
-		for _, seq := range trainSeq {
-			network.Layers()[0].Reset()
-			totalLoss += network.Train(seq.Input, []float64{seq.Target})
-		}
-		if epoch%5 == 0 || epoch == 1 {
-			fmt.Printf("Epoch %d, Loss: %.6f\n", epoch, totalLoss/float64(len(trainSeq)))
-		}
+	var x [][]float64
+	var y [][]float64
+	for i := 0; i <= len(scaledPrices)-lookback-1; i++ {
+		x = append(x, scaledPrices[i:i+lookback])
+		y = append(y, []float64{scaledPrices[i+lookback]})
 	}
+
+	splitIdx := int(float64(len(x)) * trainRatio)
+	xTrain, xTest := x[:splitIdx], x[splitIdx:]
+	yTrain, yTest := y[:splitIdx], y[splitIdx:]
+
+	forward := layer.NewLSTM(1, lstmUnits)
+	backward := layer.NewLSTM(1, lstmUnits)
+	bilstm := layer.NewBidirectional(forward, backward)
+
+	layers := []layer.Layer{
+		layer.NewSequenceUnroller(bilstm, lookback, false),
+		layer.NewDense(lstmUnits*2, 1, activations.Linear{}),
+	}
+
+	optimizer := opt.NewAdam(0.001)
+	network := net.New(layers, loss.MSE{}, optimizer)
+
+	fmt.Println("Training...")
+	network.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 10})
 
 	// Evaluation
 	var mse float64
-	for _, seq := range testSeq {
-		network.Layers()[0].Reset()
-		pred := network.Forward(seq.Input)[0]
-		diff := (pred - seq.Target) * (normParams.Max - normParams.Min)
+	for i := range xTest {
+		pred := network.Forward(xTest[i])[0]
+		diff := (pred - yTest[i][0]) * (normParams.Max - normParams.Min)
 		mse += diff * diff
 	}
-	fmt.Printf("\nTest RMSE: $%.2f\n", math.Sqrt(mse/float64(len(testSeq))))
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	fmt.Printf("Memory Alloc: %v KB\n", m.Alloc/1024)
+	fmt.Printf("\nTest RMSE: $%.2f\n", math.Sqrt(mse/float64(len(xTest))))
 }
