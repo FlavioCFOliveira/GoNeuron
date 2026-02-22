@@ -189,6 +189,16 @@ func (r *RBF) ClearGradients() {
 	for i := range r.gradInBuf { r.gradInBuf[i] = 0 }
 }
 
+// InSize returns the input size.
+func (r *RBF) InSize() int {
+	return r.inSize
+}
+
+// OutSize returns the output size.
+func (r *RBF) OutSize() int {
+	return r.outSize
+}
+
 // Clone creates a deep copy.
 func (r *RBF) Clone() Layer {
 	newR := NewRBF(r.inSize, r.numCenters, r.outSize, r.gamma)
@@ -196,4 +206,14 @@ func (r *RBF) Clone() Layer {
 	copy(newR.biases, r.biases)
 	copy(newR.centers, r.centers)
 	return newR
+}
+
+// NumCenters returns the number of RBF centers.
+func (r *RBF) NumCenters() int {
+	return r.numCenters
+}
+
+// Gamma returns the RBF gamma parameter.
+func (r *RBF) Gamma() float64 {
+	return r.gamma
 }

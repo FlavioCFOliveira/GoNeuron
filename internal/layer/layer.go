@@ -40,6 +40,12 @@ type Layer interface {
 
 	// Clone creates a deep copy of the layer.
 	Clone() Layer
+
+	// InSize returns the number of input features.
+	InSize() int
+
+	// OutSize returns the number of output features.
+	OutSize() int
 }
 
 // Dense is a fully connected layer optimized for performance.
@@ -124,19 +130,22 @@ func (d *Dense) Forward(x []float64) []float64 {
 	preAct := d.preActBuf
 	output := d.outputBuf
 
-	// Check if activation supports batch processing (e.g., Softmax, LogSoftmax)
-	// For batch activations, we compute all pre-activations first, then apply activation
-	if batchAct, ok := d.act.(activations.BatchActivation); ok {
-		// Compute all pre-activations first
-		for o := 0; o < outSize; o++ {
-			// Compute dot product: sum(W[o, :] * x)
-			sum := biases[o]
-			wBase := o * inSize
-			for i := 0; i < inSize; i++ {
-				sum += weights[wBase+i] * input[i]
-			}
-			preAct[o] = sum
+	// Compute all pre-activations first
+	for o := 0; o < outSize; o++ {
+		// Compute dot product: sum(W[o, :] * x)
+		sum := biases[o]
+		wBase := o * inSize
+		for i := 0; i < inSize; i++ {
+			sum += weights[wBase+i] * input[i]
 		}
+		preAct[o] = sum
+	}
+
+	// Save pre-activations for gradient accumulation
+	d.savePreAct(preAct)
+
+	// Check if activation supports batch processing (e.g., Softmax, LogSoftmax)
+	if batchAct, ok := d.act.(activations.BatchActivation); ok {
 		// Apply batch activation (copies output, then modifies it in place)
 		copy(output, preAct)
 		batchAct.ActivateBatch(output)
@@ -147,21 +156,11 @@ func (d *Dense) Forward(x []float64) []float64 {
 		}
 		copy(d.savedOutput[:outSize], output[:outSize])
 	} else {
-		// Standard activation: compute and apply for each output neuron
+		// Standard activation: apply for each output neuron
 		for o := 0; o < outSize; o++ {
-			// Compute dot product: sum(W[o, :] * x)
-			sum := biases[o]
-			wBase := o * inSize
-			for i := 0; i < inSize; i++ {
-				sum += weights[wBase+i] * input[i]
-			}
-			preAct[o] = sum
-			output[o] = d.act.Activate(sum)
+			output[o] = d.act.Activate(preAct[o])
 		}
 	}
-
-	// Save pre-activations for gradient accumulation
-	d.savePreAct(preAct)
 
 	return output[:outSize]
 }
@@ -178,58 +177,41 @@ func (d *Dense) Backward(grad []float64) []float64 {
 	gradB := d.gradBBuf
 	gradIn := d.gradInBuf
 
+	// Step 1: Compute dz = dL/dz = dL/d(output) * activation'(z)
 	// Check if activation is a batch activation (Softmax or LogSoftmax)
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
 		// For batch activations, use the saved output to compute derivatives
 		// The output was saved during Forward pass in savedOutput
 		output := d.savedOutput[:outSize]
 
-		// For LogSoftmax:
-		// log_softmax[i] = pre_act[i] - log(sum_j(exp(pre_act[j])))
-		// d(log_softmax[i])/d(pre_act[k]) = delta[i,k] - softmax[k]
-		//
-		// For NLLLoss with log-prob input:
-		// loss = -sum_i(y[i] * log_prob[i]) / n
-		// dloss/d(log_prob[k]) = -y[k] / n
-		//
-		// Combined gradient:
-		// dloss/d(pre_act[k]) = sum_i(dloss/d(log_softmax[i]) * d(log_softmax[i])/d(pre_act[k]))
-		// = sum_i(-y[i]/n * (delta[i,k] - softmax[k]))
-		// = -y[k]/n + softmax[k] * sum_i(y[i])/n
-		// For one-hot: sum_i(y[i]) = 1
-		// = (softmax[k] - y[k]) / n
-		//
-		// Since grad = -y/n, we have y = -n * grad
-		// = (softmax[k] + n * grad[k]) / n
-		// = softmax[k]/n + grad[k]
-		//
-		// Wait, let me redo this more carefully:
-		// grad[k] = -y[k] / n
-		// y[k] = -n * grad[k]
-		// dloss/d(pre_act[k]) = softmax[k]/n - y[k]/n
-		// = softmax[k]/n + grad[k]
-		//
-		// So: dz[k] = grad[k] + softmax[k]/n
-
-		// Compute softmax from saved log-softmax output
-		softmax := make([]float64, outSize)
-		var sumSoftmax float64
-		for o := 0; o < outSize; o++ {
-			// exp(log_softmax) = softmax
-			softmax[o] = math.Exp(output[o])
-			sumSoftmax += softmax[o]
-		}
-		// Normalize (should be 1, but numerical stability)
-		for o := 0; o < outSize; o++ {
-			softmax[o] /= sumSoftmax
-		}
-
-		// Compute dz = grad + softmax / n
-		// where n = outSize (number of classes)
-		n := float64(outSize)
-		for o := 0; o < outSize; o++ {
-			dz[o] = grad[o] + softmax[o]/n
-			gradB[o] = dz[o]
+		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
+			for k := 0; k < outSize; k++ {
+				sum := 0.0
+				outK := output[k]
+				for i := 0; i < outSize; i++ {
+					delta := 0.0
+					if i == k {
+						delta = 1.0
+					}
+					sum += grad[i] * output[i] * (delta - outK)
+				}
+				dz[k] = sum
+				gradB[k] = sum
+			}
+		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
+			for k := 0; k < outSize; k++ {
+				sum := 0.0
+				softmaxK := math.Exp(output[k])
+				for i := 0; i < outSize; i++ {
+					delta := 0.0
+					if i == k {
+						delta = 1.0
+					}
+					sum += grad[i] * (delta - softmaxK)
+				}
+				dz[k] = sum
+				gradB[k] = sum
+			}
 		}
 	} else {
 		// Standard activation: compute derivative for each output neuron
@@ -247,11 +229,6 @@ func (d *Dense) Backward(grad []float64) []float64 {
 		for i := 0; i < inSize; i++ {
 			gradW[wBase+i] += dzo * input[i]
 		}
-	}
-
-	// Step 3: Compute bias gradients
-	for o := 0; o < outSize; o++ {
-		gradB[o] += dz[o]
 	}
 
 	// Step 4: Compute input gradients: dL/dx[i] = sum_o(dz[o] * W[o, i])
@@ -452,48 +429,78 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 	gradIn := d.gradInBuf
 
 	numSaved := len(d.savedInputs)
-
-	// Clear input gradient buffer (but NOT gradW/gradB - we accumulate)
-	for i := range gradIn {
-		gradIn[i] = 0
+	if numSaved == 0 {
+		return nil
 	}
 
-	// For each saved input from forward passes, accumulate gradients
-	for s := 0; s < numSaved; s++ {
-		// Get the saved pre-activation for this forward pass
-		savedPreAct := d.savedPreActs[s]
+	// Process the most recent saved input (stack-like)
+	s := numSaved - 1
+	savedInput := d.savedInputs[s]
+	savedPreAct := d.savedPreActs[s]
 
-		// Step 1: Compute dz = dL/dz = dL/d(output) * activation'(z)
-		// Use the saved pre-activation for this forward pass
+	// Step 1: Compute dz = dL/dz = dL/d(output) * activation'(z)
+	// Check if activation is a batch activation (Softmax or LogSoftmax)
+	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
+		output := make([]float64, outSize)
+		copy(output, savedPreAct)
+		d.act.(activations.BatchActivation).ActivateBatch(output)
+
+		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
+			for k := 0; k < outSize; k++ {
+				sum := 0.0
+				outK := output[k]
+				for i := 0; i < outSize; i++ {
+					delta := 0.0
+					if i == k {
+						delta = 1.0
+					}
+					sum += grad[i] * output[i] * (delta - outK)
+				}
+				dz[k] = sum
+			}
+		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
+			for k := 0; k < outSize; k++ {
+				sum := 0.0
+				softmaxK := math.Exp(output[k])
+				for i := 0; i < outSize; i++ {
+					delta := 0.0
+					if i == k {
+						delta = 1.0
+					}
+					sum += grad[i] * (delta - softmaxK)
+				}
+				dz[k] = sum
+			}
+		}
+	} else {
 		for o := 0; o < outSize; o++ {
 			deriv := d.act.Derivative(savedPreAct[o])
 			dz[o] = grad[o] * deriv
-			gradB[o] += dz[o] // Accumulate instead of overwrite
-		}
-
-		// Step 2: Compute weight gradients: dL/dW[o, i] = dz[o] * input[i]
-		// Use the saved input from the corresponding forward pass
-		savedInput := d.savedInputs[s]
-		for o := 0; o < outSize; o++ {
-			dzo := dz[o]
-			wBase := o * inSize
-			for i := 0; i < inSize; i++ {
-				gradW[wBase+i] += dzo * savedInput[i] // Accumulate instead of overwrite
-			}
-		}
-
-		// Step 3: Compute input gradients: dL/dx[i] = sum_o(dz[o] * W[o, i])
-		// For the first saved input only (we return this gradient)
-		if s == 0 {
-			for i := 0; i < inSize; i++ {
-				sum := 0.0
-				for o := 0; o < outSize; o++ {
-					sum += dz[o] * weights[o*inSize+i]
-				}
-				gradIn[i] = sum
-			}
 		}
 	}
+
+	// Accumulate gradients
+	for o := 0; o < outSize; o++ {
+		dzo := dz[o]
+		gradB[o] += dzo
+		wBase := o * inSize
+		for i := 0; i < inSize; i++ {
+			gradW[wBase+i] += dzo * savedInput[i]
+		}
+	}
+
+	// Compute input gradients
+	for i := 0; i < inSize; i++ {
+		sum := 0.0
+		for o := 0; o < outSize; o++ {
+			sum += dz[o] * weights[o*inSize+i]
+		}
+		gradIn[i] = sum
+	}
+
+	// Remove processed input and pre-activation
+	d.savedInputs = d.savedInputs[:s]
+	d.savedPreActs = d.savedPreActs[:s]
 
 	return gradIn[:inSize]
 }

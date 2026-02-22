@@ -16,6 +16,12 @@ type Optimizer interface {
 
 	// NewStep signals the beginning of a new optimization step (e.g., for Adam timestep).
 	NewStep()
+
+	// State returns the optimizer state for serialization.
+	State() map[string]any
+
+	// SetState sets the optimizer state from a serialized map.
+	SetState(state map[string]any)
 }
 
 // SGD (Stochastic Gradient Descent) optimizer.
@@ -42,6 +48,20 @@ func (s SGD) StepInPlace(params, gradients []float64) {
 
 // NewStep signals the beginning of a new optimization step (no-op for SGD).
 func (s SGD) NewStep() {}
+
+// State returns SGD state.
+func (s SGD) State() map[string]any {
+	return map[string]any{
+		"LearningRate": s.LearningRate,
+	}
+}
+
+// SetState sets SGD state.
+func (s SGD) SetState(state map[string]any) {
+	if lr, ok := state["LearningRate"].(float64); ok {
+		s.LearningRate = lr
+	}
+}
 
 // Adam optimizer for faster convergence.
 // Adam maintains per-parameter state (first and second moment estimates).
@@ -118,7 +138,6 @@ func (a *Adam) Step(params, gradients []float64) []float64 {
 	v := a.momentum2[currentLayer]
 
 	// Bias correction factors: 1 - beta^t
-	// Timestep must be at least 1 for math.Pow to work correctly for bias correction
 	ts := float64(a.timestep)
 	if ts < 1 {
 		ts = 1
@@ -126,18 +145,18 @@ func (a *Adam) Step(params, gradients []float64) []float64 {
 	bias1 := 1 - math.Pow(beta1, ts)
 	bias2 := 1 - math.Pow(beta2, ts)
 
+	// Effective learning rate with bias correction
+	// lr_t = lr * sqrt(1 - beta2^t) / (1 - beta1^t)
+	effLR := lr * math.Sqrt(bias2) / bias1
+
 	result := make([]float64, len(params))
 	for i := range params {
 		// Update biased first moment estimate
 		m[i] = beta1*m[i] + (1-beta1)*gradients[i]
 		// Update biased second moment estimate
 		v[i] = beta2*v[i] + (1-beta2)*gradients[i]*gradients[i]
-		// Compute bias-corrected first moment estimate
-		mHat := m[i] / bias1
-		// Compute bias-corrected second moment estimate
-		vHat := v[i] / bias2
 		// Update parameters
-		result[i] = params[i] - lr*mHat/(math.Sqrt(vHat)+eps)
+		result[i] = params[i] - effLR*m[i]/(math.Sqrt(v[i])+eps)
 	}
 	return result
 }
@@ -175,17 +194,16 @@ func (a *Adam) StepInPlace(params, gradients []float64) {
 	bias1 := 1 - math.Pow(beta1, ts)
 	bias2 := 1 - math.Pow(beta2, ts)
 
+	// Effective learning rate with bias correction
+	effLR := lr * math.Sqrt(bias2) / bias1
+
 	for i := range params {
 		// Update biased first moment estimate
 		m[i] = beta1*m[i] + (1-beta1)*gradients[i]
 		// Update biased second moment estimate
 		v[i] = beta2*v[i] + (1-beta2)*gradients[i]*gradients[i]
-		// Compute bias-corrected first moment estimate
-		mHat := m[i] / bias1
-		// Compute bias-corrected second moment estimate
-		vHat := v[i] / bias2
 		// Update parameters in-place
-		params[i] -= lr * mHat / (math.Sqrt(vHat) + eps)
+		params[i] -= effLR * m[i] / (math.Sqrt(v[i]) + eps)
 	}
 }
 
@@ -193,4 +211,42 @@ func (a *Adam) StepInPlace(params, gradients []float64) {
 func (a *Adam) NewStep() {
 	a.timestep++
 	a.currentLayer = 0
+}
+
+// State returns Adam state.
+func (a *Adam) State() map[string]any {
+	return map[string]any{
+		"LearningRate": a.LearningRate,
+		"Beta1":        a.Beta1,
+		"Beta2":        a.Beta2,
+		"Epsilon":      a.Epsilon,
+		"momentum1":    a.momentum1,
+		"momentum2":    a.momentum2,
+		"timestep":     a.timestep,
+	}
+}
+
+// SetState sets Adam state.
+func (a *Adam) SetState(state map[string]any) {
+	if lr, ok := state["LearningRate"].(float64); ok {
+		a.LearningRate = lr
+	}
+	if b1, ok := state["Beta1"].(float64); ok {
+		a.Beta1 = b1
+	}
+	if b2, ok := state["Beta2"].(float64); ok {
+		a.Beta2 = b2
+	}
+	if eps, ok := state["Epsilon"].(float64); ok {
+		a.Epsilon = eps
+	}
+	if m1, ok := state["momentum1"].([][]float64); ok {
+		a.momentum1 = m1
+	}
+	if m2, ok := state["momentum2"].([][]float64); ok {
+		a.momentum2 = m2
+	}
+	if ts, ok := state["timestep"].(int); ok {
+		a.timestep = ts
+	}
 }

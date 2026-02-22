@@ -383,7 +383,7 @@ func printBenchmarkStats(durations []time.Duration) {
 // ============================================================================
 
 func main() {
-	fmt.Println("=== Stock Price Prediction using LSTM ===\n")
+	fmt.Println("=== Stock Price Prediction using LSTM ===")
 
 	// Configuration
 	const (

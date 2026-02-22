@@ -3,6 +3,7 @@ package net
 
 import (
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -76,10 +77,13 @@ func (n *Network) Step() {
 	for _, l := range n.layers {
 		params := l.Params()
 		gradients := l.Gradients()
-		// Compute updated parameters
-		updated := n.opt.Step(params, gradients)
-		// Set updated parameters back to layer
-		l.SetParams(updated)
+		// Use StepInPlace for efficiency
+		n.opt.StepInPlace(params, gradients)
+		// No need for SetParams as StepInPlace modified params in-place
+		// unless the layer doesn't return a reference to its internal params slice.
+		// Most layers currently return a copy in Params().
+		// Let's ensure consistency by calling SetParams with the modified slice.
+		l.SetParams(params)
 	}
 }
 
@@ -119,6 +123,64 @@ func (n *Network) Train(x []float64, y []float64) float64 {
 	n.Step()
 
 	return l
+}
+
+// Fit trains the network on the given dataset for a specified number of epochs.
+func (n *Network) Fit(trainX, trainY [][]float64, epochs int, batchSize int, callbacks ...Callback) {
+	for _, cb := range callbacks {
+		cb.OnTrainBegin(n)
+	}
+
+	numSamples := len(trainX)
+	numBatches := (numSamples + batchSize - 1) / batchSize
+
+	for epoch := 0; epoch < epochs; epoch++ {
+		for _, cb := range callbacks {
+			cb.OnEpochBegin(epoch, n)
+		}
+
+		totalLoss := 0.0
+
+		for b := 0; b < numBatches; b++ {
+			for _, cb := range callbacks {
+				cb.OnBatchBegin(b, n)
+			}
+
+			start := b * batchSize
+			end := (b + 1) * batchSize
+			if end > numSamples {
+				end = numSamples
+			}
+
+			batchX := trainX[start:end]
+			batchY := trainY[start:end]
+
+			loss := n.TrainBatch(batchX, batchY)
+			totalLoss += loss
+
+			for _, cb := range callbacks {
+				cb.OnBatchEnd(b, loss, n)
+			}
+		}
+
+		avgLoss := totalLoss / float64(numBatches)
+
+		stop := false
+		for _, cb := range callbacks {
+			cb.OnEpochEnd(epoch, avgLoss, n)
+			if es, ok := cb.(*EarlyStopping); ok && es.Stopped {
+				stop = true
+			}
+		}
+
+		if stop {
+			break
+		}
+	}
+
+	for _, cb := range callbacks {
+		cb.OnTrainEnd(n)
+	}
 }
 
 // TrainBatch performs training on a batch of samples.
@@ -204,10 +266,20 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float64, margin floa
 	// Negative gradient
 	_ = n.accumulateBackward(grad[2*embDim : 3*embDim])
 
-	// 5. Optimization step
+	// Optimization step
 	n.Step()
 
 	return lVal
+}
+
+// SetParams sets all network parameters from a flattened slice.
+func (n *Network) SetParams(params []float64) {
+	offset := 0
+	for _, l := range n.layers {
+		lLen := len(l.Params())
+		l.SetParams(params[offset : offset+lLen])
+		offset += lLen
+	}
 }
 
 // accumulateBackward performs a backward pass through all layers and accumulates gradients.
@@ -454,14 +526,21 @@ func Load(filename string) (*Network, loss.Loss, error) {
 	var layers []layer.Layer
 	offset := 0
 	for _, cfg := range layerConfigs {
-		layer, err := cfg.CreateLayer()
+		l, err := cfg.CreateLayer()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create layer: %w", err)
 		}
 		numParams := len(cfg.Params)
-		layer.SetParams(params[offset : offset+numParams])
-		layers = append(layers, layer)
+		l.SetParams(params[offset : offset+numParams])
+		layers = append(layers, l)
 		offset += numParams
+	}
+
+	// Read optimizer state
+	var optState map[string]any
+	if err := decoder.Decode(&optState); err != nil {
+		// Older versions might not have optimizer state
+		optState = nil
 	}
 
 	// Create network with default optimizer
@@ -473,6 +552,10 @@ func Load(filename string) (*Network, loss.Loss, error) {
 		optimizer = opt.NewAdam(0.001)
 	default:
 		optimizer = &opt.SGD{LearningRate: 0.1}
+	}
+
+	if optState != nil {
+		optimizer.SetState(optState)
 	}
 
 	// Create network with reconstructed loss
@@ -544,7 +627,42 @@ func (n *Network) Encode(w io.Writer) error {
 		return fmt.Errorf("failed to encode params: %w", err)
 	}
 
+	// Write optimizer state
+	if err := encoder.Encode(n.opt.State()); err != nil {
+		return fmt.Errorf("failed to encode optimizer state: %w", err)
+	}
+
 	return nil
+}
+
+// SaveJSON saves the network to a file using JSON encoding.
+func (n *Network) SaveJSON(filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+
+	data := struct {
+		Layers    []LayerConfig
+		Loss      string
+		Optimizer string
+		OptState  map[string]any
+	}{
+		Layers:    make([]LayerConfig, len(n.layers)),
+		Loss:      fmt.Sprintf("%T", n.loss),
+		Optimizer: fmt.Sprintf("%T", n.opt),
+		OptState:  n.opt.State(),
+	}
+
+	for i, l := range n.layers {
+		data.Layers[i] = ExtractLayerConfig(l)
+	}
+
+	return encoder.Encode(data)
 }
 
 // LayerConfig holds the configuration needed to reconstruct a layer.
@@ -572,6 +690,10 @@ type LayerConfig struct {
 	Eps             float64
 	Affine          bool
 	NormalizedShape int
+
+	// RBF parameters
+	NumCenters int
+	Gamma      float64
 }
 
 // ExtractLayerConfig extracts the configuration from a layer.
@@ -645,6 +767,12 @@ func ExtractLayerConfig(l layer.Layer) LayerConfig {
 		cfg.OutSize = v.OutSize() // embedding_dim
 	case *layer.Flatten:
 		cfg.Type = "Flatten"
+	case *layer.RBF:
+		cfg.Type = "RBF"
+		cfg.InSize = v.InSize()
+		cfg.OutSize = v.OutSize()
+		cfg.NumCenters = v.NumCenters()
+		cfg.Gamma = v.Gamma()
 	default:
 		cfg.Type = "Unknown"
 	}
@@ -683,6 +811,8 @@ func (c *LayerConfig) CreateLayer() (layer.Layer, error) {
 		l = layer.NewEmbedding(c.InSize, c.OutSize)
 	case "Flatten":
 		l = layer.NewFlatten()
+	case "RBF":
+		l = layer.NewRBF(c.InSize, c.NumCenters, c.OutSize, c.Gamma)
 	default:
 		return nil, fmt.Errorf("unsupported layer type: %s", c.Type)
 	}

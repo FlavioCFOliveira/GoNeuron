@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/FlavioCFOliveira/GoNeuron/examples/utils"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
