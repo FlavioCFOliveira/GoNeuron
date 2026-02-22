@@ -90,11 +90,11 @@ func (s *SequenceUnroller) Backward(grad []float64) []float64 {
 
 	if bi, ok := s.base.(*Bidirectional); ok {
 		// Bidirectional BPTT
-		fGradNext := make([]float64, bi.ForwardLayer.OutSize())
-		bGradNext := make([]float64, bi.BackwardLayer.OutSize())
+		fGradNext := make([]float64, bi.forward.OutSize())
+		bGradNext := make([]float64, bi.backward.OutSize())
 
-		fOutSize := bi.ForwardLayer.OutSize()
-		bOutSize := bi.BackwardLayer.OutSize()
+		fOutSize := bi.forward.OutSize()
+		bOutSize := bi.backward.OutSize()
 
 		// Forward layer: Backward from T-1 to 0
 		for t := s.timeSteps - 1; t >= 0; t-- {
@@ -109,7 +109,7 @@ func (s *SequenceUnroller) Backward(grad []float64) []float64 {
 					currentGrad[i] += grad[i]
 				}
 			}
-			dx := bi.ForwardLayer.Backward(currentGrad)
+			dx := bi.forward.Backward(currentGrad)
 			copy(s.gradInBuf[t*inSize:(t+1)*inSize], dx)
 			copy(fGradNext, currentGrad)
 		}
@@ -130,7 +130,7 @@ func (s *SequenceUnroller) Backward(grad []float64) []float64 {
 					currentGrad[i] += grad[fOutSize+i]
 				}
 			}
-			dx := bi.BackwardLayer.Backward(currentGrad)
+			dx := bi.backward.Backward(currentGrad)
 			// Add to gradInBuf (accumulate from both directions)
 			for i := 0; i < inSize; i++ {
 				s.gradInBuf[t*inSize+i] += dx[i]
@@ -164,6 +164,7 @@ func (s *SequenceUnroller) Params() []float64 { return s.base.Params() }
 func (s *SequenceUnroller) SetParams(p []float64) { s.base.SetParams(p) }
 func (s *SequenceUnroller) Gradients() []float64 { return s.base.Gradients() }
 func (s *SequenceUnroller) SetGradients(g []float64) { s.base.SetGradients(g) }
+func (s *SequenceUnroller) SetDevice(device Device) { s.base.SetDevice(device) }
 func (s *SequenceUnroller) Reset() { s.base.Reset() }
 func (s *SequenceUnroller) ClearGradients() { s.base.ClearGradients() }
 func (s *SequenceUnroller) Clone() Layer { return NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq) }

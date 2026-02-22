@@ -32,6 +32,8 @@ type BatchNorm2D struct {
 	savedVar          []float64
 	savedStd          []float64
 	numelPerChannel   int
+
+	device Device
 }
 
 // NewBatchNorm2D creates a new 2D batch normalization layer.
@@ -52,6 +54,7 @@ func NewBatchNorm2D(numFeatures int, eps float64, momentum float64, affine bool)
 		savedMean:   make([]float64, numFeatures),
 		savedVar:    make([]float64, numFeatures),
 		savedStd:    make([]float64, numFeatures),
+		device:      &CPUDevice{},
 	}
 
 	if affine {
@@ -68,6 +71,11 @@ func NewBatchNorm2D(numFeatures int, eps float64, momentum float64, affine bool)
 	}
 
 	return l
+}
+
+// SetDevice sets the computation device.
+func (b *BatchNorm2D) SetDevice(device Device) {
+	b.device = device
 }
 
 // Forward performs a forward pass through the batch normalization layer.
@@ -277,6 +285,7 @@ func (b *BatchNorm2D) Clone() Layer {
 	}
 	copy(newB.runningMean, b.runningMean)
 	copy(newB.runningVar, b.runningVar)
+	newB.device = b.device
 	return newB
 }
 

@@ -31,6 +31,8 @@ type MaxPool2D struct {
 
 	// Saved input for backward pass
 	savedInput []float64
+
+	device Device
 }
 
 // NewMaxPool2D creates a new 2D max pooling layer.
@@ -48,7 +50,13 @@ func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
 		gradInBuf:    make([]float64, 0),
 		argmaxBuf:    make([]int, 0),
 		savedInput:   make([]float64, 0),
+		device:       &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (m *MaxPool2D) SetDevice(device Device) {
+	m.device = device
 }
 
 // computeOutputSize calculates the output spatial dimensions
@@ -248,6 +256,7 @@ func (m *MaxPool2D) Clone() Layer {
 	newM.inputWidth = m.inputWidth
 	newM.outputHeight = m.outputHeight
 	newM.outputWidth = m.outputWidth
+	newM.device = m.device
 	return newM
 }
 

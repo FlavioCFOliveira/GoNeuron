@@ -41,6 +41,9 @@ type Layer interface {
 	// Clone creates a deep copy of the layer.
 	Clone() Layer
 
+	// SetDevice sets the computation device.
+	SetDevice(Device)
+
 	// InSize returns the number of input features.
 	InSize() int
 
@@ -49,18 +52,15 @@ type Layer interface {
 }
 
 // Dense is a fully connected layer optimized for performance.
-// Uses contiguous memory layout with pre-allocated buffers for minimal allocations.
-// Uses simple nested loops instead of external matrix libraries for better cache locality.
 type Dense struct {
-	// Weights stored as row-major contiguous slice for cache efficiency
-	// Shape: [out * in] where weight for output i, input j is at weights[i*in + j]
 	weights   []float64
 	biases    []float64
 	act       activations.Activation
 	outSize   int
 	inSize    int
+	device    Device
 
-	// Reusable buffers for gradient computation
+	// Reusable buffers
 	inputBuf      []float64
 	outputBuf     []float64
 	preActBuf     []float64
@@ -69,22 +69,22 @@ type Dense struct {
 	gradInBuf     []float64
 	dzBuf         []float64
 
-	// Saved inputs and pre-activations for gradient accumulation (triplet loss training)
 	savedInputs  [][]float64
 	savedPreActs [][]float64
-
-	// Saved output for batch activation derivative computation
 	savedOutput []float64
 }
 
 // NewDense creates a new dense layer with pre-allocated buffers.
 func NewDense(in, out int, act activations.Activation) *Dense {
+	return NewDenseWithDevice(in, out, act, &CPUDevice{})
+}
+
+// NewDenseWithDevice creates a new dense layer with a specific device.
+func NewDenseWithDevice(in, out int, act activations.Activation, device Device) *Dense {
 	weights := make([]float64, out*in)
 	biases := make([]float64, out)
 
-	// Xavier/Glorot initialization
 	scale := math.Sqrt(2.0 / (float64(in) + float64(out)))
-	// Create deterministic RNG with layer-specific seed for different initial weights
 	rng := NewRNG(uint64(in*1000 + out*100 + 42))
 	for i := range weights {
 		weights[i] = rng.RandFloat()*2*scale - scale
@@ -99,6 +99,7 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 		act:          act,
 		outSize:      out,
 		inSize:       in,
+		device:       device,
 		inputBuf:     make([]float64, in),
 		outputBuf:    make([]float64, out),
 		preActBuf:    make([]float64, out),
@@ -111,17 +112,10 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 	}
 }
 
-// Forward performs a forward pass through the dense layer.
-// Uses simple nested loops for optimal cache locality and zero allocations.
 func (d *Dense) Forward(x []float64) []float64 {
-	// Copy input to reusable buffer (no allocation)
 	copy(d.inputBuf, x)
-
-	// Save input for gradient accumulation (used in AccumulateBackward)
 	d.saveInput(x)
 
-	// Compute Wx + b with pre-allocated buffers
-	// W is [outSize, inSize], x is [inSize], result is [outSize]
 	outSize := d.outSize
 	inSize := d.inSize
 	weights := d.weights
@@ -130,33 +124,32 @@ func (d *Dense) Forward(x []float64) []float64 {
 	preAct := d.preActBuf
 	output := d.outputBuf
 
-	// Compute all pre-activations first
-	for o := 0; o < outSize; o++ {
-		// Compute dot product: sum(W[o, :] * x)
-		sum := biases[o]
-		wBase := o * inSize
-		for i := 0; i < inSize; i++ {
-			sum += weights[wBase+i] * input[i]
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+		metal.MatMul(d.weights, d.inputBuf, d.preActBuf, outSize, 1, inSize)
+		for o := 0; o < outSize; o++ {
+			d.preActBuf[o] += biases[o]
 		}
-		preAct[o] = sum
+	} else {
+		for o := 0; o < outSize; o++ {
+			sum := biases[o]
+			wBase := o * inSize
+			for i := 0; i < inSize; i++ {
+				sum += weights[wBase+i] * input[i]
+			}
+			preAct[o] = sum
+		}
 	}
 
-	// Save pre-activations for gradient accumulation
 	d.savePreAct(preAct)
 
-	// Check if activation supports batch processing (e.g., Softmax, LogSoftmax)
 	if batchAct, ok := d.act.(activations.BatchActivation); ok {
-		// Apply batch activation (copies output, then modifies it in place)
 		copy(output, preAct)
 		batchAct.ActivateBatch(output)
-
-		// Save output for backward pass (needed for batch activation derivatives)
 		if cap(d.savedOutput) < outSize {
 			d.savedOutput = make([]float64, outSize)
 		}
 		copy(d.savedOutput[:outSize], output[:outSize])
 	} else {
-		// Standard activation: apply for each output neuron
 		for o := 0; o < outSize; o++ {
 			output[o] = d.act.Activate(preAct[o])
 		}
@@ -165,8 +158,6 @@ func (d *Dense) Forward(x []float64) []float64 {
 	return output[:outSize]
 }
 
-// Backward performs backpropagation through the dense layer.
-// Computes gradients for weights, biases, and input.
 func (d *Dense) Backward(grad []float64) []float64 {
 	outSize := d.outSize
 	inSize := d.inSize
@@ -177,22 +168,15 @@ func (d *Dense) Backward(grad []float64) []float64 {
 	gradB := d.gradBBuf
 	gradIn := d.gradInBuf
 
-	// Step 1: Compute dz = dL/dz = dL/d(output) * activation'(z)
-	// Check if activation is a batch activation (Softmax or LogSoftmax)
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
-		// For batch activations, use the saved output to compute derivatives
-		// The output was saved during Forward pass in savedOutput
 		output := d.savedOutput[:outSize]
-
 		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
 			for k := 0; k < outSize; k++ {
 				sum := 0.0
 				outK := output[k]
 				for i := 0; i < outSize; i++ {
 					delta := 0.0
-					if i == k {
-						delta = 1.0
-					}
+					if i == k { delta = 1.0 }
 					sum += grad[i] * output[i] * (delta - outK)
 				}
 				dz[k] = sum
@@ -204,9 +188,7 @@ func (d *Dense) Backward(grad []float64) []float64 {
 				softmaxK := math.Exp(output[k])
 				for i := 0; i < outSize; i++ {
 					delta := 0.0
-					if i == k {
-						delta = 1.0
-					}
+					if i == k { delta = 1.0 }
 					sum += grad[i] * (delta - softmaxK)
 				}
 				dz[k] = sum
@@ -214,7 +196,6 @@ func (d *Dense) Backward(grad []float64) []float64 {
 			}
 		}
 	} else {
-		// Standard activation: compute derivative for each output neuron
 		for o := 0; o < outSize; o++ {
 			deriv := d.act.Derivative(d.preActBuf[o])
 			dz[o] = grad[o] * deriv
@@ -222,7 +203,6 @@ func (d *Dense) Backward(grad []float64) []float64 {
 		}
 	}
 
-	// Step 2: Compute weight gradients: dL/dW[o, i] = dz[o] * input[i]
 	for o := 0; o < outSize; o++ {
 		dzo := dz[o]
 		wBase := o * inSize
@@ -231,28 +211,26 @@ func (d *Dense) Backward(grad []float64) []float64 {
 		}
 	}
 
-	// Step 4: Compute input gradients: dL/dx[i] = sum_o(dz[o] * W[o, i])
-	// Optimized version using chunked access for better cache utilization
-	const chunkSize = 8
-	for chunk := 0; chunk < inSize; chunk += chunkSize {
-		limit := chunk + chunkSize
-		if limit > inSize {
-			limit = inSize
-		}
-		for i := chunk; i < limit; i++ {
-			sum := 0.0
-			for o := 0; o < outSize; o++ {
-				sum += dz[o] * weights[o*inSize+i]
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+		metal.MatMul(dz, weights, gradIn, 1, inSize, outSize)
+	} else {
+		const chunkSize = 8
+		for chunk := 0; chunk < inSize; chunk += chunkSize {
+			limit := chunk + chunkSize
+			if limit > inSize { limit = inSize }
+			for i := chunk; i < limit; i++ {
+				sum := 0.0
+				for o := 0; o < outSize; o++ {
+					sum += dz[o] * weights[o*inSize+i]
+				}
+				gradIn[i] = sum
 			}
-			gradIn[i] = sum
 		}
 	}
 
 	return gradIn[:inSize]
 }
 
-// Params returns all dense layer parameters flattened.
-// This creates a copy of the parameters.
 func (d *Dense) Params() []float64 {
 	total := len(d.weights) + len(d.biases)
 	params := make([]float64, total)
@@ -261,14 +239,11 @@ func (d *Dense) Params() []float64 {
 	return params
 }
 
-// SetParams updates weights and biases from a flattened slice (in-place).
 func (d *Dense) SetParams(params []float64) {
 	copy(d.weights, params[:len(d.weights)])
 	copy(d.biases, params[len(d.weights):])
 }
 
-// Gradients returns all dense layer gradients flattened.
-// This creates a copy of the gradients.
 func (d *Dense) Gradients() []float64 {
 	total := len(d.gradWBuf) + len(d.gradBBuf)
 	gradients := make([]float64, total)
@@ -277,148 +252,84 @@ func (d *Dense) Gradients() []float64 {
 	return gradients
 }
 
-// SetGradients sets gradients from a flattened slice (in-place).
-// This is used by the optimizer to set averaged gradients.
 func (d *Dense) SetGradients(gradients []float64) {
 	copy(d.gradWBuf, gradients[:len(d.gradWBuf)])
 	copy(d.gradBBuf, gradients[len(d.gradWBuf):])
 }
 
-// GetWeights returns the weights slice directly (no copy).
-func (d *Dense) GetWeights() []float64 {
-	return d.weights
+func (d *Dense) SetDevice(device Device) {
+	d.device = device
 }
 
-// GetBiases returns the biases slice directly (no copy).
-func (d *Dense) GetBiases() []float64 {
-	return d.biases
-}
-
-// GetGradWeights returns the gradient weights slice directly (no copy).
-func (d *Dense) GetGradWeights() []float64 {
-	return d.gradWBuf
-}
-
-// GetGradBiases returns the gradient biases slice directly (no copy).
-func (d *Dense) GetGradBiases() []float64 {
-	return d.gradBBuf
-}
-
-// SetWeight sets a single weight at (row, col).
-func (d *Dense) SetWeight(row, col int, val float64) {
-	d.weights[row*d.inSize+col] = val
-}
-
-// SetBias sets a single bias.
-func (d *Dense) SetBias(idx int, val float64) {
-	d.biases[idx] = val
-}
-
-// GetWeight gets a single weight at (row, col).
-func (d *Dense) GetWeight(row, col int) float64 {
-	return d.weights[row*d.inSize+col]
-}
-
-// GetBias gets a single bias.
-func (d *Dense) GetBias(idx int) float64 {
-	return d.biases[idx]
-}
-
-// InSize returns the input size of the layer.
-func (d *Dense) InSize() int {
-	return d.inSize
-}
-
-// OutSize returns the output size of the layer.
-func (d *Dense) OutSize() int {
-	return d.outSize
-}
-
-// Activation returns the activation function used by this layer.
-func (d *Dense) Activation() activations.Activation {
-	return d.act
-}
-
-// Reset clears the dense layer's internal state (no-op for Dense).
-func (d *Dense) Reset() {
-	// Dense layer has no internal state to reset
-	d.savedInputs = d.savedInputs[:0]
-	d.savedPreActs = d.savedPreActs[:0]
-	d.savedOutput = d.savedOutput[:0]
-}
-
-// GetSavedInputs returns the saved inputs buffer.
-func (d *Dense) GetSavedInputs() [][]float64 {
-	return d.savedInputs
-}
-
-// GetSavedPreActs returns the saved pre-activations buffer.
-func (d *Dense) GetSavedPreActs() [][]float64 {
-	return d.savedPreActs
-}
-
-// ClearSavedData clears the saved inputs and pre-activations.
-func (d *Dense) ClearSavedData() {
-	d.savedInputs = d.savedInputs[:0]
-	d.savedPreActs = d.savedPreActs[:0]
-}
-
-// ClearGradients zeroes out the accumulated gradients.
-func (d *Dense) ClearGradients() {
-	for i := range d.gradWBuf {
-		d.gradWBuf[i] = 0
-	}
-	for i := range d.gradBBuf {
-		d.gradBBuf[i] = 0
-	}
-}
-
-// Clone creates a deep copy of the dense layer.
-func (d *Dense) Clone() Layer {
-	newD := NewDense(d.inSize, d.outSize, d.act)
-	copy(newD.weights, d.weights)
-	copy(newD.biases, d.biases)
-	return newD
-}
-
-// GetGradWBuf returns the gradient weights buffer.
-func (d *Dense) GetGradWBuf() []float64 {
-	return d.gradWBuf
-}
-
-// GetGradBBuf returns the gradient biases buffer.
-func (d *Dense) GetGradBBuf() []float64 {
-	return d.gradBBuf
-}
+func (d *Dense) InSize() int { return d.inSize }
+func (d *Dense) OutSize() int { return d.outSize }
 
 // GetActivation returns the activation function.
 func (d *Dense) GetActivation() activations.Activation {
 	return d.act
 }
 
-// saveInput adds the input to the saved inputs buffer for later gradient accumulation.
-// This is used for triplet loss training where multiple forward passes are done
-// before backward passes.
+// GetWeights returns the weight matrix.
+func (d *Dense) GetWeights() []float64 {
+	return d.weights
+}
+
+// SetWeight sets a specific weight.
+func (d *Dense) SetWeight(out, in int, val float64) {
+	d.weights[out*d.inSize+in] = val
+}
+
+// GetWeight gets a specific weight.
+func (d *Dense) GetWeight(out, in int) float64 {
+	return d.weights[out*d.inSize+in]
+}
+
+// GetBiases returns the biases.
+func (d *Dense) GetBiases() []float64 {
+	return d.biases
+}
+
+// SetBias sets a specific bias.
+func (d *Dense) SetBias(out int, val float64) {
+	d.biases[out] = val
+}
+
+// GetBias gets a specific bias.
+func (d *Dense) GetBias(out int) float64 {
+	return d.biases[out]
+}
+
+func (d *Dense) Reset() {
+	d.savedInputs = d.savedInputs[:0]
+	d.savedPreActs = d.savedPreActs[:0]
+	d.savedOutput = d.savedOutput[:0]
+}
+
+func (d *Dense) ClearGradients() {
+	for i := range d.gradWBuf { d.gradWBuf[i] = 0 }
+	for i := range d.gradBBuf { d.gradBBuf[i] = 0 }
+}
+
+func (d *Dense) Clone() Layer {
+	newD := NewDense(d.inSize, d.outSize, d.act)
+	copy(newD.weights, d.weights)
+	copy(newD.biases, d.biases)
+	newD.device = d.device
+	return newD
+}
+
 func (d *Dense) saveInput(x []float64) {
-	// Create a copy of the input
 	saved := make([]float64, len(x))
 	copy(saved, x)
 	d.savedInputs = append(d.savedInputs, saved)
 }
 
-// savePreAct adds the pre-activations to the saved pre-acts buffer.
 func (d *Dense) savePreAct(preAct []float64) {
-	// Create a copy of the pre-activations
 	saved := make([]float64, len(preAct))
 	copy(saved, preAct)
 	d.savedPreActs = append(d.savedPreActs, saved)
 }
 
-// AccumulateBackward performs backpropagation and accumulates gradients.
-// This is used for triplet loss training where gradients from multiple
-// forward passes need to be accumulated.
-// Each forward pass saves its input and pre-activation, and AccumulateBackward
-// uses the correct pre-activation for each saved input.
 func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 	outSize := d.outSize
 	inSize := d.inSize
@@ -429,17 +340,12 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 	gradIn := d.gradInBuf
 
 	numSaved := len(d.savedInputs)
-	if numSaved == 0 {
-		return nil
-	}
+	if numSaved == 0 { return nil }
 
-	// Process the most recent saved input (stack-like)
 	s := numSaved - 1
 	savedInput := d.savedInputs[s]
 	savedPreAct := d.savedPreActs[s]
 
-	// Step 1: Compute dz = dL/dz = dL/d(output) * activation'(z)
-	// Check if activation is a batch activation (Softmax or LogSoftmax)
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
 		output := make([]float64, outSize)
 		copy(output, savedPreAct)
@@ -451,9 +357,7 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 				outK := output[k]
 				for i := 0; i < outSize; i++ {
 					delta := 0.0
-					if i == k {
-						delta = 1.0
-					}
+					if i == k { delta = 1.0 }
 					sum += grad[i] * output[i] * (delta - outK)
 				}
 				dz[k] = sum
@@ -464,9 +368,7 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 				softmaxK := math.Exp(output[k])
 				for i := 0; i < outSize; i++ {
 					delta := 0.0
-					if i == k {
-						delta = 1.0
-					}
+					if i == k { delta = 1.0 }
 					sum += grad[i] * (delta - softmaxK)
 				}
 				dz[k] = sum
@@ -479,7 +381,6 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 		}
 	}
 
-	// Accumulate gradients
 	for o := 0; o < outSize; o++ {
 		dzo := dz[o]
 		gradB[o] += dzo
@@ -489,7 +390,6 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 		}
 	}
 
-	// Compute input gradients
 	for i := 0; i < inSize; i++ {
 		sum := 0.0
 		for o := 0; o < outSize; o++ {
@@ -498,7 +398,6 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 		gradIn[i] = sum
 	}
 
-	// Remove processed input and pre-activation
 	d.savedInputs = d.savedInputs[:s]
 	d.savedPreActs = d.savedPreActs[:s]
 

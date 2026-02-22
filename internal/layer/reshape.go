@@ -16,6 +16,8 @@ type Flatten struct {
 
 	// Reusable buffers
 	outputBuf []float64
+
+	device Device
 }
 
 // NewFlatten creates a new flatten layer.
@@ -28,7 +30,13 @@ func NewFlatten() *Flatten {
 		outputBuf:  make([]float64, 0),
 		inputShape: make([]int, 0),
 		outSize:    0,
+		device:     &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (f *Flatten) SetDevice(device Device) {
+	f.device = device
 }
 
 // SetDimensions sets the start and end dimensions for flattening.
@@ -120,6 +128,7 @@ func (f *Flatten) Clone() Layer {
 	newF.startDim = f.startDim
 	newF.endDim = f.endDim
 	newF.outSize = f.outSize
+	newF.device = f.device
 	return newF
 }
 

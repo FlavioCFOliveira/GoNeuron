@@ -27,6 +27,8 @@ type RBF struct {
 	gradCBuf     []float64 // [numCenters * inSize] - Optional: gradients for centers
 	gradInBuf    []float64 // [inSize]
 	dzBuf        []float64 // [outSize]
+
+	device Device
 }
 
 // NewRBF creates a new RBF layer.
@@ -68,7 +70,13 @@ func NewRBF(inSize, numCenters, outSize int, gamma float64) *RBF {
 		gradCBuf:   make([]float64, numCenters*inSize),
 		gradInBuf:  make([]float64, inSize),
 		dzBuf:      make([]float64, outSize),
+		device:     &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (r *RBF) SetDevice(device Device) {
+	r.device = device
 }
 
 // Forward performs a forward pass.
@@ -205,6 +213,7 @@ func (r *RBF) Clone() Layer {
 	copy(newR.weights, r.weights)
 	copy(newR.biases, r.biases)
 	copy(newR.centers, r.centers)
+	newR.device = r.device
 	return newR
 }
 

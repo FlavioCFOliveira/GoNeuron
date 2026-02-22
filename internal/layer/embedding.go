@@ -25,6 +25,8 @@ type Embedding struct {
 
 	// Saved indices for backward pass
 	savedIndices []int
+
+	device Device
 }
 
 // NewEmbedding creates a new embedding layer.
@@ -47,7 +49,13 @@ func NewEmbedding(num_embeddings, embedding_dim int) *Embedding {
 		outputBuf:      make([]float64, embedding_dim),
 		gradWeights:    make([]float64, num_embeddings*embedding_dim),
 		savedIndices:   make([]int, 0),
+		device:         &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (e *Embedding) SetDevice(device Device) {
+	e.device = device
 }
 
 // Forward performs a forward pass through the embedding layer.
@@ -178,6 +186,7 @@ func (e *Embedding) Clone() Layer {
 	copy(newE.weights, e.weights)
 	newE.padding_idx = e.padding_idx
 	newE.max_norm = e.max_norm
+	newE.device = e.device
 	return newE
 }
 

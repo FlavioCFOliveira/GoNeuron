@@ -16,6 +16,7 @@ type Bidirectional struct {
 
 	// For sequences
 	inputHistory    [][]float64
+	forwardHistory  [][]float64
 	backwardHistory [][]float64
 	timeStep        int
 }
@@ -29,10 +30,11 @@ func NewBidirectional(l Layer) *Bidirectional {
 	outSize := l.OutSize()
 
 	return &Bidirectional{
-		forward:        forward,
-		backward:       backward,
-		outputBuf:      make([]float64, outSize*2),
+		forward:         forward,
+		backward:        backward,
+		outputBuf:       make([]float64, outSize*2),
 		inputHistory:    make([][]float64, 0),
+		forwardHistory:  make([][]float64, 0),
 		backwardHistory: make([][]float64, 0),
 		timeStep:        0,
 	}
@@ -48,6 +50,9 @@ func (b *Bidirectional) Forward(x []float64) []float64 {
 
 	// Forward pass for forward layer
 	fOut := b.forward.Forward(x)
+	fOutCopy := make([]float64, len(fOut))
+	copy(fOutCopy, fOut)
+	b.forwardHistory = append(b.forwardHistory, fOutCopy)
 
 	// Combine (Forward part + Zeros for backward part for now)
 	// The actual backward layer pass will happen during a specialized "SequenceForward"
@@ -72,7 +77,7 @@ func (b *Bidirectional) Backward(grad []float64) []float64 {
 
 	// If this is the first backward call for this sequence, compute backward layer forward pass
 	if b.timeStep > 0 && len(b.backwardHistory) == 0 {
-		b.computeBackwardLayerForward()
+		b.ComputeBackwardHiddenStates()
 	}
 
 	ts := b.timeStep - 1
@@ -104,20 +109,6 @@ func (b *Bidirectional) Backward(grad []float64) []float64 {
 	}
 
 	return combinedInGrad
-}
-
-func (b *Bidirectional) computeBackwardLayerForward() {
-	b.backward.Reset()
-	seqLen := len(b.inputHistory)
-	b.backwardHistory = make([][]float64, seqLen)
-
-	// Process input history in reverse
-	for i := seqLen - 1; i >= 0; i-- {
-		out := b.backward.Forward(b.inputHistory[i])
-		outCopy := make([]float64, len(out))
-		copy(outCopy, out)
-		b.backwardHistory[i] = outCopy
-	}
 }
 
 // Params returns concatenated parameters.
@@ -154,13 +145,55 @@ func (b *Bidirectional) SetGradients(grads []float64) {
 	b.backward.SetGradients(grads[fLen:])
 }
 
+// SetDevice sets the computation device for both layers.
+func (b *Bidirectional) SetDevice(device Device) {
+	b.forward.SetDevice(device)
+	b.backward.SetDevice(device)
+}
+
 // Reset resets both layers and histories.
 func (b *Bidirectional) Reset() {
 	b.forward.Reset()
 	b.backward.Reset()
 	b.inputHistory = b.inputHistory[:0]
+	b.forwardHistory = b.forwardHistory[:0]
 	b.backwardHistory = b.backwardHistory[:0]
 	b.timeStep = 0
+}
+
+// ComputeBackwardHiddenStates processes the accumulated history in reverse.
+func (b *Bidirectional) ComputeBackwardHiddenStates() {
+	b.backward.Reset()
+	seqLen := len(b.inputHistory)
+	if cap(b.backwardHistory) < seqLen {
+		b.backwardHistory = make([][]float64, seqLen)
+	} else {
+		b.backwardHistory = b.backwardHistory[:seqLen]
+	}
+
+	// Process input history in reverse
+	for i := seqLen - 1; i >= 0; i-- {
+		out := b.backward.Forward(b.inputHistory[i])
+		outCopy := make([]float64, len(out))
+		copy(outCopy, out)
+		b.backwardHistory[i] = outCopy
+	}
+}
+
+// GetForwardOutputAt returns the forward layer output at the given time step.
+func (b *Bidirectional) GetForwardOutputAt(t int) []float64 {
+	if t < 0 || t >= len(b.forwardHistory) {
+		return nil
+	}
+	return b.forwardHistory[t]
+}
+
+// GetBackwardOutputAt returns the backward layer output at the given time step.
+func (b *Bidirectional) GetBackwardOutputAt(t int) []float64 {
+	if t < 0 || t >= len(b.backwardHistory) {
+		return nil
+	}
+	return b.backwardHistory[t]
 }
 
 // ClearGradients clears gradients for both layers.

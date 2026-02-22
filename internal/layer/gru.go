@@ -62,6 +62,8 @@ type GRU struct {
 
 	// Current time step
 	timeStep int
+
+	device Device
 }
 
 // NewGRU creates a new GRU layer with pre-allocated buffers.
@@ -134,7 +136,13 @@ func NewGRU(inSize, outSize int) *GRU {
 
 		storedHiddenStates: make([][]float64, 0),
 		timeStep:           0,
+		device:             &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (g *GRU) SetDevice(device Device) {
+	g.device = device
 }
 
 // Reset resets the GRU state for a new sequence.
@@ -471,6 +479,7 @@ func (g *GRU) Clone() Layer {
 	copy(newG.inputWeights, g.inputWeights)
 	copy(newG.recurrentWeights, g.recurrentWeights)
 	copy(newG.biases, g.biases)
+	newG.device = g.device
 	return newG
 }
 

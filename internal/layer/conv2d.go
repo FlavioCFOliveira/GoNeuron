@@ -43,6 +43,8 @@ type Conv2D struct {
 
 	// Saved input for backward pass
 	savedInput []float64
+
+	device Device
 }
 
 // NewConv2D creates a new 2D convolutional layer.
@@ -93,7 +95,13 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 		biases:      biases,
 		gradWeights: make([]float64, len(weights)),
 		gradBiases:  make([]float64, len(biases)),
+		device:      &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device for the convolutional layer.
+func (c *Conv2D) SetDevice(device Device) {
+	c.device = device
 }
 
 // computeOutputSize calculates the output spatial dimensions
@@ -378,6 +386,7 @@ func (c *Conv2D) Clone() Layer {
 	copy(newC.biases, c.biases)
 	newC.setInputHeight = c.setInputHeight
 	newC.setInputWidth = c.setInputWidth
+	newC.device = c.device
 	return newC
 }
 

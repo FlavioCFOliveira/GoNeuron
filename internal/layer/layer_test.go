@@ -153,7 +153,7 @@ func TestDenseInSizeAndOutSize(t *testing.T) {
 func TestDenseActivation(t *testing.T) {
 	d := NewDense(2, 2, activations.ReLU{})
 
-	if _, ok := d.Activation().(activations.ReLU); !ok {
+	if _, ok := d.GetActivation().(activations.ReLU); !ok {
 		t.Errorf("Activation() is not ReLU")
 	}
 }

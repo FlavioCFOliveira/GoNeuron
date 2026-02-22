@@ -83,9 +83,8 @@ func main() {
 	xTrain, xTest := x[:splitIdx], x[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
-	forward := layer.NewLSTM(1, lstmUnits)
-	backward := layer.NewLSTM(1, lstmUnits)
-	bilstm := layer.NewBidirectional(forward, backward)
+	lstm := layer.NewLSTM(1, lstmUnits)
+	bilstm := layer.NewBidirectional(lstm)
 
 	layers := []layer.Layer{
 		layer.NewSequenceUnroller(bilstm, lookback, false),

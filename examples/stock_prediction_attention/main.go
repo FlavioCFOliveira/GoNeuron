@@ -85,7 +85,7 @@ func main() {
 
 	layers := []layer.Layer{
 		layer.NewSequenceUnroller(layer.NewLSTM(1, lstmUnits), lookback, true), // Returns [lookback * lstmUnits]
-		layer.NewSequenceUnroller(layer.NewAttention(lstmUnits, lstmUnits), lookback, false), // Returns [lstmUnits]
+		layer.NewGlobalAttention(lstmUnits),
 		layer.NewDense(lstmUnits, 1, activations.Linear{}),
 	}
 

@@ -26,6 +26,8 @@ type AvgPool2D struct {
 
 	// Saved input for backward pass
 	savedInput []float64
+
+	device Device
 }
 
 // NewAvgPool2D creates a new 2D average pooling layer.
@@ -34,14 +36,20 @@ type AvgPool2D struct {
 // padding: zero padding size
 func NewAvgPool2D(kernelSize, stride, padding int) *AvgPool2D {
 	return &AvgPool2D{
-		kernelSize:   kernelSize,
-		stride:       stride,
-		padding:      padding,
-		outputBuf:    make([]float64, 0),
-		gradInBuf:    make([]float64, 0),
-		countBuf:     make([]int, 0),
-		savedInput:   make([]float64, 0),
+		kernelSize: kernelSize,
+		stride:     stride,
+		padding:    padding,
+		outputBuf:  make([]float64, 0),
+		gradInBuf:  make([]float64, 0),
+		countBuf:   make([]int, 0),
+		savedInput: make([]float64, 0),
+		device:     &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (a *AvgPool2D) SetDevice(device Device) {
+	a.device = device
 }
 
 // computeOutputSize calculates the output spatial dimensions
@@ -228,6 +236,7 @@ func (a *AvgPool2D) Clone() Layer {
 	newA.inputWidth = a.inputWidth
 	newA.outputHeight = a.outputHeight
 	newA.outputWidth = a.outputWidth
+	newA.device = a.device
 	return newA
 }
 

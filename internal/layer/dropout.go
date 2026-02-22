@@ -29,6 +29,8 @@ type Dropout struct {
 
 	// RNG for dropout masks
 	rng *RNG
+
+	device Device
 }
 
 // NewDropout creates a new dropout layer.
@@ -46,7 +48,13 @@ func NewDropout(p float64, inSize int) *Dropout {
 		gradInBuf: make([]float64, inSize),
 		gradParams: make([]float64, 0), // No parameters
 		rng:       NewRNG(42),
+		device:    &CPUDevice{},
 	}
+}
+
+// SetDevice sets the computation device.
+func (d *Dropout) SetDevice(device Device) {
+	d.device = device
 }
 
 // SetTraining sets whether the layer should be in training or inference mode.
@@ -163,6 +171,7 @@ func (d *Dropout) ClearGradients() {
 func (d *Dropout) Clone() Layer {
 	newD := NewDropout(d.p, d.inSize)
 	newD.training = d.training
+	newD.device = d.device
 	return newD
 }
 

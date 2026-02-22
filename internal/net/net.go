@@ -50,6 +50,13 @@ func New(layers []layer.Layer, loss loss.Loss, optimizer opt.Optimizer) *Network
 	}
 }
 
+// SetDevice sets the computation device for the entire network.
+func (n *Network) SetDevice(device layer.Device) {
+	for _, l := range n.layers {
+		l.SetDevice(device)
+	}
+}
+
 // Clone creates a deep copy of the network.
 func (n *Network) Clone() *Network {
 	newLayers := make([]layer.Layer, len(n.layers))
@@ -757,14 +764,14 @@ func ExtractLayerConfig(l layer.Layer) LayerConfig {
 		cfg.Type = "Dense"
 		cfg.InSize = v.InSize()
 		cfg.OutSize = v.OutSize()
-		cfg.Activation = getActivationType(v.Activation())
-		if prelu, ok := v.Activation().(*activations.PReLU); ok {
+		cfg.Activation = getActivationType(v.GetActivation())
+		if prelu, ok := v.GetActivation().(*activations.PReLU); ok {
 			cfg.Alpha = prelu.Alpha
-		} else if leaky, ok := v.Activation().(*activations.LeakyReLU); ok {
+		} else if leaky, ok := v.GetActivation().(*activations.LeakyReLU); ok {
 			cfg.Alpha = leaky.Alpha
-		} else if elu, ok := v.Activation().(activations.ELU); ok {
+		} else if elu, ok := v.GetActivation().(activations.ELU); ok {
 			cfg.Alpha = elu.Alpha
-		} else if eluPtr, ok := v.Activation().(*activations.ELU); ok {
+		} else if eluPtr, ok := v.GetActivation().(*activations.ELU); ok {
 			cfg.Alpha = eluPtr.Alpha
 		}
 	case *layer.Conv2D:

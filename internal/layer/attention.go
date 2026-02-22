@@ -175,6 +175,9 @@ func (g *GlobalAttention) Clone() Layer {
 	return newG
 }
 
+// SetDevice sets the computation device (no-op for GlobalAttention).
+func (g *GlobalAttention) SetDevice(Device) {}
+
 // InSize returns input size.
 func (g *GlobalAttention) InSize() int {
 	return g.inSize

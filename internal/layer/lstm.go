@@ -68,12 +68,18 @@ type LSTM struct {
 
 	// Current time step
 	timeStep int
+
+	// Device for computation
+	device Device
 }
 
 // NewLSTM creates a new LSTM layer with pre-allocated buffers.
-// inSize: dimension of input vectors
-// outSize: dimension of hidden state/output
 func NewLSTM(inSize, outSize int) *LSTM {
+	return NewLSTMWithDevice(inSize, outSize, &CPUDevice{})
+}
+
+// NewLSTMWithDevice creates a new LSTM layer with a specific device.
+func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 	// Xavier/Glorot initialization for LSTM with 4 gates
 	// Input weights connect inSize inputs to 4*outSize gate outputs
 	inputScale := math.Sqrt(2.0 / float64(inSize + 4*outSize))
@@ -107,6 +113,7 @@ func NewLSTM(inSize, outSize int) *LSTM {
 	return &LSTM{
 		inSize:  inSize,
 		outSize: outSize,
+		device:  device,
 
 		inputWeights:   inputWeights,
 		recurrentWeights: recurrentWeights,
@@ -175,31 +182,48 @@ func (l *LSTM) Forward(x []float64) []float64 {
 	// Initialize with biases
 	copy(l.preActBuf, l.biases)
 
-	// Add input contribution: W_x * x
-	// For each of 4 gates
-	for g := 0; g < 4; g++ {
-		baseG := g * l.outSize
-		baseW := baseG * l.inSize
-		for i := 0; i < l.outSize; i++ {
-			sum := 0.0
-			for j := 0; j < l.inSize; j++ {
-				sum += l.inputWeights[baseW+i*l.inSize+j] * x[j]
-			}
-			l.preActBuf[baseG+i] += sum
-		}
-	}
+	if metal, ok := l.device.(*MetalDevice); ok && metal.IsAvailable() {
+		// GPU acceleration for LSTM gates
+		// Wx: [outSize*4, inSize] * [inSize, 1] -> [outSize*4, 1]
+		metal.MatMul(l.inputWeights, x, l.preActBuf, l.outSize*4, 1, l.inSize)
 
-	// Add recurrent contribution: W_h * h_prev
-	hPrev := l.hiddenBuf
-	for g := 0; g < 4; g++ {
-		baseG := g * l.outSize
-		baseW := baseG * l.outSize
-		for i := 0; i < l.outSize; i++ {
-			sum := 0.0
-			for j := 0; j < l.outSize; j++ {
-				sum += l.recurrentWeights[baseW+i*l.outSize+j] * hPrev[j]
+		// Wh: [outSize*4, outSize] * [outSize, 1] -> [outSize*4, 1]
+		// Use a temporary buffer to accumulate Wh * hPrev
+		whBuf := make([]float64, l.outSize*4)
+		metal.MatMul(l.recurrentWeights, l.hiddenBuf, whBuf, l.outSize*4, 1, l.outSize)
+
+		// Add Wh and biases
+		for i := 0; i < l.outSize*4; i++ {
+			l.preActBuf[i] += whBuf[i] + l.biases[i]
+		}
+	} else {
+		// CPU implementation
+		// Add input contribution: W_x * x
+		// For each of 4 gates
+		for g := 0; g < 4; g++ {
+			baseG := g * l.outSize
+			baseW := baseG * l.inSize
+			for i := 0; i < l.outSize; i++ {
+				sum := 0.0
+				for j := 0; j < l.inSize; j++ {
+					sum += l.inputWeights[baseW+i*l.inSize+j] * x[j]
+				}
+				l.preActBuf[baseG+i] += sum
 			}
-			l.preActBuf[baseG+i] += sum
+		}
+
+		// Add recurrent contribution: W_h * h_prev
+		hPrev := l.hiddenBuf
+		for g := 0; g < 4; g++ {
+			baseG := g * l.outSize
+			baseW := baseG * l.outSize
+			for i := 0; i < l.outSize; i++ {
+				sum := 0.0
+				for j := 0; j < l.outSize; j++ {
+					sum += l.recurrentWeights[baseW+i*l.outSize+j] * hPrev[j]
+				}
+				l.preActBuf[baseG+i] += sum
+			}
 		}
 	}
 
@@ -513,6 +537,11 @@ func (l *LSTM) SetGradients(gradients []float64) {
 	copy(l.gradInputWeights, gradients[:len(l.gradInputWeights)])
 	copy(l.gradRecurrentWeights, gradients[len(l.gradInputWeights):len(l.gradInputWeights)+len(l.gradRecurrentWeights)])
 	copy(l.gradBiases, gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):])
+}
+
+// SetDevice sets the computation device for the LSTM layer.
+func (l *LSTM) SetDevice(device Device) {
+	l.device = device
 }
 
 // InSize returns the input size of the LSTM.

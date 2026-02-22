@@ -26,6 +26,8 @@ type LayerNorm struct {
 	savedInput     []float64 // Input saved for backward pass
 	inputMean      float64   // Stored mean for backward
 	inputStd       float64   // Stored std for backward
+
+	device Device
 }
 
 // NewLayerNorm creates a new layer normalization layer.
@@ -40,6 +42,7 @@ func NewLayerNorm(normalizedShape int, eps float64, elementwiseAffine bool) *Lay
 		outputBuf:         make([]float64, normalizedShape),
 		gradInBuf:         make([]float64, normalizedShape),
 		gradBuf:           make([]float64, normalizedShape),
+		device:            &CPUDevice{},
 	}
 
 	if elementwiseAffine {
@@ -56,6 +59,11 @@ func NewLayerNorm(normalizedShape int, eps float64, elementwiseAffine bool) *Lay
 	}
 
 	return l
+}
+
+// SetDevice sets the computation device.
+func (l *LayerNorm) SetDevice(device Device) {
+	l.device = device
 }
 
 // Forward performs a forward pass through the layer normalization layer.
@@ -262,6 +270,7 @@ func (l *LayerNorm) Clone() Layer {
 		copy(newL.gamma, l.gamma)
 		copy(newL.beta, l.beta)
 	}
+	newL.device = l.device
 	return newL
 }
 

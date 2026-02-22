@@ -8,8 +8,7 @@ func TestBidirectionalForward(t *testing.T) {
 	inSize := 3
 	outSize := 5
 	f := NewLSTM(inSize, outSize)
-	b := NewLSTM(inSize, outSize)
-	bi := NewBidirectional(f, b)
+	bi := NewBidirectional(f)
 
 	input := []float64{1.0, 0.5, -0.5}
 	output := bi.Forward(input)
@@ -23,8 +22,7 @@ func TestBidirectionalProcessSequence(t *testing.T) {
 	inSize := 3
 	outSize := 5
 	f := NewLSTM(inSize, outSize)
-	b := NewLSTM(inSize, outSize)
-	bi := NewBidirectional(f, b)
+	bi := NewBidirectional(f)
 
 	seq := [][]float64{
 		{1.0, 0.5, -0.5},
@@ -47,8 +45,7 @@ func TestBidirectionalProcessSequence(t *testing.T) {
 
 func TestAttentionForward(t *testing.T) {
 	inSize := 8
-	outSize := 8
-	att := NewAttention(inSize, outSize)
+	att := NewGlobalAttention(inSize)
 
 	input := make([]float64, inSize)
 	for i := range input {
@@ -56,7 +53,7 @@ func TestAttentionForward(t *testing.T) {
 	}
 
 	output := att.Forward(input)
-	if len(output) != outSize {
-		t.Errorf("Expected output length %d, got %d", outSize, len(output))
+	if len(output) != inSize {
+		t.Errorf("Expected output length %d, got %d", inSize, len(output))
 	}
 }
