@@ -125,10 +125,7 @@ func (d *Dense) Forward(x []float32) []float32 {
 	output := d.outputBuf
 
 	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-		metal.MatMul(d.weights, d.inputBuf, d.preActBuf, outSize, 1, inSize)
-		for o := 0; o < outSize; o++ {
-			d.preActBuf[o] += biases[o]
-		}
+		metal.MatMulFused(d.weights, d.inputBuf, d.biases, d.preActBuf, outSize, 1, inSize, ActivationNone)
 	} else {
 		for o := 0; o < outSize; o++ {
 			sum := biases[o]

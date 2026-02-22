@@ -69,3 +69,11 @@ loss := loss.NLLLoss{}
 2. **Verify Forward is idempotent** - Same input should give same output after Reset()
 3. **Monitor gradients** - Use `Gradients()` to check for zero or NaN gradients
 4. **Test with small networks** - Start with 1-2 layers to verify flow works
+
+## Metal/MPS Development
+- **MPS Typos/SDK Changes**: Use `MPSCNNNeuronTypeTanH` (capital H) instead of `MPSCNNNeuronTypeTanh`.
+- **MPS Descriptors**: Prefer `MPSNNNeuronDescriptor` over `MPSCNNNeuronDescriptor` for better compatibility with newer SDKs.
+- **Metal Kernel Compilation**: Always check `NSError` when compiling MSL at runtime to avoid silent failures that lead to nil Pipeline States.
+
+## Additional Insights
+- **Slice Return Values in Tests**: When a method returns a slice that is a reusable buffer (like `Forward` returning `l.outputBuf`), always copy the result in tests if you need to compare it with subsequent calls to the same method. Otherwise, the second call will overwrite the first result in place.

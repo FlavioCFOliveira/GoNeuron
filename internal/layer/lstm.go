@@ -71,6 +71,19 @@ type LSTM struct {
 
 	// Device for computation
 	device Device
+
+	// GPU persistent buffers
+	bufWeightsIn  *MetalBuffer
+	bufWeightsRec *MetalBuffer
+	bufBiases     *MetalBuffer
+	bufPreAct     *MetalBuffer
+	bufC          *MetalBuffer
+	bufH          *MetalBuffer
+	bufI          *MetalBuffer
+	bufF          *MetalBuffer
+	bufG          *MetalBuffer
+	bufO          *MetalBuffer
+	bufX          *MetalBuffer
 }
 
 // NewLSTM creates a new LSTM layer with pre-allocated buffers.
@@ -110,7 +123,7 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		}
 	}
 
-	return &LSTM{
+	l := &LSTM{
 		inSize:  inSize,
 		outSize: outSize,
 		device:  device,
@@ -155,6 +168,22 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		storedHiddenStates: make([][]float32, 0),
 		timeStep:          0,
 	}
+
+	if metal, ok := device.(*MetalDevice); ok && metal.IsAvailable() {
+		l.bufWeightsIn = metal.CreateBuffer(inputWeights)
+		l.bufWeightsRec = metal.CreateBuffer(recurrentWeights)
+		l.bufBiases = metal.CreateBuffer(biases)
+		l.bufPreAct = metal.CreateEmptyBuffer(outSize * 4)
+		l.bufC = metal.CreateEmptyBuffer(outSize)
+		l.bufH = metal.CreateEmptyBuffer(outSize)
+		l.bufI = metal.CreateEmptyBuffer(outSize)
+		l.bufF = metal.CreateEmptyBuffer(outSize)
+		l.bufG = metal.CreateEmptyBuffer(outSize)
+		l.bufO = metal.CreateEmptyBuffer(outSize)
+		l.bufX = metal.CreateEmptyBuffer(inSize)
+	}
+
+	return l
 }
 
 // Reset resets the LSTM state for a new sequence.
@@ -178,24 +207,42 @@ func (l *LSTM) Forward(x []float32) []float32 {
 	// Copy input to buffer
 	copy(l.inputBuf, x)
 
+	inputStart, forgetStart, cellStart, outputStart := 0, l.outSize, l.outSize*2, l.outSize*3
+
 	// === Compute pre-activations ===
 	// Initialize with biases
 	copy(l.preActBuf, l.biases)
 
-	if metal, ok := l.device.(*MetalDevice); ok && metal.IsAvailable() {
-		// GPU acceleration for LSTM gates
-		// Wx: [outSize*4, inSize] * [inSize, 1] -> [outSize*4, 1]
-		metal.MatMul(l.inputWeights, x, l.preActBuf, l.outSize*4, 1, l.inSize)
-
-		// Wh: [outSize*4, outSize] * [outSize, 1] -> [outSize*4, 1]
-		// Use a temporary buffer to accumulate Wh * hPrev
-		whBuf := make([]float32, l.outSize*4)
-		metal.MatMul(l.recurrentWeights, l.hiddenBuf, whBuf, l.outSize*4, 1, l.outSize)
-
-		// Add Wh and biases
-		for i := 0; i < l.outSize*4; i++ {
-			l.preActBuf[i] += whBuf[i] + l.biases[i]
+	if metal, ok := l.device.(*MetalDevice); ok && metal.IsAvailable() && l.bufWeightsIn != nil {
+		// 1. Update dynamic GPU buffers
+		l.bufX.Update(x)
+		if l.timeStep == 0 {
+			l.bufC.Update(l.cellBuf) // cellBuf is cleared in Reset()
+			l.bufH.Update(l.hiddenBuf)
 		}
+
+		// 2. Wx + b -> preAct
+		// We use bufPreAct initialized with Biases
+		l.bufPreAct.Update(l.biases)
+		metal.MatMulPersistent(l.bufWeightsIn, l.bufX, l.bufPreAct, l.outSize*4, 1, l.inSize, 1.0)
+
+		// 3. Wh + preAct -> preAct
+		metal.MatMulPersistent(l.bufWeightsRec, l.bufH, l.bufPreAct, l.outSize*4, 1, l.outSize, 1.0)
+
+		// 4. Fused LSTM Step
+		metal.LSTMStepPersistent(l.bufPreAct, l.bufC, l.bufC, l.bufH,
+			l.bufI, l.bufF, l.bufG, l.bufO, l.outSize)
+
+		// 5. Read results back for Go state management and backprop
+		l.bufC.Read(l.cellBuf)
+		l.bufH.Read(l.hiddenBuf)
+		l.bufI.Read(l.inputGateOut)
+		l.bufF.Read(l.forgetGateOut)
+		l.bufG.Read(l.cellGateOut)
+		l.bufO.Read(l.outputGateOut)
+		l.bufPreAct.Read(l.preActBuf)
+
+		goto storeState
 	} else {
 		// CPU implementation
 		// Add input contribution: W_x * x
@@ -228,7 +275,6 @@ func (l *LSTM) Forward(x []float32) []float32 {
 	}
 
 	// === Apply activations ===
-	inputStart, forgetStart, cellStart, outputStart := 0, l.outSize, l.outSize*2, l.outSize*3
 
 	// Input gate: sigmoid
 	for i := 0; i < l.outSize; i++ {
@@ -271,6 +317,7 @@ func (l *LSTM) Forward(x []float32) []float32 {
 		l.hiddenBuf[i] = l.outputGateOut[i] * float32(math.Tanh(float64(l.cellBuf[i])))
 	}
 
+storeState:
 	// === Store states for backprop ===
 	if l.timeStep >= len(l.storedCellStates) {
 		l.storedCellStates = append(l.storedCellStates, make([]float32, l.outSize))
