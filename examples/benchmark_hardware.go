@@ -27,11 +27,11 @@ func runBenchmark(device layer.Device, name string, inSize, outSize, batchSize i
 	network := net.New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.01})
 
 	// Generate random data
-	x := make([][]float64, batchSize)
-	y := make([][]float64, batchSize)
+	x := make([][]float32, batchSize)
+	y := make([][]float32, batchSize)
 	for i := 0; i < batchSize; i++ {
-		x[i] = make([]float64, inSize)
-		y[i] = []float64{0, 0, 0, 0, 0, 1, 0, 0, 0, 0}
+		x[i] = make([]float32, inSize)
+		y[i] = []float32{0, 0, 0, 0, 0, 1, 0, 0, 0, 0}
 		for j := 0; j < inSize; j++ {
 			x[i][j] = 0.5
 		}
@@ -69,8 +69,8 @@ func runLSTMBenchmark(device layer.Device, name string, inSize, outSize, seqLen 
 	}
 	network := net.New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.01})
 
-	x := make([]float64, inSize * seqLen)
-	y := []float64{0, 0, 0, 0, 0, 1, 0, 0, 0, 0}
+	x := make([]float32, inSize * seqLen)
+	y := []float32{0, 0, 0, 0, 0, 1, 0, 0, 0, 0}
 
 	// Warm-up
 	network.Train(x, y)

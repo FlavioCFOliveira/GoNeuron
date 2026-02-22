@@ -15,7 +15,7 @@ type Flatten struct {
 	outSize int
 
 	// Reusable buffers
-	outputBuf []float64
+	outputBuf []float32
 
 	device Device
 }
@@ -27,7 +27,7 @@ func NewFlatten() *Flatten {
 	return &Flatten{
 		startDim:   1,
 		endDim:     -1,
-		outputBuf:  make([]float64, 0),
+		outputBuf:  make([]float32, 0),
 		inputShape: make([]int, 0),
 		outSize:    0,
 		device:     &CPUDevice{},
@@ -51,7 +51,7 @@ func (f *Flatten) SetDimensions(startDim, endDim int) {
 // Forward performs a forward pass, flattening the input.
 // input: multi-dimensional array, typically [batch, channels, height, width]
 // Returns: 2D array [batch, flattened_features]
-func (f *Flatten) Forward(x []float64) []float64 {
+func (f *Flatten) Forward(x []float32) []float32 {
 	// Infer input shape from length
 	total := len(x)
 
@@ -61,7 +61,7 @@ func (f *Flatten) Forward(x []float64) []float64 {
 
 	flattened := total
 	if f.outSize == 0 || len(f.outputBuf) < flattened {
-		f.outputBuf = make([]float64, flattened)
+		f.outputBuf = make([]float32, flattened)
 		f.outSize = flattened
 	}
 
@@ -70,34 +70,34 @@ func (f *Flatten) Forward(x []float64) []float64 {
 }
 
 // Backward performs backpropagation, reshaping gradient to original shape.
-func (f *Flatten) Backward(grad []float64) []float64 {
+func (f *Flatten) Backward(grad []float32) []float32 {
 	// Gradient flows through unchanged - just need to return correct size
 	return grad
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
-func (f *Flatten) AccumulateBackward(grad []float64) []float64 {
+func (f *Flatten) AccumulateBackward(grad []float32) []float32 {
 	// Gradient flows through unchanged - just need to return correct size
 	return grad
 }
 
 // Params returns layer parameters (empty for Flatten).
-func (f *Flatten) Params() []float64 {
-	return make([]float64, 0)
+func (f *Flatten) Params() []float32 {
+	return make([]float32, 0)
 }
 
 // SetParams sets layer parameters (no-op for Flatten).
-func (f *Flatten) SetParams(params []float64) {
+func (f *Flatten) SetParams(params []float32) {
 	// No parameters to set
 }
 
 // Gradients returns layer gradients (empty for Flatten).
-func (f *Flatten) Gradients() []float64 {
-	return make([]float64, 0)
+func (f *Flatten) Gradients() []float32 {
+	return make([]float32, 0)
 }
 
 // SetGradients sets layer gradients (no-op for Flatten).
-func (f *Flatten) SetGradients(gradients []float64) {
+func (f *Flatten) SetGradients(gradients []float32) {
 	// No parameters to set
 }
 
@@ -141,6 +141,6 @@ func (f *Flatten) OutputShape() []int {
 }
 
 // SetOutputBuf allows setting a custom output buffer.
-func (f *Flatten) SetOutputBuf(buf []float64) {
+func (f *Flatten) SetOutputBuf(buf []float32) {
 	f.outputBuf = buf
 }

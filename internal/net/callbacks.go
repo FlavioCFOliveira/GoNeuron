@@ -12,9 +12,9 @@ type Callback interface {
 	OnTrainBegin(n *Network)
 	OnTrainEnd(n *Network)
 	OnEpochBegin(epoch int, n *Network)
-	OnEpochEnd(epoch int, loss float64, n *Network)
+	OnEpochEnd(epoch int, loss float32, n *Network)
 	OnBatchBegin(batch int, n *Network)
-	OnBatchEnd(batch int, loss float64, n *Network)
+	OnBatchEnd(batch int, loss float32, n *Network)
 }
 
 // SchedulerCallback is a callback that wraps a learning rate scheduler.
@@ -27,7 +27,7 @@ func NewSchedulerCallback(scheduler opt.Scheduler) *SchedulerCallback {
 	return &SchedulerCallback{scheduler: scheduler}
 }
 
-func (c *SchedulerCallback) OnEpochEnd(epoch int, loss float64, n *Network) {
+func (c *SchedulerCallback) OnEpochEnd(epoch int, loss float32, n *Network) {
 	c.scheduler.Step()
 	c.scheduler.StepWithLoss(loss)
 }
@@ -38,31 +38,31 @@ type BaseCallback struct{}
 func (c BaseCallback) OnTrainBegin(n *Network)                {}
 func (c BaseCallback) OnTrainEnd(n *Network)                  {}
 func (c BaseCallback) OnEpochBegin(epoch int, n *Network)     {}
-func (c BaseCallback) OnEpochEnd(epoch int, loss float64, n *Network) {}
+func (c BaseCallback) OnEpochEnd(epoch int, loss float32, n *Network) {}
 func (c BaseCallback) OnBatchBegin(batch int, n *Network)     {}
-func (c BaseCallback) OnBatchEnd(batch int, loss float64, n *Network)   {}
+func (c BaseCallback) OnBatchEnd(batch int, loss float32, n *Network)   {}
 
 // EarlyStopping stops training when a monitored metric has stopped improving.
 type EarlyStopping struct {
 	BaseCallback
 	Patience  int
-	Threshold float64
+	Threshold float32
 	Monitor   string // "loss" (default)
 
-	bestLoss     float64
+	bestLoss     float32
 	numBadEpochs int
 	Stopped      bool
 }
 
-func NewEarlyStopping(patience int, threshold float64) *EarlyStopping {
+func NewEarlyStopping(patience int, threshold float32) *EarlyStopping {
 	return &EarlyStopping{
 		Patience:  patience,
 		Threshold: threshold,
-		bestLoss:  math.MaxFloat64,
+		bestLoss:  math.MaxFloat32,
 	}
 }
 
-func (c *EarlyStopping) OnEpochEnd(epoch int, loss float64, n *Network) {
+func (c *EarlyStopping) OnEpochEnd(epoch int, loss float32, n *Network) {
 	if loss < c.bestLoss-c.Threshold {
 		c.bestLoss = loss
 		c.numBadEpochs = 0
@@ -82,17 +82,17 @@ type ModelCheckpoint struct {
 	Filename string
 	Monitor  string // "loss" (default)
 
-	bestLoss float64
+	bestLoss float32
 }
 
 func NewModelCheckpoint(filename string) *ModelCheckpoint {
 	return &ModelCheckpoint{
 		Filename: filename,
-		bestLoss: math.MaxFloat64,
+		bestLoss: math.MaxFloat32,
 	}
 }
 
-func (c *ModelCheckpoint) OnEpochEnd(epoch int, loss float64, n *Network) {
+func (c *ModelCheckpoint) OnEpochEnd(epoch int, loss float32, n *Network) {
 	if loss < c.bestLoss {
 		c.bestLoss = loss
 		err := n.Save(c.Filename)
@@ -110,7 +110,7 @@ type Logger struct {
 	Interval int
 }
 
-func (c Logger) OnEpochEnd(epoch int, loss float64, n *Network) {
+func (c Logger) OnEpochEnd(epoch int, loss float32, n *Network) {
 	if c.Interval > 0 && epoch%c.Interval == 0 {
 		fmt.Printf("Epoch %d: loss = %.6f\n", epoch, loss)
 	}

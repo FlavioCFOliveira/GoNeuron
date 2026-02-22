@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"time"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
@@ -14,20 +13,19 @@ import (
 
 func main() {
 	fmt.Println("=== Autoencoder for Synthetic Data Compression ===")
-	rand.Seed(time.Now().UnixNano())
 
 	// 1. Generate synthetic data (clusters in 10D space, mostly 2D)
 	numSamples := 1000
 	dim := 10
-	data := make([][]float64, numSamples)
+	data := make([][]float32, numSamples)
 	for i := 0; i < numSamples; i++ {
-		data[i] = make([]float64, dim)
+		data[i] = make([]float32, dim)
 		// Intrinsic 2D information
-		x := rand.Float64()
-		y := rand.Float64()
+		x := rand.Float32()
+		y := rand.Float32()
 		for j := 0; j < dim; j++ {
 			// Each dimension is a linear combination of x, y plus noise
-			data[i][j] = x*rand.Float64() + y*rand.Float64() + rand.Float64()*0.1
+			data[i][j] = x*rand.Float32() + y*rand.Float32() + rand.Float32()*0.1
 		}
 	}
 
@@ -46,12 +44,12 @@ func main() {
 	epochs := 100
 	fmt.Printf("Training for %d epochs...\n", epochs)
 	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := 0.0
+		totalLoss := float32(0.0)
 		for i := range data {
 			totalLoss += network.Train(data[i], data[i])
 		}
 		if epoch%20 == 0 {
-			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float64(numSamples))
+			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float32(numSamples))
 		}
 	}
 

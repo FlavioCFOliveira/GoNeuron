@@ -2,11 +2,6 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #include <stdbool.h>
 
-// Handle cases where MPSDataTypeFloat64 is not defined
-#ifndef MPSDataTypeFloat64
-#define MPSDataTypeFloat64 (MPSDataType)(MPSDataTypeFloatBit | 64)
-#endif
-
 typedef struct {
     id<MTLDevice> device;
     id<MTLCommandQueue> commandQueue;
@@ -32,47 +27,22 @@ void freeMetalDevice(void* ptr) {
     free(ctx);
 }
 
-void matMulMPS(void* ptr, double* A, double* B, double* C, int M, int N, int K) {
+void matMulMPS(void* ptr, float* A, float* B, float* C, int M, int N, int K) {
     if (!ptr) return;
     MetalContext* ctx = (MetalContext*)ptr;
 
     @autoreleasepool {
-        // Create buffers pointing to the same unified memory
-        id<MTLBuffer> bufferA = [ctx->device newBufferWithBytesNoCopy:A
-                                                               length:M * K * sizeof(double)
-                                                              options:MTLResourceStorageModeShared
-                                                          deallocator:nil];
+        int sizeA = M * K;
+        int sizeB = K * N;
+        int sizeC = M * N;
 
-        id<MTLBuffer> bufferB = [ctx->device newBufferWithBytesNoCopy:B
-                                                               length:K * N * sizeof(double)
-                                                              options:MTLResourceStorageModeShared
-                                                          deallocator:nil];
+        id<MTLBuffer> bufferA = [ctx->device newBufferWithBytes:A length:sizeA * sizeof(float) options:MTLResourceStorageModeShared];
+        id<MTLBuffer> bufferB = [ctx->device newBufferWithBytes:B length:sizeB * sizeof(float) options:MTLResourceStorageModeShared];
+        id<MTLBuffer> bufferC = [ctx->device newBufferWithBytes:C length:sizeC * sizeof(float) options:MTLResourceStorageModeShared];
 
-        id<MTLBuffer> bufferC = [ctx->device newBufferWithBytesNoCopy:C
-                                                               length:M * N * sizeof(double)
-                                                              options:MTLResourceStorageModeShared
-                                                          deallocator:nil];
-
-        // Try to use Float32 if Float64 fails, or use a safe cast
-        // Apple Silicon supports Float32 better than Float64 in many MPS kernels
-        // but since our library is float64, we'll use the constant value directly or float32 if needed.
-        // MPSDataTypeFloat32 = 0x10020
-        // MPSDataTypeFloat64 = 0x10040 (65600)
-
-        MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:M
-                                                                           columns:K
-                                                                          rowBytes:K * sizeof(double)
-                                                                          dataType:65600];
-
-        MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K
-                                                                           columns:N
-                                                                          rowBytes:N * sizeof(double)
-                                                                          dataType:65600];
-
-        MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:M
-                                                                           columns:N
-                                                                          rowBytes:N * sizeof(double)
-                                                                          dataType:65600];
+        MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:K rowBytes:K * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
 
         MPSMatrix *matrixA = [[MPSMatrix alloc] initWithBuffer:bufferA descriptor:descA];
         MPSMatrix *matrixB = [[MPSMatrix alloc] initWithBuffer:bufferB descriptor:descB];
@@ -91,5 +61,8 @@ void matMulMPS(void* ptr, double* A, double* B, double* C, int M, int N, int K) 
         [kernel encodeToCommandBuffer:commandBuffer leftMatrix:matrixA rightMatrix:matrixB resultMatrix:matrixC];
         [commandBuffer commit];
         [commandBuffer waitUntilCompleted];
+
+        // Copy results back
+        memcpy(C, [bufferC contents], sizeC * sizeof(float));
     }
 }

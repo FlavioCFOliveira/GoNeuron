@@ -25,12 +25,12 @@ type MaxPool2D struct {
 	outputWidth  int
 
 	// Pre-allocated buffers
-	outputBuf    []float64
-	gradInBuf    []float64
+	outputBuf    []float32
+	gradInBuf    []float32
 	argmaxBuf    []int // Stores index of max value for each output position
 
 	// Saved input for backward pass
-	savedInput []float64
+	savedInput []float32
 
 	device Device
 }
@@ -46,10 +46,10 @@ func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
 		kernelSize:   kernelSize,
 		stride:       stride,
 		padding:      padding,
-		outputBuf:    make([]float64, 0),
-		gradInBuf:    make([]float64, 0),
+		outputBuf:    make([]float32, 0),
+		gradInBuf:    make([]float32, 0),
 		argmaxBuf:    make([]int, 0),
-		savedInput:   make([]float64, 0),
+		savedInput:   make([]float32, 0),
 		device:       &CPUDevice{},
 	}
 }
@@ -70,10 +70,10 @@ func (m *MaxPool2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 // Forward performs a forward pass through the max pooling layer.
 // input: flattened [inChannels, inputHeight, inputWidth]
 // Returns: flattened [outChannels, outputHeight, outputWidth]
-func (m *MaxPool2D) Forward(input []float64) []float64 {
+func (m *MaxPool2D) Forward(input []float32) []float32 {
 	totalInput := len(input)
 	if totalInput == 0 {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	if m.inChannels <= 0 {
@@ -107,18 +107,21 @@ func (m *MaxPool2D) Forward(input []float64) []float64 {
 	// Ensure buffers are sized correctly
 	requiredOutput := outChannels * outSize
 	if len(m.outputBuf) < requiredOutput {
-		m.outputBuf = make([]float64, requiredOutput)
+		m.outputBuf = make([]float32, requiredOutput)
 	}
 	if cap(m.argmaxBuf) < requiredOutput {
 		m.argmaxBuf = make([]int, requiredOutput)
+	} else {
+		m.argmaxBuf = m.argmaxBuf[:requiredOutput]
 	}
 	if cap(m.gradInBuf) < totalInput {
-		m.gradInBuf = make([]float64, totalInput)
+		m.gradInBuf = make([]float32, totalInput)
 	}
 
 	if cap(m.savedInput) < totalInput {
-		m.savedInput = make([]float64, totalInput)
+		m.savedInput = make([]float32, totalInput)
 	}
+	m.savedInput = m.savedInput[:totalInput]
 	copy(m.savedInput, input)
 
 	// Max pooling: for each channel, then for each output position
@@ -139,7 +142,7 @@ func (m *MaxPool2D) Forward(input []float64) []float64 {
 
 		for oh := 0; oh < outH; oh++ {
 			for ow := 0; ow < outW; ow++ {
-				maxVal := math.Inf(-1)
+				maxVal := float32(math.Inf(-1))
 				maxIdx := -1
 
 				for kh := 0; kh < kernelSize; kh++ {
@@ -169,7 +172,7 @@ func (m *MaxPool2D) Forward(input []float64) []float64 {
 }
 
 // Backward performs backpropagation through the max pooling layer.
-func (m *MaxPool2D) Backward(grad []float64) []float64 {
+func (m *MaxPool2D) Backward(grad []float32) []float32 {
 	totalInput := len(m.savedInput)
 	gradIn := m.gradInBuf[:totalInput]
 
@@ -187,7 +190,7 @@ func (m *MaxPool2D) Backward(grad []float64) []float64 {
 	for c := 0; c < outChannels; c++ {
 		outputOffset := c * outputChannelStride
 
-		for pos := 0; pos < len(m.argmaxBuf)/outChannels; pos++ {
+		for pos := 0; pos < outputChannelStride; pos++ {
 			gradVal := grad[outputOffset+pos]
 			maxIdx := m.argmaxBuf[outputOffset+pos]
 
@@ -201,22 +204,22 @@ func (m *MaxPool2D) Backward(grad []float64) []float64 {
 }
 
 // Params returns layer parameters (empty for MaxPool2D).
-func (m *MaxPool2D) Params() []float64 {
-	return make([]float64, 0)
+func (m *MaxPool2D) Params() []float32 {
+	return make([]float32, 0)
 }
 
 // SetParams sets layer parameters (no-op for MaxPool2D).
-func (m *MaxPool2D) SetParams(params []float64) {
+func (m *MaxPool2D) SetParams(params []float32) {
 	// No parameters to set
 }
 
 // Gradients returns layer gradients (empty for MaxPool2D).
-func (m *MaxPool2D) Gradients() []float64 {
-	return make([]float64, 0)
+func (m *MaxPool2D) Gradients() []float32 {
+	return make([]float32, 0)
 }
 
 // SetGradients sets layer gradients (no-op for MaxPool2D).
-func (m *MaxPool2D) SetGradients(gradients []float64) {
+func (m *MaxPool2D) SetGradients(gradients []float32) {
 	// No parameters to set
 }
 
@@ -282,6 +285,6 @@ func (m *MaxPool2D) GetArgmax() []int {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For MaxPool2D, gradients are already accumulated in Backward, so this just calls Backward.
-func (m *MaxPool2D) AccumulateBackward(grad []float64) []float64 {
+func (m *MaxPool2D) AccumulateBackward(grad []float32) []float32 {
 	return m.Backward(grad)
 }

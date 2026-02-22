@@ -24,7 +24,7 @@ func main() {
 	data.Shuffle()
 
 	// Split data (80% train, 20% test)
-	trainSize := int(float64(len(data.Inputs)) * 0.8)
+	trainSize := int(float32(len(data.Inputs)) * 0.8)
 	trainInputs := data.Inputs[:trainSize]
 	trainTargets := data.Targets[:trainSize]
 	testInputs := data.Inputs[trainSize:]
@@ -43,12 +43,12 @@ func main() {
 	fmt.Printf("Training for %d epochs...\n", epochs)
 
 	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := 0.0
+		totalLoss := float32(0.0)
 		for i := range trainInputs {
 			totalLoss += network.Train(trainInputs[i], trainTargets[i])
 		}
 		if epoch%20 == 0 {
-			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float64(trainSize))
+			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float32(trainSize))
 		}
 	}
 
@@ -61,11 +61,11 @@ func main() {
 		}
 	}
 
-	accuracy := float64(correct) / float64(len(testInputs)) * 100
+	accuracy := float32(correct) / float32(len(testInputs)) * 100
 	fmt.Printf("\nFinal Accuracy: %.2f%% (%d/%d)\n", accuracy, correct, len(testInputs))
 }
 
-func argmax(v []float64) int {
+func argmax(v []float32) int {
 	maxIdx := 0
 	maxVal := v[0]
 	for i := 1; i < len(v); i++ {

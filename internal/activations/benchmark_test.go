@@ -7,16 +7,16 @@ import (
 )
 
 // fillRandom fills a slice with random values.
-func fillRandom(slice []float64) {
+func fillRandom(slice []float32) {
 	for i := range slice {
-		slice[i] = rand.Float64()
+		slice[i] = rand.Float32()
 	}
 }
 
 // BenchmarkReLUActivate benchmarks the ReLU activation function.
 func BenchmarkReLUActivate(b *testing.B) {
 	relu := ReLU{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -30,7 +30,7 @@ func BenchmarkReLUActivate(b *testing.B) {
 // BenchmarkReLUDerivative benchmarks the ReLU derivative function.
 func BenchmarkReLUDerivative(b *testing.B) {
 	relu := ReLU{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -44,7 +44,7 @@ func BenchmarkReLUDerivative(b *testing.B) {
 // BenchmarkReLUFull benchmarks both Activate and Derivative.
 func BenchmarkReLUFull(b *testing.B) {
 	relu := ReLU{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -59,7 +59,7 @@ func BenchmarkReLUFull(b *testing.B) {
 // BenchmarkSigmoidActivate benchmarks the Sigmoid activation function.
 func BenchmarkSigmoidActivate(b *testing.B) {
 	sigmoid := Sigmoid{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -73,7 +73,7 @@ func BenchmarkSigmoidActivate(b *testing.B) {
 // BenchmarkSigmoidDerivative benchmarks the Sigmoid derivative function.
 func BenchmarkSigmoidDerivative(b *testing.B) {
 	sigmoid := Sigmoid{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -87,7 +87,7 @@ func BenchmarkSigmoidDerivative(b *testing.B) {
 // BenchmarkSigmoidFull benchmarks both Activate and Derivative.
 func BenchmarkSigmoidFull(b *testing.B) {
 	sigmoid := Sigmoid{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -102,7 +102,7 @@ func BenchmarkSigmoidFull(b *testing.B) {
 // BenchmarkTanhActivate benchmarks the Tanh activation function.
 func BenchmarkTanhActivate(b *testing.B) {
 	tanh := Tanh{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -116,7 +116,7 @@ func BenchmarkTanhActivate(b *testing.B) {
 // BenchmarkTanhDerivative benchmarks the Tanh derivative function.
 func BenchmarkTanhDerivative(b *testing.B) {
 	tanh := Tanh{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -130,7 +130,7 @@ func BenchmarkTanhDerivative(b *testing.B) {
 // BenchmarkTanhFull benchmarks both Activate and Derivative.
 func BenchmarkTanhFull(b *testing.B) {
 	tanh := Tanh{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -145,7 +145,7 @@ func BenchmarkTanhFull(b *testing.B) {
 // BenchmarkLeakyReLUActivate benchmarks the LeakyReLU activation function.
 func BenchmarkLeakyReLUActivate(b *testing.B) {
 	leakyReLU := NewLeakyReLU(0.01)
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -159,7 +159,7 @@ func BenchmarkLeakyReLUActivate(b *testing.B) {
 // BenchmarkLeakyReLUDerivative benchmarks the LeakyReLU derivative function.
 func BenchmarkLeakyReLUDerivative(b *testing.B) {
 	leakyReLU := NewLeakyReLU(0.01)
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -173,7 +173,7 @@ func BenchmarkLeakyReLUDerivative(b *testing.B) {
 // BenchmarkLeakyReLUFull benchmarks both Activate and Derivative.
 func BenchmarkLeakyReLUFull(b *testing.B) {
 	leakyReLU := NewLeakyReLU(0.01)
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -188,7 +188,7 @@ func BenchmarkLeakyReLUFull(b *testing.B) {
 // BenchmarkSoftmaxActivateBatch benchmarks the Softmax activation batch function.
 func BenchmarkSoftmaxActivateBatch(b *testing.B) {
 	softmax := Softmax{}
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	b.ResetTimer()
@@ -199,7 +199,7 @@ func BenchmarkSoftmaxActivateBatch(b *testing.B) {
 
 // BenchmarkActivationsComparison benchmarks all activations with same input.
 func BenchmarkActivationsComparison(b *testing.B) {
-	inputs := make([]float64, 1000)
+	inputs := make([]float32, 1000)
 	fillRandom(inputs)
 
 	relu := ReLU{}

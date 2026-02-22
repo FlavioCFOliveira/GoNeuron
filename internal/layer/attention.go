@@ -14,23 +14,23 @@ type GlobalAttention struct {
 
 	// Parameters (context vector/query for attention)
 	// For simple global attention, we can learn a context vector.
-	contextVector []float64
+	contextVector []float32
 
 	// Buffers
-	inputHistory [][]float64
-	scores       []float64
-	outputBuf    []float64
+	inputHistory [][]float32
+	scores       []float32
+	outputBuf    []float32
 
 	// Gradients
-	gradContext []float64
+	gradContext []float32
 	timeStep    int
 }
 
 // NewGlobalAttention creates a new global attention layer.
 func NewGlobalAttention(inSize int) *GlobalAttention {
 	rng := NewRNG(uint64(inSize + 42))
-	contextVector := make([]float64, inSize)
-	scale := math.Sqrt(1.0 / float64(inSize))
+	contextVector := make([]float32, inSize)
+	scale := float32(math.Sqrt(1.0 / float64(inSize)))
 	for i := range contextVector {
 		contextVector[i] = rng.RandFloat()*2*scale - scale
 	}
@@ -38,17 +38,17 @@ func NewGlobalAttention(inSize int) *GlobalAttention {
 	return &GlobalAttention{
 		inSize:        inSize,
 		contextVector: contextVector,
-		inputHistory:  make([][]float64, 0),
-		outputBuf:     make([]float64, inSize),
-		gradContext:   make([]float64, inSize),
+		inputHistory:  make([][]float32, 0),
+		outputBuf:     make([]float32, inSize),
+		gradContext:   make([]float32, inSize),
 	}
 }
 
 // Forward accumulates inputs and returns zeros (or current input) until end of sequence.
 // In global attention, the "real" output is produced after the sequence ends.
 // But to fit the Layer interface, we accumulate.
-func (g *GlobalAttention) Forward(x []float64) []float64 {
-	xCopy := make([]float64, len(x))
+func (g *GlobalAttention) Forward(x []float32) []float32 {
+	xCopy := make([]float32, len(x))
 	copy(xCopy, x)
 	g.inputHistory = append(g.inputHistory, xCopy)
 	g.timeStep++
@@ -59,16 +59,16 @@ func (g *GlobalAttention) Forward(x []float64) []float64 {
 }
 
 // ComputeContext processes the accumulated history and returns the context vector.
-func (g *GlobalAttention) ComputeContext() []float64 {
+func (g *GlobalAttention) ComputeContext() []float32 {
 	seqLen := len(g.inputHistory)
 	if seqLen == 0 {
-		return make([]float64, g.inSize)
+		return make([]float32, g.inSize)
 	}
 
 	// 1. Compute similarity scores: dot(input_t, contextVector)
-	scores := make([]float64, seqLen)
+	scores := make([]float32, seqLen)
 	for t := 0; t < seqLen; t++ {
-		dot := 0.0
+		dot := float32(0.0)
 		for i := 0; i < g.inSize; i++ {
 			dot += g.inputHistory[t][i] * g.contextVector[i]
 		}
@@ -95,11 +95,11 @@ func (g *GlobalAttention) ComputeContext() []float64 {
 }
 
 // Backward performs backpropagation.
-func (g *GlobalAttention) Backward(grad []float64) []float64 {
+func (g *GlobalAttention) Backward(grad []float32) []float32 {
 	// grad is dL/dOutputBuf
 	seqLen := len(g.inputHistory)
 	if seqLen == 0 {
-		return make([]float64, g.inSize)
+		return make([]float32, g.inSize)
 	}
 
 	// If scores haven't been computed (Sequence hasn't finished properly), compute them
@@ -109,7 +109,7 @@ func (g *GlobalAttention) Backward(grad []float64) []float64 {
 
 	ts := g.timeStep - 1
 	if ts < 0 {
-		return make([]float64, g.inSize)
+		return make([]float32, g.inSize)
 	}
 
 	// This is a complex backward pass because each timestep grad depends on all previous inputs.
@@ -119,7 +119,7 @@ func (g *GlobalAttention) Backward(grad []float64) []float64 {
 	// Here we return the gradient for the current timestep ts
 
 	w := g.scores[ts]
-	dx := make([]float64, g.inSize)
+	dx := make([]float32, g.inSize)
 	for i := 0; i < g.inSize; i++ {
 		dx[i] = w * grad[i]
 		// Accumulate gradient for context vector
@@ -131,26 +131,26 @@ func (g *GlobalAttention) Backward(grad []float64) []float64 {
 }
 
 // Params returns the learnable context vector.
-func (g *GlobalAttention) Params() []float64 {
-	params := make([]float64, g.inSize)
+func (g *GlobalAttention) Params() []float32 {
+	params := make([]float32, g.inSize)
 	copy(params, g.contextVector)
 	return params
 }
 
 // SetParams sets the context vector.
-func (g *GlobalAttention) SetParams(params []float64) {
+func (g *GlobalAttention) SetParams(params []float32) {
 	copy(g.contextVector, params)
 }
 
 // Gradients returns context vector gradients.
-func (g *GlobalAttention) Gradients() []float64 {
-	grads := make([]float64, g.inSize)
+func (g *GlobalAttention) Gradients() []float32 {
+	grads := make([]float32, g.inSize)
 	copy(grads, g.gradContext)
 	return grads
 }
 
 // SetGradients sets context vector gradients.
-func (g *GlobalAttention) SetGradients(grads []float64) {
+func (g *GlobalAttention) SetGradients(grads []float32) {
 	copy(g.gradContext, grads)
 }
 
@@ -189,6 +189,6 @@ func (g *GlobalAttention) OutSize() int {
 }
 
 // AccumulateBackward accumulates gradients.
-func (g *GlobalAttention) AccumulateBackward(grad []float64) []float64 {
+func (g *GlobalAttention) AccumulateBackward(grad []float32) []float32 {
 	return g.Backward(grad)
 }

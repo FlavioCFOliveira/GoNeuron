@@ -17,13 +17,13 @@ func main() {
 	fmt.Println("Training a 2-4-1 network to solve the XOR problem.")
 
 	// 1. Define XOR dataset
-	inputs := [][]float64{
+	inputs := [][]float32{
 		{0, 0},
 		{0, 1},
 		{1, 0},
 		{1, 1},
 	}
-	targets := [][]float64{
+	targets := [][]float32{
 		{0},
 		{1},
 		{1},
@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// 3. Initialize the network with MSE loss and Adam optimizer
-	learningRate := 0.05
+	learningRate := float32(0.05)
 	optimizer := opt.NewAdam(learningRate)
 	network := net.New(layers, loss.MSE{}, optimizer)
 
@@ -50,14 +50,14 @@ func main() {
 	fmt.Printf("\nTraining for %d epochs...\n", epochs)
 
 	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := 0.0
+		totalLoss := float32(0.0)
 		for i := range inputs {
 			lossVal := network.Train(inputs[i], targets[i])
 			totalLoss += lossVal
 		}
 
 		if epoch == 1 || epoch%100 == 0 || epoch == epochs {
-			avgLoss := totalLoss / float64(len(inputs))
+			avgLoss := totalLoss / float32(len(inputs))
 			fmt.Printf("Epoch %4d/%d - Avg Loss: %.8f\n", epoch, epochs, avgLoss)
 		}
 	}
@@ -70,7 +70,7 @@ func main() {
 	fmt.Printf("%-10s | %-10s | %-10s | %-10s\n", "Input A", "Input B", "Target", "Prediction")
 	fmt.Println("-----------|------------|------------|-----------")
 
-	tolerance := 0.1
+	tolerance := float32(0.1)
 	success := true
 
 	for i, input := range inputs {
@@ -82,7 +82,7 @@ func main() {
 			input[0], input[1], target, prediction)
 
 		// Simple check for correctness
-		if math.Abs(prediction-target) > tolerance {
+		if float32(math.Abs(float64(prediction-target))) > tolerance {
 			success = false
 		}
 	}

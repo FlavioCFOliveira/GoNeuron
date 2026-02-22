@@ -7,17 +7,17 @@ import (
 )
 
 // fillRandom fills a slice with random values.
-func fillRandom(slice []float64) {
+func fillRandom(slice []float32) {
 	for i := range slice {
-		slice[i] = rand.Float64()
+		slice[i] = rand.Float32()
 	}
 }
 
 // BenchmarkMSEForward benchmarks MSE loss forward pass.
 func BenchmarkMSEForward(b *testing.B) {
 	mse := MSE{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -30,8 +30,8 @@ func BenchmarkMSEForward(b *testing.B) {
 // BenchmarkMSEBackward benchmarks MSE loss backward pass.
 func BenchmarkMSEBackward(b *testing.B) {
 	mse := MSE{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -44,9 +44,9 @@ func BenchmarkMSEBackward(b *testing.B) {
 // BenchmarkMSEBackwardInPlace benchmarks MSE in-place gradient computation.
 func BenchmarkMSEBackwardInPlace(b *testing.B) {
 	mse := MSE{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
-	grad := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
+	grad := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -59,8 +59,8 @@ func BenchmarkMSEBackwardInPlace(b *testing.B) {
 // BenchmarkMSEFull benchmarks complete forward and backward pass.
 func BenchmarkMSEFull(b *testing.B) {
 	mse := MSE{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -74,8 +74,8 @@ func BenchmarkMSEFull(b *testing.B) {
 // BenchmarkCrossEntropyForward benchmarks CrossEntropy loss forward pass.
 func BenchmarkCrossEntropyForward(b *testing.B) {
 	ce := CrossEntropy{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -94,8 +94,8 @@ func BenchmarkCrossEntropyForward(b *testing.B) {
 // BenchmarkCrossEntropyBackward benchmarks CrossEntropy loss backward pass.
 func BenchmarkCrossEntropyBackward(b *testing.B) {
 	ce := CrossEntropy{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -108,8 +108,8 @@ func BenchmarkCrossEntropyBackward(b *testing.B) {
 // BenchmarkCrossEntropyFull benchmarks complete forward and backward pass.
 func BenchmarkCrossEntropyFull(b *testing.B) {
 	ce := CrossEntropy{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -123,8 +123,8 @@ func BenchmarkCrossEntropyFull(b *testing.B) {
 // BenchmarkHuberForward benchmarks Huber loss forward pass with default delta.
 func BenchmarkHuberForward(b *testing.B) {
 	huber := NewHuber(1.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -137,8 +137,8 @@ func BenchmarkHuberForward(b *testing.B) {
 // BenchmarkHuberBackward benchmarks Huber loss backward pass.
 func BenchmarkHuberBackward(b *testing.B) {
 	huber := NewHuber(1.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -151,8 +151,8 @@ func BenchmarkHuberBackward(b *testing.B) {
 // BenchmarkHuberFull benchmarks complete forward and backward pass.
 func BenchmarkHuberFull(b *testing.B) {
 	huber := NewHuber(1.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -166,8 +166,8 @@ func BenchmarkHuberFull(b *testing.B) {
 // BenchmarkHuberSmallDelta benchmarks Huber with small delta.
 func BenchmarkHuberSmallDelta(b *testing.B) {
 	huber := NewHuber(0.1)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -181,8 +181,8 @@ func BenchmarkHuberSmallDelta(b *testing.B) {
 // BenchmarkHuberLargeDelta benchmarks Huber with large delta.
 func BenchmarkHuberLargeDelta(b *testing.B) {
 	huber := NewHuber(5.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -195,8 +195,8 @@ func BenchmarkHuberLargeDelta(b *testing.B) {
 
 // BenchmarkLossComparison benchmarks all loss functions with same data.
 func BenchmarkLossComparison(b *testing.B) {
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -215,8 +215,8 @@ func BenchmarkLossComparison(b *testing.B) {
 // BenchmarkL1LossForward benchmarks L1Loss forward pass.
 func BenchmarkL1LossForward(b *testing.B) {
 	l1 := L1Loss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -229,8 +229,8 @@ func BenchmarkL1LossForward(b *testing.B) {
 // BenchmarkL1LossBackward benchmarks L1Loss backward pass.
 func BenchmarkL1LossBackward(b *testing.B) {
 	l1 := L1Loss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -243,8 +243,8 @@ func BenchmarkL1LossBackward(b *testing.B) {
 // BenchmarkL1LossFull benchmarks complete L1Loss forward and backward pass.
 func BenchmarkL1LossFull(b *testing.B) {
 	l1 := L1Loss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -258,8 +258,8 @@ func BenchmarkL1LossFull(b *testing.B) {
 // BenchmarkBCELossForward benchmarks BCELoss forward pass.
 func BenchmarkBCELossForward(b *testing.B) {
 	bce := BCELoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -282,8 +282,8 @@ func BenchmarkBCELossForward(b *testing.B) {
 // BenchmarkBCELossBackward benchmarks BCELoss backward pass.
 func BenchmarkBCELossBackward(b *testing.B) {
 	bce := BCELoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -305,8 +305,8 @@ func BenchmarkBCELossBackward(b *testing.B) {
 // BenchmarkBCELossFull benchmarks complete BCELoss forward and backward pass.
 func BenchmarkBCELossFull(b *testing.B) {
 	bce := BCELoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -329,8 +329,8 @@ func BenchmarkBCELossFull(b *testing.B) {
 // BenchmarkBCEWithLogitsLossForward benchmarks BCEWithLogitsLoss forward pass.
 func BenchmarkBCEWithLogitsLossForward(b *testing.B) {
 	bce := BCEWithLogitsLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -343,8 +343,8 @@ func BenchmarkBCEWithLogitsLossForward(b *testing.B) {
 // BenchmarkBCEWithLogitsLossBackward benchmarks BCEWithLogitsLoss backward pass.
 func BenchmarkBCEWithLogitsLossBackward(b *testing.B) {
 	bce := BCEWithLogitsLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -357,8 +357,8 @@ func BenchmarkBCEWithLogitsLossBackward(b *testing.B) {
 // BenchmarkBCEWithLogitsLossFull benchmarks complete BCEWithLogitsLoss forward and backward pass.
 func BenchmarkBCEWithLogitsLossFull(b *testing.B) {
 	bce := BCEWithLogitsLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
@@ -372,14 +372,14 @@ func BenchmarkBCEWithLogitsLossFull(b *testing.B) {
 // BenchmarkNLLLossForward benchmarks NLLLoss forward pass.
 func BenchmarkNLLLossForward(b *testing.B) {
 	nll := NLLLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	// Normalize to make valid probabilities (100 groups of 10)
 	for i := 0; i < 100; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for j := i * 10; j < (i+1)*10; j++ {
 			sum += yPred[j]
 		}
@@ -397,14 +397,14 @@ func BenchmarkNLLLossForward(b *testing.B) {
 // BenchmarkNLLLossBackward benchmarks NLLLoss backward pass.
 func BenchmarkNLLLossBackward(b *testing.B) {
 	nll := NLLLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	// Normalize to make valid probabilities (100 groups of 10)
 	for i := 0; i < 100; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for j := i * 10; j < (i+1)*10; j++ {
 			sum += yPred[j]
 		}
@@ -422,14 +422,14 @@ func BenchmarkNLLLossBackward(b *testing.B) {
 // BenchmarkNLLLossFull benchmarks complete NLLLoss forward and backward pass.
 func BenchmarkNLLLossFull(b *testing.B) {
 	nll := NLLLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	// Normalize to make valid probabilities (100 groups of 10)
 	for i := 0; i < 100; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for j := i * 10; j < (i+1)*10; j++ {
 			sum += yPred[j]
 		}
@@ -447,101 +447,101 @@ func BenchmarkNLLLossFull(b *testing.B) {
 
 // BenchmarkCosineEmbeddingLossForward benchmarks CosineEmbeddingLoss forward pass.
 func BenchmarkCosineEmbeddingLossForward(b *testing.B) {
-	loss := NewCosineEmbeddingLoss(0.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	l := NewCosineEmbeddingLoss(0.0)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = loss.Forward(yPred, yTrue)
+		_ = l.Forward(yPred, yTrue)
 	}
 }
 
 // BenchmarkCosineEmbeddingLossBackward benchmarks CosineEmbeddingLoss backward pass.
 func BenchmarkCosineEmbeddingLossBackward(b *testing.B) {
-	loss := NewCosineEmbeddingLoss(0.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	l := NewCosineEmbeddingLoss(0.0)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = loss.Backward(yPred, yTrue)
+		_ = l.Backward(yPred, yTrue)
 	}
 }
 
 // BenchmarkCosineEmbeddingLossFull benchmarks complete CosineEmbeddingLoss forward and backward pass.
 func BenchmarkCosineEmbeddingLossFull(b *testing.B) {
-	loss := NewCosineEmbeddingLoss(0.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	l := NewCosineEmbeddingLoss(0.0)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = loss.Forward(yPred, yTrue)
-		_ = loss.Backward(yPred, yTrue)
+		_ = l.Forward(yPred, yTrue)
+		_ = l.Backward(yPred, yTrue)
 	}
 }
 
 // BenchmarkMarginRankingLossForward benchmarks MarginRankingLoss forward pass.
 func BenchmarkMarginRankingLossForward(b *testing.B) {
-	loss := NewMarginRankingLoss(1.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 500)
+	l := NewMarginRankingLoss(1.0)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 500)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = loss.Forward(yPred, yTrue)
+		_ = l.Forward(yPred, yTrue)
 	}
 }
 
 // BenchmarkMarginRankingLossBackward benchmarks MarginRankingLoss backward pass.
 func BenchmarkMarginRankingLossBackward(b *testing.B) {
-	loss := NewMarginRankingLoss(1.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 500)
+	l := NewMarginRankingLoss(1.0)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 500)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = loss.Backward(yPred, yTrue)
+		_ = l.Backward(yPred, yTrue)
 	}
 }
 
 // BenchmarkMarginRankingLossFull benchmarks complete MarginRankingLoss forward and backward pass.
 func BenchmarkMarginRankingLossFull(b *testing.B) {
-	loss := NewMarginRankingLoss(1.0)
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 500)
+	l := NewMarginRankingLoss(1.0)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 500)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = loss.Forward(yPred, yTrue)
-		_ = loss.Backward(yPred, yTrue)
+		_ = l.Forward(yPred, yTrue)
+		_ = l.Backward(yPred, yTrue)
 	}
 }
 
 // BenchmarkKLDivLossForward benchmarks KLDivLoss forward pass.
 func BenchmarkKLDivLossForward(b *testing.B) {
 	kld := KLDivLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	// Normalize to make valid probabilities (100 groups of 10)
 	for i := 0; i < 100; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for j := i * 10; j < (i+1)*10; j++ {
 			sum += yPred[j]
 		}
@@ -559,14 +559,14 @@ func BenchmarkKLDivLossForward(b *testing.B) {
 // BenchmarkKLDivLossBackward benchmarks KLDivLoss backward pass.
 func BenchmarkKLDivLossBackward(b *testing.B) {
 	kld := KLDivLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	// Normalize to make valid probabilities (100 groups of 10)
 	for i := 0; i < 100; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for j := i * 10; j < (i+1)*10; j++ {
 			sum += yPred[j]
 		}
@@ -584,14 +584,14 @@ func BenchmarkKLDivLossBackward(b *testing.B) {
 // BenchmarkKLDivLossFull benchmarks complete KLDivLoss forward and backward pass.
 func BenchmarkKLDivLossFull(b *testing.B) {
 	kld := KLDivLoss{}
-	yPred := make([]float64, 1000)
-	yTrue := make([]float64, 1000)
+	yPred := make([]float32, 1000)
+	yTrue := make([]float32, 1000)
 	fillRandom(yPred)
 	fillRandom(yTrue)
 
 	// Normalize to make valid probabilities (100 groups of 10)
 	for i := 0; i < 100; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for j := i * 10; j < (i+1)*10; j++ {
 			sum += yPred[j]
 		}

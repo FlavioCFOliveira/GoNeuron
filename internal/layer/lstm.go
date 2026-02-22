@@ -21,9 +21,9 @@ type LSTM struct {
 	// Layout: [input_gate, forget_gate, cell_gate, output_gate]
 	// Each gate has [input_weights, recurrent_weights]
 	// Total: 8 weight blocks
-	inputWeights      []float64 // inSize * outSize * 4
-	recurrentWeights  []float64 // outSize * outSize * 4
-	biases            []float64 // outSize * 4
+	inputWeights      []float32 // inSize * outSize * 4
+	recurrentWeights  []float32 // outSize * outSize * 4
+	biases            []float32 // outSize * 4
 
 	// Activation functions for each gate
 	inputAct  activations.Activation
@@ -32,39 +32,39 @@ type LSTM struct {
 	outputAct activations.Activation
 
 	// Reusable buffers - pre-allocated to avoid garbage collection
-	inputBuf      []float64 // input vector
-	outputBuf     []float64 // output vector (hidden state)
-	preActBuf     []float64 // pre-activations for all 4 gates (outSize * 4)
-	cellBuf       []float64 // current cell state
-	hiddenBuf     []float64 // current hidden state
+	inputBuf      []float32 // input vector
+	outputBuf     []float32 // output vector (hidden state)
+	preActBuf     []float32 // pre-activations for all 4 gates (outSize * 4)
+	cellBuf       []float32 // current cell state
+	hiddenBuf     []float32 // current hidden state
 
 	// Gradient buffers
-	gradInputWeights    []float64
-	gradRecurrentWeights []float64
-	gradBiases          []float64
+	gradInputWeights    []float32
+	gradRecurrentWeights []float32
+	gradBiases          []float32
 
 	// Delta buffers for backprop (one per gate)
-	dInputBuf  []float64
-	dForgetBuf []float64
-	dCellBuf   []float64
-	dOutputBuf []float64
+	dInputBuf  []float32
+	dForgetBuf []float32
+	dCellBuf   []float32
+	dOutputBuf []float32
 
 	// Reusable buffers for backward pass to avoid allocations
-	dcBuf      []float64
-	dxBuf      []float64
-	dhPrevBuf  []float64
-	cPrevBuf   []float64
-	hPrevBuf   []float64
+	dcBuf      []float32
+	dxBuf      []float32
+	dhPrevBuf  []float32
+	cPrevBuf   []float32
+	hPrevBuf   []float32
 
 	// Gate outputs stored for backprop (one per gate)
-	inputGateOut  []float64
-	forgetGateOut []float64
-	cellGateOut   []float64
-	outputGateOut []float64
+	inputGateOut  []float32
+	forgetGateOut []float32
+	cellGateOut   []float32
+	outputGateOut []float32
 
 	// Saved states for BPTT
-	storedCellStates  [][]float64
-	storedHiddenStates [][]float64
+	storedCellStates  [][]float32
+	storedHiddenStates [][]float32
 
 	// Current time step
 	timeStep int
@@ -82,14 +82,14 @@ func NewLSTM(inSize, outSize int) *LSTM {
 func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 	// Xavier/Glorot initialization for LSTM with 4 gates
 	// Input weights connect inSize inputs to 4*outSize gate outputs
-	inputScale := math.Sqrt(2.0 / float64(inSize + 4*outSize))
+	inputScale := float32(math.Sqrt(2.0 / float64(inSize + 4*outSize)))
 	// Recurrent weights connect outSize hidden states to 4*outSize gate outputs
-	recurrentScale := math.Sqrt(2.0 / float64(outSize + 4*outSize))
+	recurrentScale := float32(math.Sqrt(2.0 / float64(outSize + 4*outSize)))
 
 	// Allocate weight matrices
-	inputWeights := make([]float64, outSize*4*inSize)
-	recurrentWeights := make([]float64, outSize*4*outSize)
-	biases := make([]float64, outSize*4)
+	inputWeights := make([]float32, outSize*4*inSize)
+	recurrentWeights := make([]float32, outSize*4*outSize)
+	biases := make([]float32, outSize*4)
 
 	// Create deterministic RNG with layer-specific seed for different initial weights
 	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 142))
@@ -125,34 +125,34 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		outputAct: activations.Sigmoid{},
 
 		// Pre-allocate all working buffers
-		inputBuf:      make([]float64, inSize),
-		outputBuf:     make([]float64, outSize),
-		preActBuf:     make([]float64, outSize*4),
-		cellBuf:       make([]float64, outSize),
-		hiddenBuf:     make([]float64, outSize),
+		inputBuf:      make([]float32, inSize),
+		outputBuf:     make([]float32, outSize),
+		preActBuf:     make([]float32, outSize*4),
+		cellBuf:       make([]float32, outSize),
+		hiddenBuf:     make([]float32, outSize),
 
-		gradInputWeights:    make([]float64, outSize*4*inSize),
-		gradRecurrentWeights: make([]float64, outSize*4*outSize),
-		gradBiases:          make([]float64, outSize*4),
+		gradInputWeights:    make([]float32, outSize*4*inSize),
+		gradRecurrentWeights: make([]float32, outSize*4*outSize),
+		gradBiases:          make([]float32, outSize*4),
 
-		dInputBuf:  make([]float64, outSize),
-		dForgetBuf: make([]float64, outSize),
-		dCellBuf:   make([]float64, outSize),
-		dOutputBuf: make([]float64, outSize),
+		dInputBuf:  make([]float32, outSize),
+		dForgetBuf: make([]float32, outSize),
+		dCellBuf:   make([]float32, outSize),
+		dOutputBuf: make([]float32, outSize),
 
-		dcBuf:     make([]float64, outSize),
-		dxBuf:     make([]float64, inSize),
-		dhPrevBuf: make([]float64, outSize),
-		cPrevBuf:  make([]float64, outSize),
-		hPrevBuf:  make([]float64, outSize),
+		dcBuf:     make([]float32, outSize),
+		dxBuf:     make([]float32, inSize),
+		dhPrevBuf: make([]float32, outSize),
+		cPrevBuf:  make([]float32, outSize),
+		hPrevBuf:  make([]float32, outSize),
 
-		inputGateOut:  make([]float64, outSize),
-		forgetGateOut: make([]float64, outSize),
-		cellGateOut:   make([]float64, outSize),
-		outputGateOut: make([]float64, outSize),
+		inputGateOut:  make([]float32, outSize),
+		forgetGateOut: make([]float32, outSize),
+		cellGateOut:   make([]float32, outSize),
+		outputGateOut: make([]float32, outSize),
 
-		storedCellStates:  make([][]float64, 0),
-		storedHiddenStates: make([][]float64, 0),
+		storedCellStates:  make([][]float32, 0),
+		storedHiddenStates: make([][]float32, 0),
 		timeStep:          0,
 	}
 }
@@ -174,7 +174,7 @@ func (l *LSTM) Reset() {
 // Forward performs a forward pass for one time step.
 // x: input vector of length inSize
 // Returns: output vector of length outSize
-func (l *LSTM) Forward(x []float64) []float64 {
+func (l *LSTM) Forward(x []float32) []float32 {
 	// Copy input to buffer
 	copy(l.inputBuf, x)
 
@@ -189,7 +189,7 @@ func (l *LSTM) Forward(x []float64) []float64 {
 
 		// Wh: [outSize*4, outSize] * [outSize, 1] -> [outSize*4, 1]
 		// Use a temporary buffer to accumulate Wh * hPrev
-		whBuf := make([]float64, l.outSize*4)
+		whBuf := make([]float32, l.outSize*4)
 		metal.MatMul(l.recurrentWeights, l.hiddenBuf, whBuf, l.outSize*4, 1, l.outSize)
 
 		// Add Wh and biases
@@ -204,7 +204,7 @@ func (l *LSTM) Forward(x []float64) []float64 {
 			baseG := g * l.outSize
 			baseW := baseG * l.inSize
 			for i := 0; i < l.outSize; i++ {
-				sum := 0.0
+				sum := float32(0.0)
 				for j := 0; j < l.inSize; j++ {
 					sum += l.inputWeights[baseW+i*l.inSize+j] * x[j]
 				}
@@ -218,7 +218,7 @@ func (l *LSTM) Forward(x []float64) []float64 {
 			baseG := g * l.outSize
 			baseW := baseG * l.outSize
 			for i := 0; i < l.outSize; i++ {
-				sum := 0.0
+				sum := float32(0.0)
 				for j := 0; j < l.outSize; j++ {
 					sum += l.recurrentWeights[baseW+i*l.outSize+j] * hPrev[j]
 				}
@@ -268,13 +268,13 @@ func (l *LSTM) Forward(x []float64) []float64 {
 	// === Compute new hidden state ===
 	// h_new = output * tanh(c_new)
 	for i := 0; i < l.outSize; i++ {
-		l.hiddenBuf[i] = l.outputGateOut[i] * math.Tanh(l.cellBuf[i])
+		l.hiddenBuf[i] = l.outputGateOut[i] * float32(math.Tanh(float64(l.cellBuf[i])))
 	}
 
 	// === Store states for backprop ===
 	if l.timeStep >= len(l.storedCellStates) {
-		l.storedCellStates = append(l.storedCellStates, make([]float64, l.outSize))
-		l.storedHiddenStates = append(l.storedHiddenStates, make([]float64, l.outSize))
+		l.storedCellStates = append(l.storedCellStates, make([]float32, l.outSize))
+		l.storedHiddenStates = append(l.storedHiddenStates, make([]float32, l.outSize))
 	}
 	copy(l.storedCellStates[l.timeStep], l.cellBuf)
 	copy(l.storedHiddenStates[l.timeStep], l.hiddenBuf)
@@ -289,7 +289,7 @@ func (l *LSTM) Forward(x []float64) []float64 {
 // Backward performs backpropagation through time for one time step.
 // grad: gradient of loss w.r.t. output (length outSize)
 // Returns: gradient of loss w.r.t. input (length inSize)
-func (l *LSTM) Backward(grad []float64) []float64 {
+func (l *LSTM) Backward(grad []float32) []float32 {
 	// Get time step index
 	ts := l.timeStep - 1
 	if ts < 0 || ts >= len(l.storedCellStates) {
@@ -327,7 +327,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 	// Start with contribution from current hidden state
 	dc := l.dcBuf
 	for i := 0; i < l.outSize; i++ {
-		tanhC := math.Tanh(c[i])
+		tanhC := float32(math.Tanh(float64(c[i])))
 		dc[i] = grad[i] * og[i] * (1 - tanhC*tanhC)
 	}
 
@@ -357,7 +357,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 
 	// Output gate gradient
 	for i := 0; i < l.outSize; i++ {
-		l.dOutputBuf[i] = grad[i] * math.Tanh(c[i]) * l.outputAct.Derivative(pre[outputStart+i])
+		l.dOutputBuf[i] = grad[i] * float32(math.Tanh(float64(c[i]))) * l.outputAct.Derivative(pre[outputStart+i])
 	}
 
 	// === Accumulate weight gradients ===
@@ -418,7 +418,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 	// dL/dx = sum_over_gates(W_x^T * d_gate)
 	dx := l.dxBuf
 	for i := 0; i < l.inSize; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for g := 0; g < 4; g++ {
 			baseG := g * l.outSize
 			baseW := baseG * l.inSize
@@ -441,7 +441,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 	// dL/dh_prev = sum_over_gates(W_h^T * d_gate)
 	dhPrev := l.dhPrevBuf
 	for i := 0; i < l.outSize; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for g := 0; g < 4; g++ {
 			baseG := g * l.outSize
 			baseW := baseG * l.outSize
@@ -476,7 +476,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 // Uses max norm clipping: if ||g||_2 > maxNorm, scale g by maxNorm/||g||_2
 func (l *LSTM) clipGradients() {
 	// Compute L2 norm of all gradients
-	normSq := 0.0
+	normSq := float32(0.0)
 	for i := range l.gradInputWeights {
 		normSq += l.gradInputWeights[i] * l.gradInputWeights[i]
 	}
@@ -487,9 +487,9 @@ func (l *LSTM) clipGradients() {
 		normSq += l.gradBiases[i] * l.gradBiases[i]
 	}
 
-	norm := math.Sqrt(normSq)
+	norm := float32(math.Sqrt(float64(normSq)))
 	if norm > maxGradientNorm {
-		scale := maxGradientNorm / norm
+		scale := float32(maxGradientNorm / norm)
 		for i := range l.gradInputWeights {
 			l.gradInputWeights[i] *= scale
 		}
@@ -503,9 +503,9 @@ func (l *LSTM) clipGradients() {
 }
 
 // Params returns all LSTM parameters flattened (copy).
-func (l *LSTM) Params() []float64 {
+func (l *LSTM) Params() []float32 {
 	total := len(l.inputWeights) + len(l.recurrentWeights) + len(l.biases)
-	params := make([]float64, total)
+	params := make([]float32, total)
 	copy(params, l.inputWeights)
 	copy(params[len(l.inputWeights):], l.recurrentWeights)
 	copy(params[len(l.inputWeights)+len(l.recurrentWeights):], l.biases)
@@ -513,7 +513,7 @@ func (l *LSTM) Params() []float64 {
 }
 
 // SetParams updates weights and biases from a flattened slice.
-func (l *LSTM) SetParams(params []float64) {
+func (l *LSTM) SetParams(params []float32) {
 	totalInput := len(l.inputWeights)
 	totalRecurrent := len(l.recurrentWeights)
 
@@ -523,9 +523,9 @@ func (l *LSTM) SetParams(params []float64) {
 }
 
 // Gradients returns all LSTM gradients flattened (copy).
-func (l *LSTM) Gradients() []float64 {
+func (l *LSTM) Gradients() []float32 {
 	total := len(l.gradInputWeights) + len(l.gradRecurrentWeights) + len(l.gradBiases)
-	gradients := make([]float64, total)
+	gradients := make([]float32, total)
 	copy(gradients, l.gradInputWeights)
 	copy(gradients[len(l.gradInputWeights):], l.gradRecurrentWeights)
 	copy(gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):], l.gradBiases)
@@ -533,7 +533,7 @@ func (l *LSTM) Gradients() []float64 {
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
-func (l *LSTM) SetGradients(gradients []float64) {
+func (l *LSTM) SetGradients(gradients []float32) {
 	copy(l.gradInputWeights, gradients[:len(l.gradInputWeights)])
 	copy(l.gradRecurrentWeights, gradients[len(l.gradInputWeights):len(l.gradInputWeights)+len(l.gradRecurrentWeights)])
 	copy(l.gradBiases, gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):])
@@ -555,7 +555,7 @@ func (l *LSTM) OutSize() int {
 }
 
 // Hidden returns the current hidden state of the LSTM.
-func (l *LSTM) Hidden() []float64 {
+func (l *LSTM) Hidden() []float32 {
 	return l.hiddenBuf
 }
 
@@ -583,6 +583,6 @@ func (l *LSTM) Clone() Layer {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For LSTM, gradients are already accumulated in Backward, so this just calls Backward.
-func (l *LSTM) AccumulateBackward(grad []float64) []float64 {
+func (l *LSTM) AccumulateBackward(grad []float32) []float32 {
 	return l.Backward(grad)
 }

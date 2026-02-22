@@ -9,7 +9,7 @@ func TestFlattenForward(t *testing.T) {
 	flatten := NewFlatten()
 
 	// Test flattening a 2D input [2, 3] -> [6]
-	input := []float64{1, 2, 3, 4, 5, 6}
+	input := []float32{1, 2, 3, 4, 5, 6}
 	output := flatten.Forward(input)
 
 	if len(output) != 6 {
@@ -17,8 +17,8 @@ func TestFlattenForward(t *testing.T) {
 	}
 
 	for i := 0; i < 6; i++ {
-		if output[i] != float64(i+1) {
-			t.Errorf("Output[%d] = %f, expected %f", i, output[i], float64(i+1))
+		if output[i] != float32(i+1) {
+			t.Errorf("Output[%d] = %f, expected %f", i, output[i], float32(i+1))
 		}
 	}
 }
@@ -26,10 +26,10 @@ func TestFlattenForward(t *testing.T) {
 func TestFlattenBackward(t *testing.T) {
 	flatten := NewFlatten()
 
-	input := []float64{1, 2, 3, 4, 5, 6}
+	input := []float32{1, 2, 3, 4, 5, 6}
 	flatten.Forward(input)
 
-	grad := []float64{1, 1, 1, 1, 1, 1}
+	grad := []float32{1, 1, 1, 1, 1, 1}
 	outputGrad := flatten.Backward(grad)
 
 	for i := 0; i < 6; i++ {
@@ -42,7 +42,7 @@ func TestFlattenBackward(t *testing.T) {
 func TestFlattenInOutSize(t *testing.T) {
 	flatten := NewFlatten()
 
-	input := []float64{1, 2, 3, 4, 5, 6}
+	input := []float32{1, 2, 3, 4, 5, 6}
 	flatten.Forward(input)
 
 	// After forward, outSize should be set
@@ -64,8 +64,8 @@ func TestFlattenParams(t *testing.T) {
 		t.Errorf("Expected 0 gradients, got %d", len(gradients))
 	}
 
-	flatten.SetParams([]float64{1, 2, 3})
-	flatten.SetGradients([]float64{1, 2, 3})
+	flatten.SetParams([]float32{1, 2, 3})
+	flatten.SetGradients([]float32{1, 2, 3})
 
 	newParams := flatten.Params()
 	if len(newParams) != 0 {
@@ -77,9 +77,9 @@ func TestFlattenLargeInput(t *testing.T) {
 	flatten := NewFlatten()
 
 	// Create a larger input: 4x32x32 = 4096
-	input := make([]float64, 4096)
+	input := make([]float32, 4096)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 
 	output := flatten.Forward(input)
@@ -94,7 +94,7 @@ func TestFlattenLargeInput(t *testing.T) {
 
 	// Verify values preserved
 	for i := 0; i < 4096; i++ {
-		if math.Abs(output[i]-float64(i)) > 1e-10 {
+		if float32(math.Abs(float64(output[i]-float32(i)))) > 1e-6 {
 			t.Errorf("Value mismatch at %d", i)
 		}
 	}
@@ -104,9 +104,9 @@ func BenchmarkFlattenForward(b *testing.B) {
 	flatten := NewFlatten()
 
 	// 3x224x224 = 150528 (typical image)
-	input := make([]float64, 150528)
+	input := make([]float32, 150528)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 
 	b.ResetTimer()
@@ -118,13 +118,13 @@ func BenchmarkFlattenForward(b *testing.B) {
 func BenchmarkFlattenBackward(b *testing.B) {
 	flatten := NewFlatten()
 
-	input := make([]float64, 150528)
+	input := make([]float32, 150528)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 	flatten.Forward(input)
 
-	grad := make([]float64, 150528)
+	grad := make([]float32, 150528)
 	for i := range grad {
 		grad[i] = 1.0
 	}

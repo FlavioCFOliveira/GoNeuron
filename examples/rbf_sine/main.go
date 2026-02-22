@@ -34,18 +34,18 @@ func main() {
 	fmt.Printf("Training for %d epochs...\n", epochs)
 
 	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := 0.0
+		totalLoss := float32(0.0)
 		for i := range trainInputs {
 			totalLoss += network.Train(trainInputs[i], trainTargets[i])
 		}
 		if epoch%50 == 0 {
-			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float64(len(trainInputs)))
+			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float32(len(trainInputs)))
 		}
 	}
 
 	// 4. Evaluate
 	fmt.Println("\n=== Sample Predictions ===")
-	totalMSE := 0.0
+	totalMSE := float32(0.0)
 	for i := range testInputs {
 		output := network.Forward(testInputs[i])
 		target := testTargets[i][0]
@@ -57,5 +57,5 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\nTest MSE: %.6f\n", totalMSE/float64(len(testInputs)))
+	fmt.Printf("\nTest MSE: %.6f\n", totalMSE/float32(len(testInputs)))
 }

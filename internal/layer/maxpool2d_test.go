@@ -14,21 +14,21 @@ func TestMaxPool2DForward(t *testing.T) {
 	// 5  6  7  8
 	// 9  10 11 12
 	// 13 14 15 16
-	input := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
 	output := pool.Forward(input)
 
 	// Expected output: 2x2 = 4 values
 	// max(1,2,5,6) = 6, max(3,4,7,8) = 8
 	// max(9,10,13,14) = 14, max(11,12,15,16) = 16
-	expected := []float64{6, 8, 14, 16}
+	expected := []float32{6, 8, 14, 16}
 
 	if len(output) != 4 {
 		t.Errorf("Output length = %d, expected 4", len(output))
 	}
 
 	for i := 0; i < 4; i++ {
-		if math.Abs(output[i]-expected[i]) > 1e-10 {
+		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-6 {
 			t.Errorf("Output[%d] = %f, expected %f", i, output[i], expected[i])
 		}
 	}
@@ -42,7 +42,7 @@ func TestMaxPool2DForwardStride(t *testing.T) {
 	// 1 2 3
 	// 4 5 6
 	// 7 8 9
-	input := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
 	output := pool.Forward(input)
 
@@ -51,14 +51,14 @@ func TestMaxPool2DForwardStride(t *testing.T) {
 	// Position (0,1): max(2,3,5,6) = 6
 	// Position (1,0): max(4,5,7,8) = 8
 	// Position (1,1): max(5,6,8,9) = 9
-	expected := []float64{5, 6, 8, 9}
+	expected := []float32{5, 6, 8, 9}
 
 	if len(output) != 4 {
 		t.Errorf("Output length = %d, expected 4", len(output))
 	}
 
 	for i := 0; i < 4; i++ {
-		if math.Abs(output[i]-expected[i]) > 1e-10 {
+		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-6 {
 			t.Errorf("Output[%d] = %f, expected %f", i, output[i], expected[i])
 		}
 	}
@@ -69,7 +69,7 @@ func TestMaxPool2DForwardPadding(t *testing.T) {
 	pool := NewMaxPool2D(1, 2, 2, 1)
 
 	// Input: 3x3 = 9 values
-	input := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
 	output := pool.Forward(input)
 
@@ -86,11 +86,11 @@ func TestMaxPool2DBackward(t *testing.T) {
 	pool := NewMaxPool2D(1, 2, 2, 0)
 
 	// Input: 4x4 = 16 values
-	input := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	pool.Forward(input)
 
 	// Pass gradient of all ones
-	grad := []float64{1, 1, 1, 1}
+	grad := []float32{1, 1, 1, 1}
 	outputGrad := pool.Backward(grad)
 
 	// Only the max positions should get gradient
@@ -98,7 +98,7 @@ func TestMaxPool2DBackward(t *testing.T) {
 	// max(3,4,7,8) = 8 at index 7
 	// max(9,10,13,14) = 14 at index 13
 	// max(11,12,15,16) = 16 at index 15
-	expected := []float64{0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1}
+	expected := []float32{0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1}
 
 	for i := 0; i < 16; i++ {
 		if outputGrad[i] != expected[i] {
@@ -121,8 +121,8 @@ func TestMaxPool2DParams(t *testing.T) {
 		t.Errorf("Expected 0 gradients, got %d", len(gradients))
 	}
 
-	pool.SetParams([]float64{1, 2, 3})
-	pool.SetGradients([]float64{1, 2, 3})
+	pool.SetParams([]float32{1, 2, 3})
+	pool.SetGradients([]float32{1, 2, 3})
 
 	newParams := pool.Params()
 	if len(newParams) != 0 {
@@ -135,9 +135,9 @@ func TestMaxPool2DInOutSize(t *testing.T) {
 	pool := NewMaxPool2D(1, 2, 2, 0)
 
 	// 4x4 input -> 2x2 output
-	input := make([]float64, 16)
+	input := make([]float32, 16)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 	pool.Forward(input)
 
@@ -153,7 +153,7 @@ func TestMaxPool2DArgmax(t *testing.T) {
 	// Test argmax indices (single channel)
 	pool := NewMaxPool2D(1, 2, 2, 0)
 
-	input := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	pool.Forward(input)
 
 	argmax := pool.GetArgmax()
@@ -177,9 +177,9 @@ func TestMaxPool2DLargeInput(t *testing.T) {
 	pool := NewMaxPool2D(1, 2, 2, 0)
 
 	// 64x64 input
-	input := make([]float64, 4096)
+	input := make([]float32, 4096)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 
 	for i := 0; i < 100; i++ {
@@ -191,13 +191,13 @@ func TestMaxPool2DBackwardLarge(t *testing.T) {
 	// Test backward with large input (single channel)
 	pool := NewMaxPool2D(1, 2, 2, 0)
 
-	input := make([]float64, 4096)
+	input := make([]float32, 4096)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 	pool.Forward(input)
 
-	grad := make([]float64, 1024)
+	grad := make([]float32, 1024)
 	for i := range grad {
 		grad[i] = 1.0
 	}

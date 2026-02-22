@@ -9,7 +9,7 @@ import (
 // During inference, passes inputs through unchanged.
 type Dropout struct {
 	// Probability of dropping a neuron
-	p float64
+	p float32
 
 	// Training mode
 	training bool
@@ -21,11 +21,11 @@ type Dropout struct {
 	outSize int
 
 	// Reusable buffers
-	inputBuf   []float64
-	outputBuf  []float64
-	maskBuf    []float64 // Stores dropout mask for backward pass
-	gradInBuf  []float64 // Gradient w.r.t. input
-	gradParams []float64 // No learnable parameters, just for interface
+	inputBuf   []float32
+	outputBuf  []float32
+	maskBuf    []float32 // Stores dropout mask for backward pass
+	gradInBuf  []float32 // Gradient w.r.t. input
+	gradParams []float32 // No learnable parameters, just for interface
 
 	// RNG for dropout masks
 	rng *RNG
@@ -36,17 +36,17 @@ type Dropout struct {
 // NewDropout creates a new dropout layer.
 // p is the probability of dropping a neuron (default 0.5).
 // A higher p means more aggressive dropout.
-func NewDropout(p float64, inSize int) *Dropout {
+func NewDropout(p float32, inSize int) *Dropout {
 	return &Dropout{
 		p:         p,
 		training:  true,
 		inSize:    inSize,
 		outSize:   inSize,
-		inputBuf:  make([]float64, inSize),
-		outputBuf: make([]float64, inSize),
-		maskBuf:   make([]float64, inSize),
-		gradInBuf: make([]float64, inSize),
-		gradParams: make([]float64, 0), // No parameters
+		inputBuf:  make([]float32, inSize),
+		outputBuf: make([]float32, inSize),
+		maskBuf:   make([]float32, inSize),
+		gradInBuf: make([]float32, inSize),
+		gradParams: make([]float32, 0), // No parameters
 		rng:       NewRNG(42),
 		device:    &CPUDevice{},
 	}
@@ -72,7 +72,7 @@ func (d *Dropout) IsTraining() bool {
 // Forward performs a forward pass through the dropout layer.
 // During training: applies dropout mask and scales remaining values.
 // During inference: passes inputs through unchanged.
-func (d *Dropout) Forward(x []float64) []float64 {
+func (d *Dropout) Forward(x []float32) []float32 {
 	copy(d.inputBuf, x)
 
 	if d.training {
@@ -100,7 +100,7 @@ func (d *Dropout) Forward(x []float64) []float64 {
 }
 
 // Backward performs backpropagation through the dropout layer.
-func (d *Dropout) Backward(grad []float64) []float64 {
+func (d *Dropout) Backward(grad []float32) []float32 {
 	if d.training {
 		// Gradient flows through where mask was 1, scaled by 1/keepProb
 		keepProb := 1.0 - d.p
@@ -123,27 +123,27 @@ func (d *Dropout) Backward(grad []float64) []float64 {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For Dropout, we just apply the mask and return the input gradient.
-func (d *Dropout) AccumulateBackward(grad []float64) []float64 {
+func (d *Dropout) AccumulateBackward(grad []float32) []float32 {
 	return d.Backward(grad)
 }
 
 // Params returns layer parameters (empty for Dropout - no learnable params).
-func (d *Dropout) Params() []float64 {
+func (d *Dropout) Params() []float32 {
 	return d.gradParams
 }
 
 // SetParams sets layer parameters (no-op for Dropout).
-func (d *Dropout) SetParams(params []float64) {
+func (d *Dropout) SetParams(params []float32) {
 	// No parameters to set
 }
 
 // Gradients returns layer gradients (empty for Dropout).
-func (d *Dropout) Gradients() []float64 {
+func (d *Dropout) Gradients() []float32 {
 	return d.gradParams
 }
 
 // SetGradients sets layer gradients (no-op for Dropout).
-func (d *Dropout) SetGradients(gradients []float64) {
+func (d *Dropout) SetGradients(gradients []float32) {
 	// No parameters to set
 }
 
@@ -176,11 +176,11 @@ func (d *Dropout) Clone() Layer {
 }
 
 // GetP returns the dropout probability.
-func (d *Dropout) GetP() float64 {
+func (d *Dropout) GetP() float32 {
 	return d.p
 }
 
 // SetP sets the dropout probability.
-func (d *Dropout) SetP(p float64) {
+func (d *Dropout) SetP(p float32) {
 	d.p = p
 }

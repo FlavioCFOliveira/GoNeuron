@@ -27,18 +27,18 @@ func TestDenseForward(t *testing.T) {
 	d.SetBias(1, 0.0)
 
 	// Test input
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 	output := d.Forward(input)
 
 	// With identity weights and zero biases, output should be close to input (tanh applied)
 	// tanh(1) ≈ 0.7616, tanh(2) ≈ 0.9640
-	expected0 := math.Tanh(1.0)
-	expected1 := math.Tanh(2.0)
+	expected0 := float32(math.Tanh(1.0))
+	expected1 := float32(math.Tanh(2.0))
 
-	if math.Abs(output[0]-expected0) > 1e-6 {
+	if float32(math.Abs(float64(output[0]-expected0))) > 1e-6 {
 		t.Errorf("output[0] = %v, want %v", output[0], expected0)
 	}
-	if math.Abs(output[1]-expected1) > 1e-6 {
+	if float32(math.Abs(float64(output[1]-expected1))) > 1e-6 {
 		t.Errorf("output[1] = %v, want %v", output[1], expected1)
 	}
 }
@@ -55,11 +55,11 @@ func TestDenseBackward(t *testing.T) {
 	d.SetBias(0, 0.0)
 	d.SetBias(1, 0.0)
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 	d.Forward(input)
 
 	// Gradient of loss w.r.t. output (dL/dy)
-	grad := []float64{1.0, 1.0}
+	grad := []float32{1.0, 1.0}
 
 	// Backward pass
 	inputGrad := d.Backward(grad)
@@ -88,9 +88,9 @@ func TestDenseParamsAndSetParams(t *testing.T) {
 	}
 
 	// Create new params
-	newParams := make([]float64, len(initialParams))
+	newParams := make([]float32, len(initialParams))
 	for i := range newParams {
-		newParams[i] = float64(i) * 0.1
+		newParams[i] = float32(i) * 0.1
 	}
 
 	// Set new params
@@ -99,7 +99,7 @@ func TestDenseParamsAndSetParams(t *testing.T) {
 	// Verify params were set
 	paramsAfter := d.Params()
 	for i := range paramsAfter {
-		if math.Abs(paramsAfter[i]-newParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(paramsAfter[i]-newParams[i]))) > 1e-7 {
 			t.Errorf("params[%d] = %v, want %v", i, paramsAfter[i], newParams[i])
 		}
 	}
@@ -109,11 +109,11 @@ func TestDenseParamsAndSetParams(t *testing.T) {
 func TestDenseGradients(t *testing.T) {
 	d := NewDense(2, 2, activations.Tanh{})
 
-	input := []float64{1.0, 1.0}
+	input := []float32{1.0, 1.0}
 	d.Forward(input)
 
 	// Compute gradients
-	grad := []float64{1.0, 1.0}
+	grad := []float32{1.0, 1.0}
 	_ = d.Backward(grad)
 
 	// Get gradients
@@ -128,7 +128,7 @@ func TestDenseGradients(t *testing.T) {
 	// Gradients should be non-zero after backward pass
 	nonZeroCount := 0
 	for _, g := range gradients {
-		if math.Abs(g) > 1e-10 {
+		if float32(math.Abs(float64(g))) > 1e-10 {
 			nonZeroCount++
 		}
 	}
@@ -167,7 +167,7 @@ func TestDenseWeightSetGet(t *testing.T) {
 
 	// Get it back
 	val := d.GetWeight(0, 1)
-	if math.Abs(val-3.14) > 1e-10 {
+	if float32(math.Abs(float64(val-3.14))) > 1e-6 {
 		t.Errorf("GetWeight(0,1) = %v, want 3.14", val)
 	}
 }
@@ -181,7 +181,7 @@ func TestDenseBiasSetGet(t *testing.T) {
 
 	// Get it back
 	val := d.GetBias(1)
-	if math.Abs(val-2.71) > 1e-10 {
+	if float32(math.Abs(float64(val-2.71))) > 1e-6 {
 		t.Errorf("GetBias(1) = %v, want 2.71", val)
 	}
 }
@@ -193,15 +193,15 @@ func TestDenseIdentityMapping(t *testing.T) {
 
 	// Train for identity mapping
 	for i := 0; i < 1000; i++ {
-		input := []float64{0.5, 0.5}
+		input := []float32{0.5, 0.5}
 		// Forward
 		output := d.Forward(input)
 
 		// Backward with target = input (identity)
-		target := []float64{0.5, 0.5}
+		target := []float32{0.5, 0.5}
 
 		// Compute loss gradient: dL/dy = y - t
-		grad := make([]float64, 2)
+		grad := make([]float32, 2)
 		for j := 0; j < 2; j++ {
 			grad[j] = output[j] - target[j]
 		}
@@ -211,7 +211,7 @@ func TestDenseIdentityMapping(t *testing.T) {
 		// Simple gradient step
 		params := d.Params()
 		gradients := d.Gradients()
-		learningRate := 0.1
+		learningRate := float32(0.1)
 		for j := range params {
 			params[j] -= learningRate * gradients[j]
 		}
@@ -219,11 +219,11 @@ func TestDenseIdentityMapping(t *testing.T) {
 	}
 
 	// Test after training
-	input := []float64{0.5, 0.5}
+	input := []float32{0.5, 0.5}
 	output := d.Forward(input)
 
 	// Output should be close to input for identity
-	if math.Abs(output[0]-0.5) > 0.1 || math.Abs(output[1]-0.5) > 0.1 {
+	if float32(math.Abs(float64(output[0]-0.5))) > 0.1 || float32(math.Abs(float64(output[1]-0.5))) > 0.1 {
 		t.Errorf("After training, output %v not close to input [0.5, 0.5]", output)
 	}
 }
@@ -234,7 +234,7 @@ func TestConv2DForward(t *testing.T) {
 	c := NewConv2D(1, 1, 1, 1, 0, activations.Tanh{})
 
 	// Input: 2x2
-	input := []float64{1.0, 2.0, 3.0, 4.0} // 2x2 flattened
+	input := []float32{1.0, 2.0, 3.0, 4.0} // 2x2 flattened
 
 	output := c.Forward(input)
 
@@ -250,7 +250,7 @@ func TestConv2DBackward(t *testing.T) {
 	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
 
 	// Input: 4x4
-	input := make([]float64, 16)
+	input := make([]float32, 16)
 	for i := range input {
 		input[i] = 1.0
 	}
@@ -259,7 +259,7 @@ func TestConv2DBackward(t *testing.T) {
 	c.Forward(input)
 
 	// Gradient of same size as output
-	grad := make([]float64, len(c.OutputBuf()))
+	grad := make([]float32, len(c.OutputBuf()))
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -286,16 +286,16 @@ func TestConv2DParamsAndSetParams(t *testing.T) {
 
 	// Test SetParams
 	params := c.Params()
-	newParams := make([]float64, len(params))
+	newParams := make([]float32, len(params))
 	for i := range newParams {
-		newParams[i] = float64(i) * 0.01
+		newParams[i] = float32(i) * 0.01
 	}
 	c.SetParams(newParams)
 
 	// Verify
 	paramsAfter := c.Params()
 	for i := range paramsAfter {
-		if math.Abs(paramsAfter[i]-newParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(paramsAfter[i]-newParams[i]))) > 1e-7 {
 			t.Errorf("params[%d] mismatch", i)
 			break
 		}
@@ -308,7 +308,7 @@ func TestConv2DOutputShape(t *testing.T) {
 	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{}) // 3x3 kernel, stride=1, padding=1
 
 	// Input: 4x4 -> should output 4x4 with padding
-	input := make([]float64, 16)
+	input := make([]float32, 16)
 	output := c.Forward(input)
 
 	// With padding=1 and stride=1, output should be same size as input
@@ -334,7 +334,7 @@ func TestConv2DInSizeAndOutSize(t *testing.T) {
 func TestLSTMForward(t *testing.T) {
 	l := NewLSTM(2, 3) // 2 input features, 3 hidden units
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 	output := l.Forward(input)
 
 	// Output should have correct size
@@ -347,10 +347,10 @@ func TestLSTMForward(t *testing.T) {
 func TestLSTMForwardMultipleSteps(t *testing.T) {
 	l := NewLSTM(2, 3)
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 
 	// Multiple timesteps
-	outputs := make([][]float64, 5)
+	outputs := make([][]float32, 5)
 	for i := range outputs {
 		outputs[i] = l.Forward(input)
 	}
@@ -367,8 +367,8 @@ func TestLSTMForwardMultipleSteps(t *testing.T) {
 func TestLSTMBackward(t *testing.T) {
 	l := NewLSTM(2, 3)
 
-	input := []float64{1.0, 2.0}
-	grad := []float64{0.1, 0.1, 0.1}
+	input := []float32{1.0, 2.0}
+	grad := []float32{0.1, 0.1, 0.1}
 
 	// Forward
 	l.Forward(input)
@@ -386,8 +386,8 @@ func TestLSTMBackward(t *testing.T) {
 func TestLSTMGradients(t *testing.T) {
 	l := NewLSTM(2, 3)
 
-	input := []float64{1.0, 2.0}
-	grad := []float64{0.1, 0.1, 0.1}
+	input := []float32{1.0, 2.0}
+	grad := []float32{0.1, 0.1, 0.1}
 
 	l.Forward(input)
 	_ = l.Backward(grad)
@@ -410,7 +410,7 @@ func TestLSTMGradients(t *testing.T) {
 func TestLSTMReset(t *testing.T) {
 	l := NewLSTM(2, 3)
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 
 	// Get initial output (first forward pass)
 	output0 := l.Forward(input)
@@ -429,7 +429,7 @@ func TestLSTMReset(t *testing.T) {
 
 	// Should be similar (reset should produce same output as initial forward with same weights)
 	for i := range output0 {
-		if math.Abs(output0[i]-output1[i]) > 1e-10 {
+		if float32(math.Abs(float64(output0[i]-output1[i]))) > 1e-7 {
 			t.Errorf("output after reset differs from initial output at index %d: %v vs %v", i, output1[i], output0[i])
 			break
 		}
@@ -447,16 +447,16 @@ func TestLSTMParamsAndSetParams(t *testing.T) {
 	}
 
 	// Test SetParams
-	newParams := make([]float64, len(params))
+	newParams := make([]float32, len(params))
 	for i := range newParams {
-		newParams[i] = float64(i) * 0.001
+		newParams[i] = float32(i) * 0.001
 	}
 	l.SetParams(newParams)
 
 	// Verify
 	paramsAfter := l.Params()
 	for i := range paramsAfter {
-		if math.Abs(paramsAfter[i]-newParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(paramsAfter[i]-newParams[i]))) > 1e-7 {
 			t.Errorf("params[%d] mismatch", i)
 			break
 		}
@@ -482,14 +482,14 @@ func TestDenseLayerInterface(t *testing.T) {
 	// Verify all methods exist and can be called
 	d := NewDense(2, 2, activations.Tanh{})
 
-	x := []float64{1.0, 2.0}
+	x := []float32{1.0, 2.0}
 	y := d.Forward(x)
 
 	if len(y) != 2 {
 		t.Errorf("Forward output length wrong")
 	}
 
-	grad := []float64{1.0, 1.0}
+	grad := []float32{1.0, 1.0}
 	_ = d.Backward(grad)
 
 	_ = d.Params()
@@ -514,10 +514,10 @@ func TestConv2DLayerInterface(t *testing.T) {
 	// Verify all required methods exist
 	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
 
-	input := make([]float64, 9)
+	input := make([]float32, 9)
 	output := c.Forward(input)
 
-	grad := make([]float64, len(output))
+	grad := make([]float32, len(output))
 	_ = c.Backward(grad)
 
 	_ = c.Params()
@@ -531,7 +531,7 @@ func TestLSTMLayerInterface(t *testing.T) {
 	// Verify all required methods exist
 	l := NewLSTM(2, 3)
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 	output := l.Forward(input)
 	_ = l.Backward(output)
 
@@ -546,13 +546,13 @@ func TestDenseZeroInput(t *testing.T) {
 	// This test verifies that the output is small (from small random biases).
 	d := NewDense(3, 2, activations.Tanh{})
 
-	input := []float64{0.0, 0.0, 0.0}
+	input := []float32{0.0, 0.0, 0.0}
 	output := d.Forward(input)
 
 	// Output should be small (close to tanh of small bias values)
 	// Biases are initialized in range [-0.1, 0.1], so output should be in similar range
 	for i := range output {
-		if math.Abs(output[i]) > 0.2 {
+		if float32(math.Abs(float64(output[i]))) > 0.2 {
 			t.Errorf("output[%d] with zero input = %v, expected small value", i, output[i])
 			break
 		}
@@ -564,7 +564,7 @@ func TestDenseLargeValues(t *testing.T) {
 	d := NewDense(2, 2, activations.Tanh{})
 
 	// Large input values
-	input := []float64{100.0, 100.0}
+	input := []float32{100.0, 100.0}
 	output := d.Forward(input)
 
 	// tanh saturates at ±1
@@ -580,7 +580,7 @@ func TestConv2DMultipleChannels(t *testing.T) {
 	c := NewConv2D(3, 2, 2, 1, 0, activations.Tanh{})
 
 	// Input: 3 channels, 4x4 = 48 elements
-	input := make([]float64, 48)
+	input := make([]float32, 48)
 	for i := range input {
 		input[i] = 1.0
 	}
@@ -599,7 +599,7 @@ func TestConv2DMultipleChannels(t *testing.T) {
 func TestConv2DPadding(t *testing.T) {
 	// Without padding: 4x4 input, 3x3 kernel -> 2x2 output
 	c1 := NewConv2D(1, 1, 3, 1, 0, activations.Tanh{})
-	input := make([]float64, 16)
+	input := make([]float32, 16)
 	output1 := c1.Forward(input)
 
 	if len(output1) != 4 { // 2x2
@@ -619,7 +619,7 @@ func TestConv2DPadding(t *testing.T) {
 func TestConv2DStride(t *testing.T) {
 	// Stride=2: 4x4 input, 3x3 kernel, no padding -> 1x1 output
 	c := NewConv2D(1, 1, 3, 2, 0, activations.Tanh{})
-	input := make([]float64, 16)
+	input := make([]float32, 16)
 	output := c.Forward(input)
 
 	if len(output) != 1 { // 1x1 with stride=2

@@ -19,8 +19,8 @@ func TestPReLUAgainstPyTorchReference(t *testing.T) {
 
 	// Values from PyTorch: torch.nn.functional.prelu(torch.tensor(x), torch.tensor([0.25]))
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, -0.5},
 		{-1.0, -0.25},
@@ -33,7 +33,7 @@ func TestPReLUAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := prelu.Activate(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("PReLU.Activate(%v) = %v, PyTorch would give %v", tt.x, got, tt.expected)
 		}
 	}
@@ -46,8 +46,8 @@ func TestPReLUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	// PyTorch PReLU: f'(x) = 1 if x > 0, alpha if x <= 0
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, 0.25},
 		{-0.1, 0.25},
@@ -58,7 +58,7 @@ func TestPReLUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := prelu.Derivative(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("PReLU.Derivative(%v) = %v, PyTorch would give %v", tt.x, got, tt.expected)
 		}
 	}
@@ -81,8 +81,8 @@ func TestPReLUAlphaAccess(t *testing.T) {
 
 	// Verify activation uses updated alpha
 	got := prelu.Activate(-1.0)
-	expected := -0.5
-	if !float64Near(got, expected, 1e-10) {
+	expected := float32(-0.5)
+	if !float32Near(got, expected, 1e-6) {
 		t.Errorf("PReLU(alpha=0.5).Activate(-1.0) = %v, want %v", got, expected)
 	}
 }
@@ -94,22 +94,22 @@ func TestSoftmaxAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed with PyTorch
 	tests := []struct {
-		x        []float64
-		expected []float64
+		x        []float32
+		expected []float32
 	}{
-		{[]float64{1.0, 2.0, 3.0}, []float64{0.09003057317, 0.2447284710, 0.6652409558}},
-		{[]float64{0.0, 0.0, 0.0}, []float64{0.3333333333, 0.3333333333, 0.3333333333}},
-		{[]float64{-1.0, 0.0, 1.0}, []float64{0.09003057317, 0.2447284710, 0.6652409558}},
-		{[]float64{2.0}, []float64{1.0}}, // Single element
+		{[]float32{1.0, 2.0, 3.0}, []float32{0.09003057317, 0.2447284710, 0.6652409558}},
+		{[]float32{0.0, 0.0, 0.0}, []float32{0.3333333333, 0.3333333333, 0.3333333333}},
+		{[]float32{-1.0, 0.0, 1.0}, []float32{0.09003057317, 0.2447284710, 0.6652409558}},
+		{[]float32{2.0}, []float32{1.0}}, // Single element
 	}
 
 	for _, tt := range tests {
-		got := make([]float64, len(tt.x))
+		got := make([]float32, len(tt.x))
 		copy(got, tt.x)
 		result := softmax.ActivateBatch(got)
 
 		for i := range result {
-			if !float64Near(result[i], tt.expected[i], 1e-9) {
+			if !float32Near(result[i], tt.expected[i], 1e-6) {
 				t.Errorf("Softmax.ActivateBatch(%v) = %v, PyTorch would give %v", tt.x, result, tt.expected)
 				break
 			}
@@ -125,22 +125,22 @@ func TestLogSoftmaxAgainstPyTorchReference(t *testing.T) {
 	// Reference values computed with PyTorch: log_softmax(x, dim=0)
 	// For x = [1, 2, 3]: softmax = [0.09, 0.24, 0.66], log_softmax = [-2.41, -1.41, -0.41]
 	tests := []struct {
-		x        []float64
-		expected []float64
+		x        []float32
+		expected []float32
 	}{
-		{[]float64{1.0, 2.0, 3.0}, []float64{-2.407605964, -1.407605964, -0.4076059643}},
-		{[]float64{0.0, 0.0, 0.0}, []float64{-1.098612289, -1.098612289, -1.098612289}},
-		{[]float64{-1.0, 0.0, 1.0}, []float64{-2.407605964, -1.407605964, -0.4076059643}},
-		{[]float64{2.0}, []float64{0.0}}, // Single element: log(1) = 0
+		{[]float32{1.0, 2.0, 3.0}, []float32{-2.407605964, -1.407605964, -0.4076059643}},
+		{[]float32{0.0, 0.0, 0.0}, []float32{-1.098612289, -1.098612289, -1.098612289}},
+		{[]float32{-1.0, 0.0, 1.0}, []float32{-2.407605964, -1.407605964, -0.4076059643}},
+		{[]float32{2.0}, []float32{0.0}}, // Single element: log(1) = 0
 	}
 
 	for _, tt := range tests {
-		got := make([]float64, len(tt.x))
+		got := make([]float32, len(tt.x))
 		copy(got, tt.x)
 		result := logsoftmax.ActivateBatch(got)
 
 		for i := range result {
-			if !float64Near(result[i], tt.expected[i], 1e-9) {
+			if !float32Near(result[i], tt.expected[i], 1e-6) {
 				t.Errorf("LogSoftmax.ActivateBatch(%v) = %v, PyTorch would give %v", tt.x, result, tt.expected)
 				break
 			}
@@ -156,8 +156,8 @@ func TestGELUAgainstPyTorchReference(t *testing.T) {
 	// Reference values computed with PyTorch (using tanh approximation)
 	// GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, -0.04540230591},
 		{-1.0, -0.15880800939},
@@ -170,7 +170,7 @@ func TestGELUAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := gelu.Activate(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("GELU.Activate(%v) = %v, expected %v", tt.x, got, tt.expected)
 		}
 	}
@@ -183,8 +183,8 @@ func TestGELUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed numerically
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, -0.08609925685},
 		{-1.0, -0.08296408407},
@@ -197,7 +197,7 @@ func TestGELUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := gelu.Derivative(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("GELU.Derivative(%v) = %v, expected %v", tt.x, got, tt.expected)
 		}
 	}
@@ -212,8 +212,8 @@ func TestSiLUAgainstPyTorchReference(t *testing.T) {
 	// Reference values using the formula x * sigmoid(x)
 	// sigmoid(x) = 1 / (1 + exp(-x))
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, -0.23840584408490563},  // -2 * sigmoid(-2) = -2 * 0.1192 = -0.2384
 		{-1.0, -0.2689414213699951},   // -1 * sigmoid(-1) = -1 * 0.2689 = -0.2689
@@ -226,7 +226,7 @@ func TestSiLUAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := silu.Activate(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("SiLU.Activate(%v) = %v, expected %v", tt.x, got, tt.expected)
 		}
 	}
@@ -240,8 +240,8 @@ func TestSiLUDerivativeAgainstPyTorchReference(t *testing.T) {
 	// Reference values computed using the derivative formula
 	// SiLU'(x) = sigmoid(x) + SiLU(x) * (1 - sigmoid(x))
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, -0.09078424878},  // sigmoid(-2) + (-0.2384)*(1-0.1192) = 0.1192 - 0.2099 = -0.0907
 		{-1.0, 0.07232948813},   // sigmoid(-1) + (-0.2689)*(1-0.2689) = 0.2689 - 0.1966 = 0.0723
@@ -254,7 +254,7 @@ func TestSiLUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := silu.Derivative(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("SiLU.Derivative(%v) = %v, expected %v", tt.x, got, tt.expected)
 		}
 	}
@@ -267,8 +267,8 @@ func TestELUAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed with PyTorch
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, -0.8646647168},
 		{-1.0, -0.6321205588},
@@ -281,7 +281,7 @@ func TestELUAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := elu.Activate(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("ELU(alpha=1.0).Activate(%v) = %v, PyTorch would give %v", tt.x, got, tt.expected)
 		}
 	}
@@ -293,8 +293,8 @@ func TestELUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	// PyTorch ELU derivative: 1 if x > 0, else alpha*exp(x)
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
 		{-2.0, 0.1353352832},
 		{-1.0, 0.3678794412},
@@ -306,7 +306,7 @@ func TestELUDerivativeAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := elu.Derivative(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("ELU.Derivative(%v) = %v, PyTorch would give %v", tt.x, got, tt.expected)
 		}
 	}
@@ -317,16 +317,16 @@ func TestELUAlphaParameter(t *testing.T) {
 	// Test with alpha=0.5
 	elu05 := NewELU(0.5)
 	got := elu05.Activate(-1.0)
-	expected := 0.5 * (math.Exp(-1.0) - 1)
-	if !float64Near(got, expected, 1e-10) {
+	expected := float32(0.5 * (math.Exp(-1.0) - 1))
+	if !float32Near(got, expected, 1e-6) {
 		t.Errorf("ELU(alpha=0.5).Activate(-1.0) = %v, expected %v", got, expected)
 	}
 
 	// Test with alpha=2.0
 	elu2 := NewELU(2.0)
 	got = elu2.Activate(-1.0)
-	expected = 2.0 * (math.Exp(-1.0) - 1)
-	if !float64Near(got, expected, 1e-10) {
+	expected = float32(2.0 * (math.Exp(-1.0) - 1))
+	if !float32Near(got, expected, 1e-6) {
 		t.Errorf("ELU(alpha=2.0).Activate(-1.0) = %v, expected %v", got, expected)
 	}
 }
@@ -346,12 +346,12 @@ func TestSELUAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed with the SELU formula
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
-		{-2.0, scale * alpha * (math.Exp(-2.0) - 1)},  // -1.5201664686
-		{-1.0, scale * alpha * (math.Exp(-1.0) - 1)},  // -1.1113307378
-		{-0.5, scale * alpha * (math.Exp(-0.5) - 1)},  // -0.6917581878
+		{-2.0, float32(scale * alpha * (math.Exp(-2.0) - 1))},  // -1.5201664686
+		{-1.0, float32(scale * alpha * (math.Exp(-1.0) - 1))},  // -1.1113307378
+		{-0.5, float32(scale * alpha * (math.Exp(-0.5) - 1))},  // -0.6917581878
 		{0.0, 0.0},
 		{0.5, scale * 0.5},                            // 0.5253504937
 		{1.0, scale * 1.0},                            // 1.0507009874
@@ -360,7 +360,7 @@ func TestSELUAgainstPyTorchReference(t *testing.T) {
 
 	for _, tt := range tests {
 		got := selu.Activate(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("SELU.Activate(%v) = %v, expected %v", tt.x, got, tt.expected)
 		}
 	}
@@ -376,26 +376,26 @@ func TestSELUDerivativeAgainstPyTorchReference(t *testing.T) {
 	// SELU'(x) = scale if x > 0, else scale * alpha * exp(x)
 	// Note: at x=0, we use x <= 0 branch, so derivative = scale * alpha * exp(0) = scale * alpha
 	tests := []struct {
-		x        float64
-		expected float64
+		x        float32
+		expected float32
 	}{
-		{-2.0, scale * alpha * math.Exp(-2.0)},  // 0.2379328723
-		{-1.0, scale * alpha * math.Exp(-1.0)},  // 0.6467686030
-		{-0.5, scale * alpha * math.Exp(-0.5)},  // 1.0663411530
-		{0.0, scale * alpha},                    // 1.7580993408 (at x=0, uses x<=0 branch)
+		{-2.0, float32(scale * alpha * math.Exp(-2.0))},  // 0.2379328723
+		{-1.0, float32(scale * alpha * math.Exp(-1.0))},  // 0.6467686030
+		{-0.5, float32(scale * alpha * math.Exp(-0.5))},  // 1.0663411530
+		{0.0, float32(scale * alpha)},                    // 1.7580993408 (at x=0, uses x<=0 branch)
 		{0.5, scale},                            // 1.0507009874
 		{1.0, scale},                            // 1.0507009874
 	}
 
 	for _, tt := range tests {
 		got := selu.Derivative(tt.x)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("SELU.Derivative(%v) = %v, expected %v", tt.x, got, tt.expected)
 		}
 	}
 }
 
 // Helper function
-func float64Near(a, b, tol float64) bool {
-	return math.Abs(a-b) <= tol
+func float32Near(a, b, tol float32) bool {
+	return float32(math.Abs(float64(a-b))) <= tol
 }

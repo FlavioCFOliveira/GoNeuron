@@ -28,21 +28,21 @@ type Conv2D struct {
 
 	// Weights: [outChannels, inChannels, kernelSize, kernelSize]
 	// Stored as contiguous slice for cache efficiency
-	weights []float64
-	biases  []float64
+	weights []float32
+	biases  []float32
 
 	// Activation function
 	activation activations.Activation
 
 	// Pre-allocated buffers
-	preActBuf   []float64 // Contains pre-activation values (z = w*x + b)
-	outputBuf   []float64 // Contains post-activation values (activation(z))
-	gradWeights []float64
-	gradBiases  []float64
-	gradInBuf   []float64
+	preActBuf   []float32 // Contains pre-activation values (z = w*x + b)
+	outputBuf   []float32 // Contains post-activation values (activation(z))
+	gradWeights []float32
+	gradBiases  []float32
+	gradInBuf   []float32
 
 	// Saved input for backward pass
-	savedInput []float64
+	savedInput []float32
 
 	device Device
 }
@@ -57,12 +57,12 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 	activation activations.Activation) *Conv2D {
 
 	// He initialization (better for ReLU)
-	scale := math.Sqrt(2.0 / float64(inChannels*kernelSize*kernelSize))
+	scale := float32(math.Sqrt(2.0 / float64(inChannels*kernelSize*kernelSize)))
 
 	// Allocate weights: [outChannels, inChannels, kernelSize, kernelSize]
 	// Flattened: [outChannels * inChannels * kernelSize * kernelSize]
-	weights := make([]float64, outChannels*inChannels*kernelSize*kernelSize)
-	biases := make([]float64, outChannels)
+	weights := make([]float32, outChannels*inChannels*kernelSize*kernelSize)
+	biases := make([]float32, outChannels)
 
 	// Create deterministic RNG for reproducible initialization
 	rng := NewRNG(42)
@@ -93,8 +93,8 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 
 		weights:     weights,
 		biases:      biases,
-		gradWeights: make([]float64, len(weights)),
-		gradBiases:  make([]float64, len(biases)),
+		gradWeights: make([]float32, len(weights)),
+		gradBiases:  make([]float32, len(biases)),
 		device:      &CPUDevice{},
 	}
 }
@@ -122,7 +122,7 @@ func (c *Conv2D) SetInputDimensions(height, width int) {
 // Forward performs a forward pass through the convolutional layer.
 // input: flattened [inChannels, inputHeight, inputWidth]
 // Returns: flattened [outChannels, outputHeight, outputWidth]
-func (c *Conv2D) Forward(input []float64) []float64 {
+func (c *Conv2D) Forward(input []float32) []float32 {
 	// Infer input dimensions from length
 	totalInput := len(input)
 	if totalInput%c.inChannels != 0 {
@@ -163,20 +163,20 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 	// Ensure buffers are sized correctly
 	requiredOutput := c.outChannels * outH * outW
 	if len(c.preActBuf) < requiredOutput {
-		c.preActBuf = make([]float64, requiredOutput)
+		c.preActBuf = make([]float32, requiredOutput)
 	}
 	if len(c.outputBuf) < requiredOutput {
-		c.outputBuf = make([]float64, requiredOutput)
+		c.outputBuf = make([]float32, requiredOutput)
 	}
 
 	// Ensure gradInBuf is sized correctly for backward pass
 	if len(c.gradInBuf) < totalInput {
-		c.gradInBuf = make([]float64, totalInput)
+		c.gradInBuf = make([]float32, totalInput)
 	}
 
 	// Save input for backward pass
 	if cap(c.savedInput) < len(input) {
-		c.savedInput = make([]float64, len(input))
+		c.savedInput = make([]float32, len(input))
 	}
 	copy(c.savedInput, input)
 
@@ -256,7 +256,7 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 // Backward performs backpropagation through the convolutional layer.
 // grad: gradient of loss w.r.t. activated output (shape: [outChannels, outH, outW] flattened)
 // Returns: gradient of loss w.r.t. input
-func (c *Conv2D) Backward(grad []float64) []float64 {
+func (c *Conv2D) Backward(grad []float32) []float32 {
 	// Output dimensions
 	outH, outW := c.computeOutputSize(c.inputHeight, c.inputWidth)
 	outSize := outH * outW
@@ -333,39 +333,39 @@ func (c *Conv2D) Backward(grad []float64) []float64 {
 }
 
 // Params returns all convolutional layer parameters flattened (copy).
-func (c *Conv2D) Params() []float64 {
+func (c *Conv2D) Params() []float32 {
 	total := len(c.weights) + len(c.biases)
-	params := make([]float64, total)
+	params := make([]float32, total)
 	copy(params, c.weights)
 	copy(params[len(c.weights):], c.biases)
 	return params
 }
 
 // SetParams updates weights and biases from a flattened slice.
-func (c *Conv2D) SetParams(params []float64) {
+func (c *Conv2D) SetParams(params []float32) {
 	totalWeights := len(c.weights)
 	copy(c.weights, params[:totalWeights])
 	copy(c.biases, params[totalWeights:])
 }
 
 // Gradients returns all convolutional layer gradients flattened (copy).
-func (c *Conv2D) Gradients() []float64 {
+func (c *Conv2D) Gradients() []float32 {
 	total := len(c.gradWeights) + len(c.gradBiases)
-	gradients := make([]float64, total)
+	gradients := make([]float32, total)
 	copy(gradients, c.gradWeights)
 	copy(gradients[len(c.gradWeights):], c.gradBiases)
 	return gradients
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
-func (c *Conv2D) SetGradients(gradients []float64) {
+func (c *Conv2D) SetGradients(gradients []float32) {
 	copy(c.gradWeights, gradients[:len(c.gradWeights)])
 	copy(c.gradBiases, gradients[len(c.gradWeights):])
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For Conv2D, gradients are already accumulated in Backward, so this just calls Backward.
-func (c *Conv2D) AccumulateBackward(grad []float64) []float64 {
+func (c *Conv2D) AccumulateBackward(grad []float32) []float32 {
 	return c.Backward(grad)
 }
 
@@ -407,13 +407,13 @@ func (c *Conv2D) Reset() {
 
 // OutputBuf returns the raw output buffer for advanced use.
 // The caller should not modify this buffer directly.
-func (c *Conv2D) OutputBuf() []float64 {
+func (c *Conv2D) OutputBuf() []float32 {
 	return c.outputBuf
 }
 
 // SetOutputBuf allows setting a custom output buffer.
 // This is useful for chaining layers efficiently.
-func (c *Conv2D) SetOutputBuf(buf []float64) {
+func (c *Conv2D) SetOutputBuf(buf []float32) {
 	c.outputBuf = buf
 }
 

@@ -7,35 +7,35 @@ import (
 // RBF is a Radial Basis Function layer.
 // It uses Gaussian RBF activation: phi(x) = exp(-gamma * ||x - center||^2)
 type RBF struct {
-	centers  []float64 // Shape: [numCenters * inSize]
-	weights  []float64 // Shape: [outSize * numCenters]
-	biases   []float64 // Shape: [outSize]
-	gamma    float64   // Shape parameter for RBF kernel
+	centers  []float32 // Shape: [numCenters * inSize]
+	weights  []float32 // Shape: [outSize * numCenters]
+	biases   []float32 // Shape: [outSize]
+	gamma    float32   // Shape parameter for RBF kernel
 
 	inSize     int
 	numCenters int
 	outSize    int
 
 	// Pre-allocated buffers
-	inputBuf     []float64 // [inSize]
-	distBuf      []float64 // [numCenters] - Squared distances
-	phiBuf       []float64 // [numCenters] - RBF activations
-	outputBuf    []float64 // [outSize]
+	inputBuf     []float32 // [inSize]
+	distBuf      []float32 // [numCenters] - Squared distances
+	phiBuf       []float32 // [numCenters] - RBF activations
+	outputBuf    []float32 // [outSize]
 
-	gradWBuf     []float64 // [outSize * numCenters]
-	gradBBuf     []float64 // [outSize]
-	gradCBuf     []float64 // [numCenters * inSize] - Optional: gradients for centers
-	gradInBuf    []float64 // [inSize]
-	dzBuf        []float64 // [outSize]
+	gradWBuf     []float32 // [outSize * numCenters]
+	gradBBuf     []float32 // [outSize]
+	gradCBuf     []float32 // [numCenters * inSize] - Optional: gradients for centers
+	gradInBuf    []float32 // [inSize]
+	dzBuf        []float32 // [outSize]
 
 	device Device
 }
 
 // NewRBF creates a new RBF layer.
-func NewRBF(inSize, numCenters, outSize int, gamma float64) *RBF {
-	centers := make([]float64, numCenters*inSize)
-	weights := make([]float64, outSize*numCenters)
-	biases := make([]float64, outSize)
+func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
+	centers := make([]float32, numCenters*inSize)
+	weights := make([]float32, outSize*numCenters)
+	biases := make([]float32, outSize)
 
 	// Simple initialization
 	rng := NewRNG(uint64(inSize*1000 + numCenters*100 + outSize + 7))
@@ -44,7 +44,7 @@ func NewRBF(inSize, numCenters, outSize int, gamma float64) *RBF {
 	}
 
 	// Xavier-like for weights
-	scale := math.Sqrt(2.0 / float64(numCenters+outSize))
+	scale := float32(math.Sqrt(2.0 / float64(numCenters+outSize)))
 	for i := range weights {
 		weights[i] = rng.RandFloat()*2*scale - scale
 	}
@@ -61,15 +61,15 @@ func NewRBF(inSize, numCenters, outSize int, gamma float64) *RBF {
 		inSize:     inSize,
 		numCenters: numCenters,
 		outSize:    outSize,
-		inputBuf:   make([]float64, inSize),
-		distBuf:    make([]float64, numCenters),
-		phiBuf:     make([]float64, numCenters),
-		outputBuf:  make([]float64, outSize),
-		gradWBuf:   make([]float64, outSize*numCenters),
-		gradBBuf:   make([]float64, outSize),
-		gradCBuf:   make([]float64, numCenters*inSize),
-		gradInBuf:  make([]float64, inSize),
-		dzBuf:      make([]float64, outSize),
+		inputBuf:   make([]float32, inSize),
+		distBuf:    make([]float32, numCenters),
+		phiBuf:     make([]float32, numCenters),
+		outputBuf:  make([]float32, outSize),
+		gradWBuf:   make([]float32, outSize*numCenters),
+		gradBBuf:   make([]float32, outSize),
+		gradCBuf:   make([]float32, numCenters*inSize),
+		gradInBuf:  make([]float32, inSize),
+		dzBuf:      make([]float32, outSize),
 		device:     &CPUDevice{},
 	}
 }
@@ -80,19 +80,19 @@ func (r *RBF) SetDevice(device Device) {
 }
 
 // Forward performs a forward pass.
-func (r *RBF) Forward(x []float64) []float64 {
+func (r *RBF) Forward(x []float32) []float32 {
 	copy(r.inputBuf, x)
 
 	// 1. Compute RBF activations: phi_j = exp(-gamma * ||x - c_j||^2)
 	for j := 0; j < r.numCenters; j++ {
-		distSq := 0.0
+		distSq := float32(0.0)
 		cBase := j * r.inSize
 		for i := 0; i < r.inSize; i++ {
 			diff := x[i] - r.centers[cBase+i]
 			distSq += diff * diff
 		}
 		r.distBuf[j] = distSq
-		r.phiBuf[j] = math.Exp(-r.gamma * distSq)
+		r.phiBuf[j] = float32(math.Exp(float64(-r.gamma * distSq)))
 	}
 
 	// 2. Compute linear output: y = W * phi + b
@@ -109,7 +109,7 @@ func (r *RBF) Forward(x []float64) []float64 {
 }
 
 // Backward performs a backward pass.
-func (r *RBF) Backward(grad []float64) []float64 {
+func (r *RBF) Backward(grad []float32) []float32 {
 	// 1. Gradients for Linear part (weights and biases)
 	// dL/db_o = grad_o
 	// dL/dW_{oj} = grad_o * phi_j
@@ -124,7 +124,7 @@ func (r *RBF) Backward(grad []float64) []float64 {
 	// 2. Gradient for RBF activations (phi)
 	// dL/dphi_j = sum_o (grad_o * W_{oj})
 	for j := 0; j < r.numCenters; j++ {
-		dphi := 0.0
+		dphi := float32(0.0)
 		for o := 0; o < r.outSize; o++ {
 			dphi += grad[o] * r.weights[o*r.numCenters+j]
 		}
@@ -146,16 +146,16 @@ func (r *RBF) Backward(grad []float64) []float64 {
 }
 
 // AccumulateBackward is like Backward but specifically for accumulation.
-func (r *RBF) AccumulateBackward(grad []float64) []float64 {
+func (r *RBF) AccumulateBackward(grad []float32) []float32 {
 	// For RBF, we already accumulate in Backward if we don't clear.
 	// But let's follow the interface pattern.
 	return r.Backward(grad)
 }
 
 // Params returns all parameters flattened: weights, biases, centers.
-func (r *RBF) Params() []float64 {
+func (r *RBF) Params() []float32 {
 	total := len(r.weights) + len(r.biases) + len(r.centers)
-	p := make([]float64, total)
+	p := make([]float32, total)
 	n := copy(p, r.weights)
 	n += copy(p[n:], r.biases)
 	copy(p[n:], r.centers)
@@ -163,16 +163,16 @@ func (r *RBF) Params() []float64 {
 }
 
 // SetParams updates parameters from flattened slice.
-func (r *RBF) SetParams(p []float64) {
+func (r *RBF) SetParams(p []float32) {
 	n := copy(r.weights, p)
 	n += copy(r.biases, p[n:])
 	copy(r.centers, p[n:])
 }
 
 // Gradients returns all gradients flattened.
-func (r *RBF) Gradients() []float64 {
+func (r *RBF) Gradients() []float32 {
 	total := len(r.gradWBuf) + len(r.gradBBuf) + len(r.gradCBuf)
-	g := make([]float64, total)
+	g := make([]float32, total)
 	n := copy(g, r.gradWBuf)
 	n += copy(g[n:], r.gradBBuf)
 	copy(g[n:], r.gradCBuf)
@@ -180,7 +180,7 @@ func (r *RBF) Gradients() []float64 {
 }
 
 // SetGradients sets gradients from flattened slice.
-func (r *RBF) SetGradients(g []float64) {
+func (r *RBF) SetGradients(g []float32) {
 	n := copy(r.gradWBuf, g)
 	n += copy(r.gradBBuf, g[n:])
 	copy(r.gradCBuf, g[n:])
@@ -223,6 +223,6 @@ func (r *RBF) NumCenters() int {
 }
 
 // Gamma returns the RBF gamma parameter.
-func (r *RBF) Gamma() float64 {
+func (r *RBF) Gamma() float32 {
 	return r.gamma
 }

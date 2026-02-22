@@ -23,7 +23,7 @@ func TestNetworkForward(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 	output := network.Forward(input)
 
 	if len(output) != 1 {
@@ -39,8 +39,8 @@ func TestNetworkBackward(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 2.0}
-	target := []float64{1.0}
+	input := []float32{1.0, 2.0}
+	target := []float32{1.0}
 
 	// Forward
 	yPred := network.Forward(input)
@@ -64,13 +64,13 @@ func TestNetworkTrain(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{0.0, 0.0}
-	target := []float64{0.0}
+	input := []float32{0.0, 0.0}
+	target := []float32{0.0}
 
-	loss := network.Train(input, target)
+	l := network.Train(input, target)
 
-	if loss < 0 {
-		t.Errorf("Loss should be non-negative, got %v", loss)
+	if l < 0 {
+		t.Errorf("Loss should be non-negative, got %v", l)
 	}
 }
 
@@ -84,8 +84,8 @@ func TestNetworkXOR(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.5})
 
 	// XOR training data
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}}
 
 	// Train for multiple epochs
 	for epoch := 0; epoch < 1000; epoch++ {
@@ -96,19 +96,19 @@ func TestNetworkXOR(t *testing.T) {
 
 	// Test predictions
 	tolerances := []struct {
-		input  []float64
-		target float64
+		input  []float32
+		target float32
 	}{
-		{[]float64{0, 0}, 0},
-		{[]float64{0, 1}, 1},
-		{[]float64{1, 0}, 1},
-		{[]float64{1, 1}, 0},
+		{[]float32{0, 0}, 0},
+		{[]float32{0, 1}, 1},
+		{[]float32{1, 0}, 1},
+		{[]float32{1, 1}, 0},
 	}
 
 	for _, tt := range tolerances {
 		output := network.Forward(tt.input)
 		pred := output[0]
-		if math.Abs(pred-tt.target) > 0.1 {
+		if float32(math.Abs(float64(pred-tt.target))) > 0.1 {
 			t.Errorf("XOR(%v) = %v, want ~%v", tt.input, pred, tt.target)
 		}
 	}
@@ -122,16 +122,16 @@ func TestNetworkMultipleEpochs(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}}
 
 	// Store initial loss
-	initialLoss := 0.0
+	initialLoss := float32(0.0)
 	for i := range trainX {
 		yPred := network.Forward(trainX[i])
 		initialLoss += loss.MSE{}.Forward(yPred, trainY[i])
 	}
-	initialLoss /= float64(len(trainX))
+	initialLoss /= float32(len(trainX))
 
 	// Train for 500 epochs
 	for epoch := 0; epoch < 500; epoch++ {
@@ -141,12 +141,12 @@ func TestNetworkMultipleEpochs(t *testing.T) {
 	}
 
 	// Check that loss decreased
-	finalLoss := 0.0
+	finalLoss := float32(0.0)
 	for i := range trainX {
 		yPred := network.Forward(trainX[i])
 		finalLoss += loss.MSE{}.Forward(yPred, trainY[i])
 	}
-	finalLoss /= float64(len(trainX))
+	finalLoss /= float32(len(trainX))
 
 	if finalLoss >= initialLoss {
 		t.Errorf("Loss should decrease after training: initial=%v, final=%v", initialLoss, finalLoss)
@@ -160,8 +160,8 @@ func TestNetworkStep(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 1.0}
-	target := []float64{1.0, 1.0}
+	input := []float32{1.0, 1.0}
+	target := []float32{1.0, 1.0}
 
 	// Get initial params
 	initialParams := network.Params()
@@ -175,7 +175,7 @@ func TestNetworkStep(t *testing.T) {
 	// Params should have changed
 	paramsChanged := false
 	for i := range initialParams {
-		if math.Abs(initialParams[i]-afterStepParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(initialParams[i]-afterStepParams[i]))) > 1e-6 {
 			paramsChanged = true
 			break
 		}
@@ -210,8 +210,8 @@ func TestNetworkGradients(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 1.0}
-	target := []float64{1.0, 1.0}
+	input := []float32{1.0, 1.0}
+	target := []float32{1.0, 1.0}
 
 	// Train to compute gradients
 	network.Train(input, target)
@@ -222,7 +222,7 @@ func TestNetworkGradients(t *testing.T) {
 	// Gradients should not be all zero after training
 	nonZeroCount := 0
 	for _, g := range gradients {
-		if math.Abs(g) > 1e-10 {
+		if float32(math.Abs(float64(g))) > 1e-10 {
 			nonZeroCount++
 		}
 	}
@@ -240,14 +240,14 @@ func TestNetworkTrainBatch(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}}
 
 	// Train on batch
-	loss := network.TrainBatch(trainX, trainY)
+	l := network.TrainBatch(trainX, trainY)
 
-	if loss < 0 {
-		t.Errorf("Batch loss should be non-negative, got %v", loss)
+	if l < 0 {
+		t.Errorf("Batch loss should be non-negative, got %v", l)
 	}
 }
 
@@ -258,10 +258,10 @@ func TestNetworkTrainBatchEmpty(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	loss := network.TrainBatch([][]float64{}, [][]float64{})
+	l := network.TrainBatch([][]float32{}, [][]float32{})
 
-	if loss != 0 {
-		t.Errorf("Empty batch loss should be 0, got %v", loss)
+	if l != 0 {
+		t.Errorf("Empty batch loss should be 0, got %v", l)
 	}
 }
 
@@ -288,8 +288,8 @@ func TestNetworkTrainBatchConsistency(t *testing.T) {
 	params := network1.Params()
 	network2.SetParams(params)
 
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}}
 
 	// Train one epoch with sequential
 	for i := range trainX {
@@ -309,7 +309,7 @@ func TestNetworkTrainBatchConsistency(t *testing.T) {
 
 	// Check params are similar (batch averaging may cause slight differences)
 	for i := range params1 {
-		if math.Abs(params1[i]-params2[i]) > 0.01 {
+		if float32(math.Abs(float64(params1[i]-params2[i]))) > 0.01 {
 			t.Logf("Param %d: sequential=%v, batch=%v", i, params1[i], params2[i])
 		}
 	}
@@ -324,12 +324,12 @@ func TestNetworkGradientDescent(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Generate training data: y = 2x + 1
-	trainX := make([][]float64, 10)
-	trainY := make([][]float64, 10)
+	trainX := make([][]float32, 10)
+	trainY := make([][]float32, 10)
 	for i := 0; i < 10; i++ {
-		x := float64(i) / 10.0
-		trainX[i] = []float64{x}
-		trainY[i] = []float64{2*x + 1}
+		x := float32(i) / 10.0
+		trainX[i] = []float32{x}
+		trainY[i] = []float32{2*x + 1}
 	}
 
 	// Train for 100 epochs
@@ -341,13 +341,13 @@ func TestNetworkGradientDescent(t *testing.T) {
 
 	// Test predictions
 	for i := 0; i < 10; i++ {
-		x := float64(i) / 10.0
-		output := network.Forward([]float64{x})
+		x := float32(i) / 10.0
+		output := network.Forward([]float32{x})
 		pred := output[0]
-		target := 2*x + 1
+		target := float32(2*x + 1)
 
 		// Should be reasonably close after training
-		if math.Abs(pred-target) > 0.2 {
+		if float32(math.Abs(float64(pred-target))) > 0.2 {
 			t.Errorf("Prediction for x=%v: %v, want %v", x, pred, target)
 		}
 	}
@@ -361,8 +361,8 @@ func TestNetworkParamsLengthMatchesGradients(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 1.0, 1.0}
-	target := []float64{1.0, 1.0}
+	input := []float32{1.0, 1.0, 1.0}
+	target := []float32{1.0, 1.0}
 
 	// Train to compute gradients
 	network.Train(input, target)
@@ -391,7 +391,7 @@ func TestNetworkLayerOrdering(t *testing.T) {
 	}
 
 	// Forward pass
-	output := network.Forward([]float64{1.0, 1.0})
+	output := network.Forward([]float32{1.0, 1.0})
 	if len(output) != 1 {
 		t.Errorf("Output length = %d, want 1", len(output))
 	}
@@ -418,7 +418,7 @@ func TestNetworkDifferentActivations(t *testing.T) {
 			network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 			// Just verify it doesn't panic
-			output := network.Forward([]float64{1.0, 1.0})
+			output := network.Forward([]float32{1.0, 1.0})
 			if len(output) != 1 {
 				t.Errorf("Output length = %d, want 1", len(output))
 			}
@@ -434,10 +434,10 @@ func TestNetworkForwardBackwardShape(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 1.0, 1.0}
+	input := []float32{1.0, 1.0, 1.0}
 	output := network.Forward(input)
 
-	grad := make([]float64, len(output))
+	grad := make([]float32, len(output))
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -461,7 +461,7 @@ func TestNetworkSetParams(t *testing.T) {
 
 	// Modify them
 	for i := range params {
-		params[i] = float64(i) * 0.01
+		params[i] = float32(i) * 0.01
 	}
 
 	// Set them back
@@ -470,7 +470,7 @@ func TestNetworkSetParams(t *testing.T) {
 	// Verify they were set
 	afterParams := network.Params()
 	for i := range params {
-		if math.Abs(params[i]-afterParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(params[i]-afterParams[i]))) > 1e-6 {
 			t.Errorf("Param %d mismatch after SetParams", i)
 		}
 	}
@@ -488,9 +488,9 @@ func TestNetworkParamsSetParamsRoundtrip(t *testing.T) {
 	originalParams := network.Params()
 
 	// Set new random params
-	newParams := make([]float64, len(originalParams))
+	newParams := make([]float32, len(originalParams))
 	for i := range newParams {
-		newParams[i] = float64(i) * 0.001
+		newParams[i] = float32(i) * 0.001
 	}
 	network.SetParams(newParams)
 
@@ -499,7 +499,7 @@ func TestNetworkParamsSetParamsRoundtrip(t *testing.T) {
 
 	// Verify they match
 	for i := range newParams {
-		if math.Abs(newParams[i]-afterParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(newParams[i]-afterParams[i]))) > 1e-6 {
 			t.Errorf("Param %d: expected %v, got %v", i, newParams[i], afterParams[i])
 		}
 	}
@@ -509,7 +509,7 @@ func TestNetworkParamsSetParamsRoundtrip(t *testing.T) {
 	afterOriginal := network.Params()
 
 	for i := range originalParams {
-		if math.Abs(originalParams[i]-afterOriginal[i]) > 1e-10 {
+		if float32(math.Abs(float64(originalParams[i]-afterOriginal[i]))) > 1e-6 {
 			t.Errorf("Param %d after roundtrip: expected %v, got %v", i, originalParams[i], afterOriginal[i])
 		}
 	}
@@ -523,7 +523,7 @@ func TestNetworkZeroInput(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Zero input should produce some output (due to biases)
-	output := network.Forward([]float64{0, 0})
+	output := network.Forward([]float32{0, 0})
 
 	// Output should be in [-1, 1] for Tanh
 	for i := range output {
@@ -541,7 +541,7 @@ func TestNetworkLargeInput(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Large input values
-	output := network.Forward([]float64{100, 100})
+	output := network.Forward([]float32{100, 100})
 
 	// Tanh should saturate at ±1
 	for i := range output {
@@ -558,7 +558,7 @@ func TestNetworkSingleLayer(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	output := network.Forward([]float64{1, 2, 3})
+	output := network.Forward([]float32{1, 2, 3})
 	if len(output) != 2 {
 		t.Errorf("Output length = %d, want 2", len(output))
 	}
@@ -575,7 +575,7 @@ func TestNetworkDeepNetwork(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	output := network.Forward([]float64{1, 2, 3, 4})
+	output := network.Forward([]float32{1, 2, 3, 4})
 	if len(output) != 2 {
 		t.Errorf("Output length = %d, want 2", len(output))
 	}
@@ -589,21 +589,21 @@ func TestNetworkTrainBatchParallel(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}, {0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}, {0}, {1}, {1}, {0}}
 
 	// Train on batch (should use parallel path)
-	loss := network.TrainBatch(trainX, trainY)
+	l := network.TrainBatch(trainX, trainY)
 
-	if loss < 0 {
-		t.Errorf("Batch loss should be non-negative, got %v", loss)
+	if l < 0 {
+		t.Errorf("Batch loss should be non-negative, got %v", l)
 	}
 }
 
 // TestNetworkSequentialVsParallelConsistency tests that sequential and parallel batch training produce consistent results.
 func TestNetworkSequentialVsParallelConsistency(t *testing.T) {
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}, {0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}, {0}, {1}, {1}, {0}}
 
 	// Sequential network
 	sequentialLayers := []layer.Layer{
@@ -632,8 +632,8 @@ func TestNetworkSequentialVsParallelConsistency(t *testing.T) {
 	parallelNet.TrainBatch(trainX, trainY)
 
 	// Compare final losses on same test data
-	testLossSeq := 0.0
-	testLossPar := 0.0
+	testLossSeq := float32(0.0)
+	testLossPar := float32(0.0)
 
 	for i := range trainX {
 		yPredSeq := sequentialNet.Forward(trainX[i])
@@ -645,7 +645,7 @@ func TestNetworkSequentialVsParallelConsistency(t *testing.T) {
 
 	// Losses should be similar (both are minimizing the same objective)
 	// Allow some tolerance due to floating point differences
-	if math.Abs(testLossSeq-testLossPar) > 0.1 {
+	if float32(math.Abs(float64(testLossSeq-testLossPar))) > 0.1 {
 		t.Logf("Sequential loss: %v, Parallel loss: %v", testLossSeq, testLossPar)
 	}
 }
@@ -658,10 +658,10 @@ func TestNetworkBackwardGradientShape(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1, 2, 3}
+	input := []float32{1, 2, 3}
 	output := network.Forward(input)
 
-	grad := make([]float64, len(output))
+	grad := make([]float32, len(output))
 	outputGrad := network.Backward(grad)
 
 	if len(outputGrad) != len(input) {
@@ -676,13 +676,13 @@ func TestNetworkForwardIdempotent(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1.0, 2.0}
+	input := []float32{1.0, 2.0}
 
 	output1 := network.Forward(input)
 	output2 := network.Forward(input)
 
 	for i := range output1 {
-		if math.Abs(output1[i]-output2[i]) > 1e-15 {
+		if float32(math.Abs(float64(output1[i]-output2[i]))) > 1e-6 {
 			t.Errorf("Forward not idempotent: output1[%d]=%v, output2[%d]=%v", i, output1[i], i, output2[i])
 		}
 	}
@@ -697,7 +697,7 @@ func TestNetworkTrainPreservesParamsLength(t *testing.T) {
 
 	initialLen := len(network.Params())
 
-	network.Train([]float64{1, 1}, []float64{1, 1})
+	network.Train([]float32{1, 1}, []float32{1, 1})
 
 	afterLen := len(network.Params())
 
@@ -714,10 +714,10 @@ func TestNetworkLossDecreases(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.5})
 
-	input := []float64{0, 0}
-	target := []float64{0}
+	input := []float32{0, 0}
+	target := []float32{0}
 
-	losses := make([]float64, 10)
+	losses := make([]float32, 10)
 	for i := 0; i < 10; i++ {
 		losses[i] = network.Train(input, target)
 	}
@@ -738,11 +738,11 @@ func TestNetworkParamsDoNotNan(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		params := network.Params()
 		for j := range params {
-			if math.IsNaN(params[j]) {
+			if math.IsNaN(float64(params[j])) {
 				t.Errorf("NaN detected in params at index %d", j)
 			}
 		}
-		network.Train([]float64{1, 1}, []float64{1, 1})
+		network.Train([]float32{1, 1}, []float32{1, 1})
 	}
 }
 
@@ -755,10 +755,10 @@ func TestNetworkBackwardChain(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := []float64{1, 2}
+	input := []float32{1, 2}
 	_ = network.Forward(input) // Forward pass to populate states
 
-	grad := []float64{1.0}
+	grad := []float32{1.0}
 	outputGrad := network.Backward(grad)
 
 	// Input gradient should have same length as input
@@ -790,17 +790,17 @@ func TestNetworkLargeBatch(t *testing.T) {
 
 	// Create a larger batch
 	batchSize := 50
-	trainX := make([][]float64, batchSize)
-	trainY := make([][]float64, batchSize)
+	trainX := make([][]float32, batchSize)
+	trainY := make([][]float32, batchSize)
 	for i := 0; i < batchSize; i++ {
-		trainX[i] = []float64{float64(i % 2), float64((i / 2) % 2)}
-		trainY[i] = []float64{float64((i % 3) % 2)}
+		trainX[i] = []float32{float32(i % 2), float32((i / 2) % 2)}
+		trainY[i] = []float32{float32((i % 3) % 2)}
 	}
 
-	loss := network.TrainBatch(trainX, trainY)
+	l := network.TrainBatch(trainX, trainY)
 
-	if loss < 0 {
-		t.Errorf("Batch loss should be non-negative, got %v", loss)
+	if l < 0 {
+		t.Errorf("Batch loss should be non-negative, got %v", l)
 	}
 }
 
@@ -812,7 +812,7 @@ func TestNetworkSetParamsLengthMismatch(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Wrong length params
-	wrongParams := make([]float64, 100)
+	wrongParams := make([]float32, 100)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -821,7 +821,7 @@ func TestNetworkSetParamsLengthMismatch(t *testing.T) {
 		}
 	}()
 
-	layer := network.layers[0]
+	l := network.layers[0]
 	defer func() {
 		if r := recover(); r == nil {
 			// This is actually acceptable behavior - SetParams may not check length
@@ -829,7 +829,7 @@ func TestNetworkSetParamsLengthMismatch(t *testing.T) {
 		}
 	}()
 
-	layer.SetParams(wrongParams)
+	l.SetParams(wrongParams)
 }
 
 // TestNetworkGobEncodingAdam tests gob encoding/decoding with Adam optimizer.
@@ -843,8 +843,8 @@ func TestNetworkGobEncodingAdam(t *testing.T) {
 	network := New(layers, loss.MSE{}, optimizer)
 
 	// Train for a few steps to populate optimizer state
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}}
 	for i := 0; i < 10; i++ {
 		for j := range trainX {
 			network.Train(trainX[j], trainY[j])
@@ -874,13 +874,13 @@ func TestNetworkGobEncodingAdam(t *testing.T) {
 	}
 
 	for i := range initialParams {
-		if math.Abs(initialParams[i]-loadedParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(initialParams[i]-loadedParams[i]))) > 1e-6 {
 			t.Errorf("Params[%d] mismatch: %v vs %v", i, initialParams[i], loadedParams[i])
 		}
 	}
 
 	// Verify forward pass works
-	output := loadedNetwork.Forward([]float64{0.5, 0.5})
+	output := loadedNetwork.Forward([]float32{0.5, 0.5})
 	if len(output) != 1 {
 		t.Errorf("Loaded network output length = %d, want 1", len(output))
 	}
@@ -897,8 +897,8 @@ func TestNetworkGobEncodingSGD(t *testing.T) {
 	network := New(layers, loss.MSE{}, optimizer)
 
 	// Train for a few steps
-	trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-	trainY := [][]float64{{0}, {1}, {1}, {0}}
+	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	trainY := [][]float32{{0}, {1}, {1}, {0}}
 	for i := 0; i < 10; i++ {
 		for j := range trainX {
 			network.Train(trainX[j], trainY[j])
@@ -928,7 +928,7 @@ func TestNetworkGobEncodingSGD(t *testing.T) {
 	}
 
 	for i := range initialParams {
-		if math.Abs(initialParams[i]-loadedParams[i]) > 1e-10 {
+		if float32(math.Abs(float64(initialParams[i]-loadedParams[i]))) > 1e-6 {
 			t.Errorf("Params[%d] mismatch: %v vs %v", i, initialParams[i], loadedParams[i])
 		}
 	}
@@ -968,7 +968,7 @@ func LoadFromBuffer(data []byte) (*Network, loss.Loss, error) {
 	}
 
 	// Read parameters for all layers
-	var params []float64
+	var params []float32
 	if err := decoder.Decode(&params); err != nil {
 		return nil, nil, fmt.Errorf("failed to read parameters: %w", err)
 	}
@@ -1038,10 +1038,10 @@ func TestNetworkLSTMResetBetweenSamples(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Train on multiple samples
-	trainX := [][]float64{{1, 2}, {3, 4}, {5, 6}}
+	trainX := [][]float32{{1, 2}, {3, 4}, {5, 6}}
 
 	// Store outputs for comparison
-	outputs := make([][]float64, len(trainX))
+	outputs := make([][]float32, len(trainX))
 	for i := range trainX {
 		outputs[i] = network.Forward(trainX[i])
 	}
@@ -1054,7 +1054,7 @@ func TestNetworkLSTMResetBetweenSamples(t *testing.T) {
 	output2 := network.Forward(trainX[0])
 
 	for i := range output1 {
-		if math.Abs(output1[i]-output2[i]) > 1e-15 {
+		if float32(math.Abs(float64(output1[i]-output2[i]))) > 1e-6 {
 			t.Errorf("Reset not working: output1[%d]=%v, output2[%d]=%v", i, output1[i], i, output2[i])
 		}
 	}
@@ -1072,18 +1072,18 @@ func TestNetworkTrainBatchWithLSTM(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	trainX := [][]float64{{1, 2}, {3, 4}, {5, 6}}
-	trainY := [][]float64{{1, 0}, {0, 1}, {1, 1}}
+	trainX := [][]float32{{1, 2}, {3, 4}, {5, 6}}
+	trainY := [][]float32{{1, 0}, {0, 1}, {1, 1}}
 
 	// Train on batch
-	loss := network.TrainBatch(trainX, trainY)
+	l := network.TrainBatch(trainX, trainY)
 
-	if loss < 0 {
-		t.Errorf("Batch loss should be non-negative, got %v", loss)
+	if l < 0 {
+		t.Errorf("Batch loss should be non-negative, got %v", l)
 	}
 
 	// Verify forward pass works after batch training
-	output := network.Forward([]float64{1, 2})
+	output := network.Forward([]float32{1, 2})
 	if len(output) != 2 {
 		t.Errorf("Output length = %d, want 2", len(output))
 	}
@@ -1103,15 +1103,15 @@ func TestNetworkTrainWithLSTMReset(t *testing.T) {
 
 	// Train multiple times on the same input
 	// Without proper reset, outputs would differ due to accumulated state
-	outputs := make([][]float64, 5)
+	outputs := make([][]float32, 5)
 	for i := range outputs {
-		outputs[i] = network.Forward([]float64{1, 2})
+		outputs[i] = network.Forward([]float32{1, 2})
 	}
 
 	// Outputs should be identical (same weights, no accumulated state)
 	for i := 1; i < len(outputs); i++ {
 		for j := range outputs[0] {
-			if math.Abs(outputs[0][j]-outputs[i][j]) > 1e-15 {
+			if float32(math.Abs(float64(outputs[0][j]-outputs[i][j]))) > 1e-6 {
 				t.Errorf("Output mismatch at training step %d: %v vs %v", i, outputs[0][j], outputs[i][j])
 			}
 		}

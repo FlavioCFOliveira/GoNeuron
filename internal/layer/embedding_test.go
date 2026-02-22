@@ -10,7 +10,7 @@ func TestEmbeddingForward(t *testing.T) {
 	emb := NewEmbedding(5, 3)
 
 	// Input indices
-	input := []float64{0, 2, 4}
+	input := []float32{0, 2, 4}
 
 	output := emb.Forward(input)
 
@@ -26,7 +26,7 @@ func TestEmbeddingForward(t *testing.T) {
 		start := i * 3
 		weightStart := idx * 3
 		for d := 0; d < 3; d++ {
-			if math.Abs(output[start+d]-weights[weightStart+d]) > 1e-10 {
+			if float32(math.Abs(float64(output[start+d]-weights[weightStart+d]))) > 1e-6 {
 				t.Errorf("Output[%d] = %f, expected %f", start+d, output[start+d], weights[weightStart+d])
 			}
 		}
@@ -36,11 +36,11 @@ func TestEmbeddingForward(t *testing.T) {
 func TestEmbeddingBackward(t *testing.T) {
 	emb := NewEmbedding(5, 3)
 
-	input := []float64{0, 2, 4}
+	input := []float32{0, 2, 4}
 	emb.Forward(input)
 
 	// Pass gradient of all ones
-	grad := make([]float64, 9)
+	grad := make([]float32, 9)
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -59,21 +59,21 @@ func TestEmbeddingBackward(t *testing.T) {
 
 	// Embedding 0 (indices[0]=0) should have gradient 1 for each dimension
 	for d := 0; d < 3; d++ {
-		if math.Abs(gradWeights[d]-1.0) > 1e-10 {
+		if float32(math.Abs(float64(gradWeights[d]-1.0))) > 1e-6 {
 			t.Errorf("GradWeights[%d] = %f, expected 1.0", d, gradWeights[d])
 		}
 	}
 
 	// Embedding 2 (indices[1]=2) should have gradient 1 for each dimension
 	for d := 0; d < 3; d++ {
-		if math.Abs(gradWeights[6+d]-1.0) > 1e-10 {
+		if float32(math.Abs(float64(gradWeights[6+d]-1.0))) > 1e-6 {
 			t.Errorf("GradWeights[%d] = %f, expected 1.0", 6+d, gradWeights[6+d])
 		}
 	}
 
 	// Embedding 4 (indices[2]=4) should have gradient 1 for each dimension
 	for d := 0; d < 3; d++ {
-		if math.Abs(gradWeights[12+d]-1.0) > 1e-10 {
+		if float32(math.Abs(float64(gradWeights[12+d]-1.0))) > 1e-6 {
 			t.Errorf("GradWeights[%d] = %f, expected 1.0", 12+d, gradWeights[12+d])
 		}
 	}
@@ -94,22 +94,22 @@ func TestEmbeddingParams(t *testing.T) {
 
 	// Test Params and SetParams
 	params := emb.Params()
-	if len(params) != 8 {
+	if len(params) != 8 { // 4 gamma + 4 beta
 		t.Errorf("Expected 8 params, got %d", len(params))
 	}
 
 	// Modify params
-	newParams := make([]float64, 8)
+	newParams := make([]float32, 8)
 	for i := 0; i < 8; i++ {
-		newParams[i] = float64(i + 10)
+		newParams[i] = float32(i + 10)
 	}
 	emb.SetParams(newParams)
 
 	// Verify
 	params2 := emb.Params()
 	for i := 0; i < 8; i++ {
-		if math.Abs(params2[i]-float64(i+10)) > 1e-10 {
-			t.Errorf("Param[%d] = %f, expected %f", i, params2[i], float64(i+10))
+		if float32(math.Abs(float64(params2[i]-float32(i+10)))) > 1e-6 {
+			t.Errorf("Param[%d] = %f, expected %f", i, params2[i], float32(i+10))
 		}
 	}
 }
@@ -138,7 +138,7 @@ func TestEmbeddingGetWeight(t *testing.T) {
 	// Verify it matches the internal weights
 	weights := emb.GetWeights()
 	for i := 0; i < 4; i++ {
-		if math.Abs(weight[i]-weights[4+i]) > 1e-10 {
+		if float32(math.Abs(float64(weight[i]-weights[4+i]))) > 1e-6 {
 			t.Errorf("Weight[%d] = %f, expected %f", i, weight[i], weights[4+i])
 		}
 	}
@@ -148,13 +148,13 @@ func TestEmbeddingSetWeight(t *testing.T) {
 	emb := NewEmbedding(3, 4)
 
 	// Set specific weight
-	newWeight := []float64{1, 2, 3, 4}
+	newWeight := []float32{1, 2, 3, 4}
 	emb.SetWeight(1, newWeight)
 
 	// Verify
 	weight := emb.GetWeight(1)
 	for i := 0; i < 4; i++ {
-		if math.Abs(weight[i]-newWeight[i]) > 1e-10 {
+		if float32(math.Abs(float64(weight[i]-newWeight[i]))) > 1e-6 {
 			t.Errorf("Weight[%d] = %f, expected %f", i, weight[i], newWeight[i])
 		}
 	}
@@ -164,13 +164,13 @@ func TestEmbeddingOutOfBounds(t *testing.T) {
 	emb := NewEmbedding(3, 2)
 
 	// Use out-of-bounds index
-	input := []float64{100}
+	input := []float32{100}
 	output := emb.Forward(input)
 
 	// Should default to first embedding (index 0)
 	weights := emb.GetWeights()
 	for i := 0; i < 2; i++ {
-		if math.Abs(output[i]-weights[i]) > 1e-10 {
+		if float32(math.Abs(float64(output[i]-weights[i]))) > 1e-6 {
 			t.Errorf("Output[%d] = %f, expected %f", i, output[i], weights[i])
 		}
 	}
@@ -180,7 +180,7 @@ func TestEmbeddingBatch(t *testing.T) {
 	emb := NewEmbedding(5, 3)
 
 	// Batch of 4 indices
-	input := []float64{0, 1, 2, 3}
+	input := []float32{0, 1, 2, 3}
 	output := emb.Forward(input)
 
 	// Check output shape
@@ -195,7 +195,7 @@ func TestEmbeddingBatch(t *testing.T) {
 		start := b * 3
 		weightStart := idx * 3
 		for d := 0; d < 3; d++ {
-			if math.Abs(output[start+d]-weights[weightStart+d]) > 1e-10 {
+			if float32(math.Abs(float64(output[start+d]-weights[weightStart+d]))) > 1e-6 {
 				t.Errorf("Output[%d] = %f, expected %f", start+d, output[start+d], weights[weightStart+d])
 			}
 		}
@@ -205,12 +205,8 @@ func TestEmbeddingBatch(t *testing.T) {
 func TestEmbeddingReset(t *testing.T) {
 	emb := NewEmbedding(3, 2)
 
-	input := []float64{0, 1}
+	input := []float32{0, 1}
 	emb.Forward(input)
-
-	// Save indices
-	savedIndices1 := make([]int, len(emb.savedIndices))
-	copy(savedIndices1, emb.savedIndices)
 
 	// Reset
 	emb.Reset()
@@ -225,9 +221,9 @@ func BenchmarkEmbeddingForward(b *testing.B) {
 	emb := NewEmbedding(10000, 128)
 
 	// Batch of 32 indices
-	input := make([]float64, 32)
+	input := make([]float32, 32)
 	for i := range input {
-		input[i] = float64(i % 1000)
+		input[i] = float32(i % 1000)
 	}
 
 	b.ResetTimer()
@@ -239,13 +235,13 @@ func BenchmarkEmbeddingForward(b *testing.B) {
 func BenchmarkEmbeddingBackward(b *testing.B) {
 	emb := NewEmbedding(10000, 128)
 
-	input := make([]float64, 32)
+	input := make([]float32, 32)
 	for i := range input {
-		input[i] = float64(i % 1000)
+		input[i] = float32(i % 1000)
 	}
 	emb.Forward(input)
 
-	grad := make([]float64, 32*128)
+	grad := make([]float32, 32*128)
 	for i := range grad {
 		grad[i] = 1.0
 	}

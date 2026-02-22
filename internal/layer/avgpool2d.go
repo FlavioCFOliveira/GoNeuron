@@ -20,12 +20,12 @@ type AvgPool2D struct {
 	outputWidth  int
 
 	// Pre-allocated buffers
-	outputBuf    []float64
-	gradInBuf    []float64
+	outputBuf    []float32
+	gradInBuf    []float32
 	countBuf     []int // Count of inputs contributing to each output position
 
 	// Saved input for backward pass
-	savedInput []float64
+	savedInput []float32
 
 	device Device
 }
@@ -39,10 +39,10 @@ func NewAvgPool2D(kernelSize, stride, padding int) *AvgPool2D {
 		kernelSize: kernelSize,
 		stride:     stride,
 		padding:    padding,
-		outputBuf:  make([]float64, 0),
-		gradInBuf:  make([]float64, 0),
+		outputBuf:  make([]float32, 0),
+		gradInBuf:  make([]float32, 0),
 		countBuf:   make([]int, 0),
-		savedInput: make([]float64, 0),
+		savedInput: make([]float32, 0),
 		device:     &CPUDevice{},
 	}
 }
@@ -63,10 +63,10 @@ func (a *AvgPool2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 // Forward performs a forward pass through the average pooling layer.
 // input: flattened [inChannels, inputHeight, inputWidth]
 // Returns: flattened [outChannels, outputHeight, outputWidth]
-func (a *AvgPool2D) Forward(input []float64) []float64 {
+func (a *AvgPool2D) Forward(input []float32) []float32 {
 	totalInput := len(input)
 	if totalInput == 0 {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	// Infer input dimensions
@@ -87,14 +87,15 @@ func (a *AvgPool2D) Forward(input []float64) []float64 {
 	// Ensure buffers are sized correctly
 	requiredOutput := outChannels * outSize
 	if len(a.outputBuf) < requiredOutput {
-		a.outputBuf = make([]float64, requiredOutput)
+		a.outputBuf = make([]float32, requiredOutput)
 		a.countBuf = make([]int, requiredOutput)
-		a.gradInBuf = make([]float64, totalInput)
+		a.gradInBuf = make([]float32, totalInput)
 	}
 
 	if cap(a.savedInput) < len(input) {
-		a.savedInput = make([]float64, len(input))
+		a.savedInput = make([]float32, len(input))
 	}
+	a.savedInput = a.savedInput[:len(input)]
 	copy(a.savedInput, input)
 
 	// Average pooling: for each output position
@@ -108,7 +109,7 @@ func (a *AvgPool2D) Forward(input []float64) []float64 {
 
 	for oh := 0; oh < outH; oh++ {
 		for ow := 0; ow < outW; ow++ {
-			sum := 0.0
+			sum := float32(0.0)
 			count := 0
 
 			for kh := 0; kh < kernelSize; kh++ {
@@ -127,7 +128,7 @@ func (a *AvgPool2D) Forward(input []float64) []float64 {
 
 			pos := oh*outW + ow
 			if count > 0 {
-				a.outputBuf[pos] = sum / float64(count)
+				a.outputBuf[pos] = sum / float32(count)
 				a.countBuf[pos] = count
 			} else {
 				a.outputBuf[pos] = 0
@@ -140,7 +141,7 @@ func (a *AvgPool2D) Forward(input []float64) []float64 {
 }
 
 // Backward performs backpropagation through the average pooling layer.
-func (a *AvgPool2D) Backward(grad []float64) []float64 {
+func (a *AvgPool2D) Backward(grad []float32) []float32 {
 	totalInput := len(a.savedInput)
 	gradIn := a.gradInBuf[:totalInput]
 
@@ -166,7 +167,7 @@ func (a *AvgPool2D) Backward(grad []float64) []float64 {
 
 			if count > 0 {
 				// Distribute gradient equally among contributing inputs
-				gradPerInput := gradVal / float64(count)
+				gradPerInput := gradVal / float32(count)
 
 				for kh := 0; kh < kernelSize; kh++ {
 					for kw := 0; kw < kernelSize; kw++ {
@@ -187,22 +188,22 @@ func (a *AvgPool2D) Backward(grad []float64) []float64 {
 }
 
 // Params returns layer parameters (empty for AvgPool2D).
-func (a *AvgPool2D) Params() []float64 {
-	return make([]float64, 0)
+func (a *AvgPool2D) Params() []float32 {
+	return make([]float32, 0)
 }
 
 // SetParams sets layer parameters (no-op for AvgPool2D).
-func (a *AvgPool2D) SetParams(params []float64) {
+func (a *AvgPool2D) SetParams(params []float32) {
 	// No parameters to set
 }
 
 // Gradients returns layer gradients (empty for AvgPool2D).
-func (a *AvgPool2D) Gradients() []float64 {
-	return make([]float64, 0)
+func (a *AvgPool2D) Gradients() []float32 {
+	return make([]float32, 0)
 }
 
 // SetGradients sets layer gradients (no-op for AvgPool2D).
-func (a *AvgPool2D) SetGradients(gradients []float64) {
+func (a *AvgPool2D) SetGradients(gradients []float32) {
 	// No parameters to set
 }
 
@@ -257,6 +258,6 @@ func (a *AvgPool2D) GetPadding() int {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For AvgPool2D, gradients are already accumulated in Backward, so this just calls Backward.
-func (a *AvgPool2D) AccumulateBackward(grad []float64) []float64 {
+func (a *AvgPool2D) AccumulateBackward(grad []float32) []float32 {
 	return a.Backward(grad)
 }

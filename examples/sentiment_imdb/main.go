@@ -82,14 +82,14 @@ func BuildVocabulary(sentences []string, maxWords int) *Vocabulary {
 	return vocab
 }
 
-func Tokenize(sentence string, vocab *Vocabulary, maxLength int) []float64 {
+func Tokenize(sentence string, vocab *Vocabulary, maxLength int) []float32 {
 	words := strings.Fields(strings.ToLower(sentence))
-	tokens := make([]float64, maxLength)
+	tokens := make([]float32, maxLength)
 	for i := 0; i < maxLength; i++ {
 		if i < len(words) {
 			w := strings.Trim(words[i], ".,!?:;\"'()[]{}<>")
 			if w != "" {
-				tokens[i] = float64(vocab.GetIdx(w))
+				tokens[i] = float32(vocab.GetIdx(w))
 			} else {
 				tokens[i] = 0
 			}
@@ -150,7 +150,7 @@ func main() {
 	}
 
 	allSentences := append(posSentences, negSentences...)
-	labels := make([]float64, len(allSentences))
+	labels := make([]float32, len(allSentences))
 	for i := len(posSentences); i < len(labels); i++ {
 		labels[i] = 1.0
 	}
@@ -159,27 +159,26 @@ func main() {
 	vocab := BuildVocabulary(allSentences, maxVocabSize)
 	maxLen := 20
 
-	x := make([][]float64, len(allSentences))
+	x := make([][]float32, len(allSentences))
 	for i, s := range allSentences {
 		x[i] = Tokenize(s, vocab, maxLen)
 	}
 
-	y := make([][]float64, len(allSentences))
+	y := make([][]float32, len(allSentences))
 	for i := range y {
 		if labels[i] == 0 {
-			y[i] = []float64{1.0, 0.0}
+			y[i] = []float32{1.0, 0.0}
 		} else {
-			y[i] = []float64{0.0, 1.0}
+			y[i] = []float32{0.0, 1.0}
 		}
 	}
 
-	rand.Seed(42)
 	rand.Shuffle(len(x), func(i, j int) {
 		x[i], x[j] = x[j], x[i]
 		y[i], y[j] = y[j], y[i]
 	})
 
-	split := int(float64(len(x)) * 0.8)
+	split := int(float32(len(x)) * 0.8)
 	xTrain, xTest := x[:split], x[split:]
 	yTrain, yTest := y[:split], y[split:]
 
@@ -239,13 +238,13 @@ func main() {
 			correct++
 		}
 	}
-	fmt.Printf("Test Accuracy: %.2f%%\n", float64(correct)/float64(len(xTest))*100)
+	fmt.Printf("Test Accuracy: %.2f%%\n", float32(correct)/float32(len(xTest))*100)
 
 	// Save model
 	network.Save("sentiment_imdb_bilstm_attention.gob")
 }
 
-func argmax(v []float64) int {
+func argmax(v []float32) int {
 	maxIdx := 0
 	maxVal := v[0]
 	for i := 1; i < len(v); i++ {

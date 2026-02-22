@@ -20,11 +20,11 @@ import (
 type TimeSeriesGenerator struct {
 	numFeatures int
 	numSamples  int
-	noiseLevel  float64
+	noiseLevel  float32
 }
 
 // NewTimeSeriesGenerator creates a new data generator
-func NewTimeSeriesGenerator(numFeatures, numSamples int, noiseLevel float64) *TimeSeriesGenerator {
+func NewTimeSeriesGenerator(numFeatures, numSamples int, noiseLevel float32) *TimeSeriesGenerator {
 	return &TimeSeriesGenerator{
 		numFeatures: numFeatures,
 		numSamples:  numSamples,
@@ -34,13 +34,13 @@ func NewTimeSeriesGenerator(numFeatures, numSamples int, noiseLevel float64) *Ti
 
 // Generate creates synthetic multivariate time series data
 // Each feature is a combination of sine/cosine waves with different frequencies
-func (g *TimeSeriesGenerator) Generate() ([][]float64, error) {
-	data := make([][]float64, g.numSamples)
+func (g *TimeSeriesGenerator) Generate() ([][]float32, error) {
+	data := make([][]float32, g.numSamples)
 	t := 0.0
 	tick := 0.1
 
 	for i := 0; i < g.numSamples; i++ {
-		features := make([]float64, g.numFeatures)
+		features := make([]float32, g.numFeatures)
 		for j := 0; j < g.numFeatures; j++ {
 			// Create multiple frequency components
 			baseFreq := float64(j+1) * 0.5
@@ -57,9 +57,9 @@ func (g *TimeSeriesGenerator) Generate() ([][]float64, error) {
 			}
 
 			// Add noise
-			value += g.noiseLevel * (rand.Float64() - 0.5)
+			value += float64(g.noiseLevel) * (rand.Float64() - 0.5)
 
-			features[j] = value
+			features[j] = float32(value)
 		}
 		data[i] = features
 		t += tick
@@ -69,9 +69,9 @@ func (g *TimeSeriesGenerator) Generate() ([][]float64, error) {
 }
 
 // Normalize normalizes data using min-max scaling
-func Normalize(data [][]float64) ([][]float64, []struct{ Min, Max float64 }) {
+func Normalize(data [][]float32) ([][]float32, []struct{ Min, Max float32 }) {
 	numFeatures := len(data[0])
-	params := make([]struct{ Min, Max float64 }, numFeatures)
+	params := make([]struct{ Min, Max float32 }, numFeatures)
 
 	// Find min/max for each feature
 	for j := 0; j < numFeatures; j++ {
@@ -84,13 +84,13 @@ func Normalize(data [][]float64) ([][]float64, []struct{ Min, Max float64 }) {
 				maxVal = data[i][j]
 			}
 		}
-		params[j] = struct{ Min, Max float64 }{Min: minVal, Max: maxVal}
+		params[j] = struct{ Min, Max float32 }{Min: minVal, Max: maxVal}
 	}
 
 	// Normalize data
-	normalized := make([][]float64, len(data))
+	normalized := make([][]float32, len(data))
 	for i := range normalized {
-		normalized[i] = make([]float64, numFeatures)
+		normalized[i] = make([]float32, numFeatures)
 		for j := 0; j < numFeatures; j++ {
 			minVal := params[j].Min
 			maxVal := params[j].Max
@@ -106,8 +106,8 @@ func Normalize(data [][]float64) ([][]float64, []struct{ Min, Max float64 }) {
 }
 
 // Denormalize reverses normalization
-func Denormalize(data []float64, params []struct{ Min, Max float64 }) []float64 {
-	result := make([]float64, len(data))
+func Denormalize(data []float32, params []struct{ Min, Max float32 }) []float32 {
+	result := make([]float32, len(data))
 	for i := 0; i < len(data); i++ {
 		if params[i].Max-params[i].Min != 0 {
 			result[i] = data[i]*(params[i].Max-params[i].Min) + params[i].Min
@@ -119,22 +119,22 @@ func Denormalize(data []float64, params []struct{ Min, Max float64 }) []float64 
 }
 
 // CreateSequences creates input-output pairs for time series forecasting
-func CreateSequences(data [][]float64, lookback int, forecastStep int) ([][]float64, [][]float64) {
-	var X [][]float64
-	var y [][]float64
+func CreateSequences(data [][]float32, lookback int, forecastStep int) ([][]float32, [][]float32) {
+	var X [][]float32
+	var y [][]float32
 
 	numFeatures := len(data[0])
 
 	for i := 0; i < len(data)-lookback-forecastStep; i++ {
 		// Input: flattened sequence [lookback * numFeatures]
-		input := make([]float64, lookback*numFeatures)
+		input := make([]float32, lookback*numFeatures)
 		for t := 0; t < lookback; t++ {
 			copy(input[t*numFeatures:(t+1)*numFeatures], data[i+t])
 		}
 		X = append(X, input)
 
 		// Output: next forecastStep * numFeatures values
-		output := make([]float64, forecastStep*numFeatures)
+		output := make([]float32, forecastStep*numFeatures)
 		for t := 0; t < forecastStep; t++ {
 			copy(output[t*numFeatures:(t+1)*numFeatures], data[i+lookback+t])
 		}
@@ -182,7 +182,7 @@ func main() {
 	fmt.Printf("Total sequences: %d\n", len(X))
 
 	// 4. Split into train/test
-	splitIdx := int(float64(len(X)) * trainRatio)
+	splitIdx := int(float32(len(X)) * trainRatio)
 	XTrain, XTest := X[:splitIdx], X[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
@@ -240,7 +240,7 @@ func main() {
 	fmt.Println("\nEvaluating on test set...")
 
 	// Calculate RMSE
-	var totalMSE float64
+	var totalMSE float32
 	for i := 0; i < len(XTest); i++ {
 		pred := network.Forward(XTest[i])
 		trueVal := yTest[i]
@@ -251,12 +251,13 @@ func main() {
 		}
 	}
 
-	rmse := math.Sqrt(totalMSE / float64(len(XTest)*forecastStep*numFeatures))
+	rmse := float32(math.Sqrt(float64(totalMSE / float32(len(XTest)*forecastStep*numFeatures))))
 	fmt.Printf("Test RMSE (normalized): %.6f\n", rmse)
 
 	// Denormalize and calculate actual RMSE
-	var actualMSE float64
-	for i := 0; i < min(len(XTest), 100); i++ {
+	var actualMSE float32
+	testSubsetSize := min(len(XTest), 100)
+	for i := 0; i < testSubsetSize; i++ {
 		pred := network.Forward(XTest[i])
 
 		// Denormalize predictions and actuals
@@ -269,7 +270,7 @@ func main() {
 		}
 	}
 
-	actualRMSE := math.Sqrt(actualMSE / float64(min(len(XTest), 100)*forecastStep*numFeatures))
+	actualRMSE := float32(math.Sqrt(float64(actualMSE / float32(testSubsetSize*forecastStep*numFeatures))))
 	fmt.Printf("Test RMSE (actual): %.6f\n", actualRMSE)
 
 	// 9. Sample predictions
@@ -288,7 +289,7 @@ func main() {
 	fmt.Println("\nModel saved to time_series_forecast_final.gob")
 }
 
-func formatValues(values []float64, maxLen int) string {
+func formatValues(values []float32, maxLen int) string {
 	if len(values) <= maxLen {
 		result := "["
 		for i, v := range values {
@@ -325,34 +326,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-
-// Performance Notes for Multivariate Time Series Forecasting Architecture:
-//
-// Zero-Allocation Pattern:
-// 1. LSTM pre-allocates all buffers (inputBuf, outputBuf, preActBuf, etc.)
-// 2. SequenceUnroller pre-allocates inputBuf, outputBuf, gradInBuf ONCE
-// 3. Dense layers use pre-allocated gradient buffers
-// 4. All Forward/Backward passes reuse buffers - no allocations during training
-//
-// Architecture Design:
-// - LSTM input size = numFeatures (each time step processes all features)
-// - Hidden size = 64 (balance of capacity and efficiency)
-// - Dense hidden = 32 units with Tanh
-// - Linear output for regression (direct predictions)
-// - MSE loss for regression
-//
-// Input Format:
-// - Each input is flattened sequence [lookback * numFeatures]
-// - SequenceUnroller reshapes internally to [lookback, numFeatures]
-// - Each time step receives [numFeatures] values
-//
-// Expected Performance:
-// - Good performance on synthetic periodic data
-// - Zero allocations in hot path
-// - Efficient cache-friendly processing
-//
-// For production use:
-// - Real-world data often benefits from feature engineering
-// - Consider adding attention mechanism for long sequences
-// - Multiple LSTM layers for complex patterns
-// - Dropout for regularization on noisy data

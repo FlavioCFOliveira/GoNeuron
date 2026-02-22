@@ -55,7 +55,7 @@ func downloadFile(url, dest string) error {
 	return err
 }
 
-func loadMNISTImages(filename string) ([][]float64, int, int, error) {
+func loadMNISTImages(filename string) ([][]float32, int, int, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, 0, 0, err
@@ -78,14 +78,14 @@ func loadMNISTImages(filename string) ([][]float64, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("invalid magic number: %d", magic)
 	}
 
-	images := make([][]float64, numImages)
+	images := make([][]float32, numImages)
 	pixelCount := int(rows * cols)
 	for i := 0; i < int(numImages); i++ {
 		pixels := make([]uint8, pixelCount)
 		gz.Read(pixels)
-		floatPixels := make([]float64, pixelCount)
+		floatPixels := make([]float32, pixelCount)
 		for j := 0; j < pixelCount; j++ {
-			floatPixels[j] = float64(pixels[j]) / 255.0
+			floatPixels[j] = float32(pixels[j]) / 255.0
 		}
 		images[i] = floatPixels
 	}
@@ -93,7 +93,7 @@ func loadMNISTImages(filename string) ([][]float64, int, int, error) {
 	return images, int(rows), int(cols), nil
 }
 
-func loadMNISTLabels(filename string) ([][]float64, error) {
+func loadMNISTLabels(filename string) ([][]float32, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -114,11 +114,11 @@ func loadMNISTLabels(filename string) ([][]float64, error) {
 		return nil, fmt.Errorf("invalid magic number: %d", magic)
 	}
 
-	labels := make([][]float64, numLabels)
+	labels := make([][]float32, numLabels)
 	for i := 0; i < int(numLabels); i++ {
 		var label uint8
 		binary.Read(gz, binary.BigEndian, &label)
-		oneHot := make([]float64, 10)
+		oneHot := make([]float32, 10)
 		oneHot[label] = 1.0
 		labels[i] = oneHot
 	}
@@ -173,7 +173,6 @@ func main() {
 		len(xTrain), len(xTest), rows, cols)
 
 	// Shuffle training data
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(xTrain), func(i, j int) {
 		xTrain[i], xTrain[j] = xTrain[j], xTrain[i]
 		yTrain[i], yTrain[j] = yTrain[j], yTrain[i]
@@ -200,7 +199,6 @@ func main() {
 	optimizer := opt.NewAdam(0.001)
 	// Using CrossEntropy for classification. Note: CrossEntropy in GoNeuron handles Softmax.
 	// But we use LogSoftmax + CrossEntropy for stability, or custom NLL if available.
-	// Let's use CrossEntropy and check its behavior.
 	network := net.New(layers, loss.CrossEntropy{}, optimizer)
 
 	// 4. Training with Callbacks
@@ -235,7 +233,7 @@ func main() {
 		}
 	}
 
-	accuracy := float64(correct) / float64(len(xTest))
+	accuracy := float32(correct) / float32(len(xTest))
 	fmt.Printf("Test Accuracy: %.2f%%\n", accuracy*100)
 
 	// Save final model
@@ -243,7 +241,7 @@ func main() {
 	fmt.Println("Model saved to sequential_mnist_final.gob")
 }
 
-func argmax(v []float64) int {
+func argmax(v []float32) int {
 	maxIdx := 0
 	maxVal := v[0]
 	for i := 1; i < len(v); i++ {

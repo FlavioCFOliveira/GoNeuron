@@ -24,22 +24,22 @@ func TestMSEAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed with PyTorch: nn.MSELoss(reduction='mean')
 	tests := []struct {
-		yPred    []float64
-		yTrue    []float64
-		expected float64
+		yPred    []float32
+		yTrue    []float32
+		expected float32
 	}{
-		{[]float64{1.0, 2.0, 3.0}, []float64{1.0, 2.0, 3.0}, 0.0},           // Perfect
-		{[]float64{1.0, 2.0}, []float64{1.5, 2.0}, 0.125},                   // (0.25 + 0) / 2
-		{[]float64{1.0, 2.0, 3.0}, []float64{0.0, 1.0, 2.0}, 1.0},           // (1+1+1)/3
-		{[]float64{1.0, 1.0}, []float64{0.0, 2.0}, 1.0},                     // (1+1)/2
-		{[]float64{0.5}, []float64{0.0}, 0.25},                              // 0.5^2
-		{[]float64{2.0}, []float64{-1.0}, 9.0},                              // 3^2
-		{[]float64{-1.5}, []float64{0.5}, 4.0},                              // (-2)^2
+		{[]float32{1.0, 2.0, 3.0}, []float32{1.0, 2.0, 3.0}, 0.0},           // Perfect
+		{[]float32{1.0, 2.0}, []float32{1.5, 2.0}, 0.125},                   // (0.25 + 0) / 2
+		{[]float32{1.0, 2.0, 3.0}, []float32{0.0, 1.0, 2.0}, 1.0},           // (1+1+1)/3
+		{[]float32{1.0, 1.0}, []float32{0.0, 2.0}, 1.0},                     // (1+1)/2
+		{[]float32{0.5}, []float32{0.0}, 0.25},                              // 0.5^2
+		{[]float32{2.0}, []float32{-1.0}, 9.0},                              // 3^2
+		{[]float32{-1.5}, []float32{0.5}, 4.0},                              // (-2)^2
 	}
 
 	for _, tt := range tests {
 		got := mse.Forward(tt.yPred, tt.yTrue)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("MSE.Forward(%v, %v) = %v, PyTorch would give %v", tt.yPred, tt.yTrue, got, tt.expected)
 		}
 	}
@@ -53,14 +53,14 @@ func TestMSEGradientAgainstPyTorchReference(t *testing.T) {
 	// Reference values computed with PyTorch
 	// dL/dy_pred = 2*(y_pred - y_true)/n
 	tests := []struct {
-		yPred    []float64
-		yTrue    []float64
-		expected []float64
+		yPred    []float32
+		yTrue    []float32
+		expected []float32
 	}{
-		{[]float64{1.0, 2.0}, []float64{1.0, 2.0}, []float64{0.0, 0.0}},              // Perfect
-		{[]float64{1.5, 2.0}, []float64{1.0, 2.0}, []float64{0.5, 0.0}},              // 2*0.5/2 = 0.5
-		{[]float64{0.0, 0.0}, []float64{1.0, 1.0}, []float64{-1.0, -1.0}},            // 2*(-1)/2 = -1
-		{[]float64{0.5, 0.5}, []float64{0.0, 1.0}, []float64{0.5, -0.5}},             // 2*{0.5, -0.5}/2 = {0.5, -0.5}
+		{[]float32{1.0, 2.0}, []float32{1.0, 2.0}, []float32{0.0, 0.0}},              // Perfect
+		{[]float32{1.5, 2.0}, []float32{1.0, 2.0}, []float32{0.5, 0.0}},              // 2*0.5/2 = 0.5
+		{[]float32{0.0, 0.0}, []float32{1.0, 1.0}, []float32{-1.0, -1.0}},            // 2*(-1)/2 = -1
+		{[]float32{0.5, 0.5}, []float32{0.0, 1.0}, []float32{0.5, -0.5}},             // 2*{0.5, -0.5}/2 = {0.5, -0.5}
 	}
 
 	for _, tt := range tests {
@@ -70,7 +70,7 @@ func TestMSEGradientAgainstPyTorchReference(t *testing.T) {
 			continue
 		}
 		for i := range got {
-			if !float64Near(got[i], tt.expected[i], 1e-10) {
+			if !float32Near(got[i], tt.expected[i], 1e-6) {
 				t.Errorf("MSE.Backward[%d](%v, %v) = %v, PyTorch would give %v", i, tt.yPred, tt.yTrue, got[i], tt.expected[i])
 			}
 		}
@@ -91,19 +91,19 @@ func TestCrossEntropyAgainstPyTorchReference(t *testing.T) {
 	// For y=0, p=0.3: -log(1-0.3) = -log(0.7) = 0.3567
 
 	tests := []struct {
-		yPred    []float64
-		yTrue    []float64
-		minLoss  float64 // Minimum expected loss
-		maxLoss  float64 // Maximum expected loss
+		yPred    []float32
+		yTrue    []float32
+		minLoss  float32 // Minimum expected loss
+		maxLoss  float32 // Maximum expected loss
 	}{
 		// Perfect prediction (p=1, y=1): loss = 0
-		{[]float64{1.0}, []float64{1.0}, 0.0, 1e-10},
+		{[]float32{1.0}, []float32{1.0}, 0.0, 1e-6},
 		// Perfect prediction (p=0, y=0): loss = 0
-		{[]float64{0.0}, []float64{0.0}, 0.0, 1e-10},
+		{[]float32{0.0}, []float32{0.0}, 0.0, 1e-6},
 		// Good prediction (p=0.9, y=1): loss ≈ 0.105
-		{[]float64{0.9}, []float64{1.0}, 0.1, 0.11},
+		{[]float32{0.9}, []float32{1.0}, 0.1, 0.11},
 		// Bad prediction (p=0.1, y=1): loss ≈ 2.30
-		{[]float64{0.1}, []float64{1.0}, 2.2, 2.4},
+		{[]float32{0.1}, []float32{1.0}, 2.2, 2.4},
 	}
 
 	for _, tt := range tests {
@@ -123,14 +123,14 @@ func TestCrossEntropyGradientAgainstPyTorchReference(t *testing.T) {
 	// For cross entropy, gradient is (y_pred - y_true)
 	// This is true for both multiclass softmax and binary BCE
 	tests := []struct {
-		yPred    []float64
-		yTrue    []float64
-		expected []float64
+		yPred    []float32
+		yTrue    []float32
+		expected []float32
 	}{
-		{[]float64{1.0, 0.0}, []float64{1.0, 0.0}, []float64{0.0, 0.0}}, // Perfect
-		{[]float64{0.7, 0.3}, []float64{1.0, 0.0}, []float64{-0.3, 0.3}}, // PyTorch gradient
-		{[]float64{0.5}, []float64{1.0}, []float64{-0.5}},
-		{[]float64{0.5}, []float64{0.0}, []float64{0.5}},
+		{[]float32{1.0, 0.0}, []float32{1.0, 0.0}, []float32{0.0, 0.0}}, // Perfect
+		{[]float32{0.7, 0.3}, []float32{1.0, 0.0}, []float32{-0.3, 0.3}}, // PyTorch gradient
+		{[]float32{0.5}, []float32{1.0}, []float32{-0.5}},
+		{[]float32{0.5}, []float32{0.0}, []float32{0.5}},
 	}
 
 	for _, tt := range tests {
@@ -140,7 +140,7 @@ func TestCrossEntropyGradientAgainstPyTorchReference(t *testing.T) {
 			continue
 		}
 		for i := range got {
-			if !float64Near(got[i], tt.expected[i], 1e-10) {
+			if !float32Near(got[i], tt.expected[i], 1e-6) {
 				t.Errorf("CrossEntropy.Backward[%d](%v, %v) = %v, PyTorch would give %v", i, tt.yPred, tt.yTrue, got[i], tt.expected[i])
 			}
 		}
@@ -154,23 +154,23 @@ func TestHuberAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed with PyTorch: nn.HuberLoss(delta=1.0)
 	tests := []struct {
-		yPred    []float64
-		yTrue    []float64
-		expected float64
+		yPred    []float32
+		yTrue    []float32
+		expected float32
 	}{
 		// Perfect prediction
-		{[]float64{1.0, 2.0}, []float64{1.0, 2.0}, 0.0},
+		{[]float32{1.0, 2.0}, []float32{1.0, 2.0}, 0.0},
 		// Small error (diff < delta): quadratic region
-		{[]float64{1.0}, []float64{1.5}, 0.125}, // 0.5 * 0.5^2 = 0.125
+		{[]float32{1.0}, []float32{1.5}, 0.125}, // 0.5 * 0.5^2 = 0.125
 		// Large error (diff > delta): linear region
-		{[]float64{0.0}, []float64{2.0}, 1.5}, // 1.0 * (2.0 - 0.5*1.0) = 1.5
+		{[]float32{0.0}, []float32{2.0}, 1.5}, // 1.0 * (2.0 - 0.5*1.0) = 1.5
 		// Mixed: one small, one large
-		{[]float64{0.0, 0.0}, []float64{0.5, 2.0}, 0.8125}, // (0.125 + 1.5) / 2 = 0.8125
+		{[]float32{0.0, 0.0}, []float32{0.5, 2.0}, 0.8125}, // (0.125 + 1.5) / 2 = 0.8125
 	}
 
 	for _, tt := range tests {
 		got := huber.Forward(tt.yPred, tt.yTrue)
-		if !float64Near(got, tt.expected, 1e-10) {
+		if !float32Near(got, tt.expected, 1e-6) {
 			t.Errorf("Huber.Forward(%v, %v) = %v, PyTorch would give %v", tt.yPred, tt.yTrue, got, tt.expected)
 		}
 	}
@@ -185,17 +185,17 @@ func TestHuberGradientAgainstPyTorchReference(t *testing.T) {
 
 	// Reference values computed with PyTorch
 	tests := []struct {
-		yPred    []float64
-		yTrue    []float64
-		expected []float64
+		yPred    []float32
+		yTrue    []float32
+		expected []float32
 	}{
 		// Perfect prediction
-		{[]float64{1.0, 2.0}, []float64{1.0, 2.0}, []float64{0.0, 0.0}},
+		{[]float32{1.0, 2.0}, []float32{1.0, 2.0}, []float32{0.0, 0.0}},
 		// Small error: gradient = diff
-		{[]float64{1.0}, []float64{1.5}, []float64{-0.5}},
+		{[]float32{1.0}, []float32{1.5}, []float32{-0.5}},
 		// Large error: gradient = delta * sign(diff)
-		{[]float64{0.0}, []float64{2.0}, []float64{-1.0}}, // -delta = -1
-		{[]float64{2.0}, []float64{0.0}, []float64{1.0}},  // +delta = +1
+		{[]float32{0.0}, []float32{2.0}, []float32{-1.0}}, // -delta = -1
+		{[]float32{2.0}, []float32{0.0}, []float32{1.0}},  // +delta = +1
 	}
 
 	for _, tt := range tests {
@@ -205,7 +205,7 @@ func TestHuberGradientAgainstPyTorchReference(t *testing.T) {
 			continue
 		}
 		for i := range got {
-			if !float64Near(got[i], tt.expected[i], 1e-10) {
+			if !float32Near(got[i], tt.expected[i], 1e-6) {
 				t.Errorf("Huber.Backward[%d](%v, %v) = %v, PyTorch would give %v", i, tt.yPred, tt.yTrue, got[i], tt.expected[i])
 			}
 		}
@@ -214,8 +214,8 @@ func TestHuberGradientAgainstPyTorchReference(t *testing.T) {
 
 // TestHuberDeltaParameterNumeric validates different delta values (numeric check)
 func TestHuberDeltaParameterNumeric(t *testing.T) {
-	yPred := []float64{0.0}
-	yTrue := []float64{1.5}
+	yPred := []float32{0.0}
+	yTrue := []float32{1.5}
 
 	// diff = 1.5
 	// delta=0.5: |diff| > delta, so loss = delta*(|diff| - 0.5*delta) = 0.5*(1.5-0.25) = 0.625
@@ -223,21 +223,21 @@ func TestHuberDeltaParameterNumeric(t *testing.T) {
 
 	huber1 := NewHuber(0.5)
 	loss1 := huber1.Forward(yPred, yTrue)
-	expected1 := 0.625
+	expected1 := float32(0.625)
 
 	huber2 := NewHuber(2.0)
 	loss2 := huber2.Forward(yPred, yTrue)
-	expected2 := 1.125
+	expected2 := float32(1.125)
 
-	if !float64Near(loss1, expected1, 1e-10) {
+	if !float32Near(loss1, expected1, 1e-6) {
 		t.Errorf("Huber(delta=0.5).Forward([0], [1.5]) = %v, expected %v", loss1, expected1)
 	}
-	if !float64Near(loss2, expected2, 1e-10) {
+	if !float32Near(loss2, expected2, 1e-6) {
 		t.Errorf("Huber(delta=2.0).Forward([0], [1.5]) = %v, expected %v", loss2, expected2)
 	}
 }
 
 // Helper function
-func float64Near(a, b, tol float64) bool {
-	return math.Abs(a-b) <= tol
+func float32Near(a, b, tol float32) bool {
+	return float32(math.Abs(float64(a-b))) <= tol
 }

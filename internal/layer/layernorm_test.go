@@ -13,14 +13,14 @@ func TestLayerNormForward(t *testing.T) {
 	// Mean = 2.5, Std = sqrt(1.25) ≈ 1.118
 	// Normalized: [-1.342, -0.447, 0.447, 1.342]
 	// With gamma=1, beta=0: same as normalized
-	input := []float64{1, 2, 3, 4}
+	input := []float32{1, 2, 3, 4}
 
 	output := ln.Forward(input)
 
 	// Manually compute expected values
-	mean := 2.5
-	std := math.Sqrt(1.25 + 1e-5)
-	expected := []float64{
+	mean := float32(2.5)
+	std := float32(math.Sqrt(1.25 + 1e-5))
+	expected := []float32{
 		(1 - mean) / std,
 		(2 - mean) / std,
 		(3 - mean) / std,
@@ -28,7 +28,7 @@ func TestLayerNormForward(t *testing.T) {
 	}
 
 	for i := 0; i < 4; i++ {
-		if math.Abs(output[i]-expected[i]) > 1e-5 {
+		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-5 {
 			t.Errorf("Output[%d] = %f, expected %f", i, output[i], expected[i])
 		}
 	}
@@ -40,7 +40,7 @@ func TestLayerNormWithAffine(t *testing.T) {
 
 	// Set gamma = [2, 2, 2, 2], beta = [1, 1, 1, 1]
 	// After normalization, output = 2 * normalized + 1
-	input := []float64{1, 2, 3, 4}
+	input := []float32{1, 2, 3, 4}
 	ln.Forward(input)
 
 	// Get gamma and verify
@@ -51,7 +51,7 @@ func TestLayerNormWithAffine(t *testing.T) {
 
 	// Default gamma should be all 1s
 	for i := 0; i < 4; i++ {
-		if math.Abs(gamma[i]-1.0) > 1e-10 {
+		if float32(math.Abs(float64(gamma[i]-1.0))) > 1e-6 {
 			t.Errorf("Gamma[%d] = %f, expected 1.0", i, gamma[i])
 		}
 	}
@@ -59,7 +59,7 @@ func TestLayerNormWithAffine(t *testing.T) {
 	// Default beta should be all 0s
 	beta := ln.GetBeta()
 	for i := 0; i < 4; i++ {
-		if math.Abs(beta[i]) > 1e-10 {
+		if float32(math.Abs(float64(beta[i]))) > 1e-6 {
 			t.Errorf("Beta[%d] = %f, expected 0.0", i, beta[i])
 		}
 	}
@@ -69,13 +69,13 @@ func TestLayerNormWithoutAffine(t *testing.T) {
 	// Test without affine transformation
 	ln := NewLayerNorm(4, 1e-5, false)
 
-	input := []float64{1, 2, 3, 4}
+	input := []float32{1, 2, 3, 4}
 	output := ln.Forward(input)
 
 	// Should be same as normalized
-	mean := 2.5
-	std := math.Sqrt(1.25 + 1e-5)
-	expected := []float64{
+	mean := float32(2.5)
+	std := float32(math.Sqrt(1.25 + 1e-5))
+	expected := []float32{
 		(1 - mean) / std,
 		(2 - mean) / std,
 		(3 - mean) / std,
@@ -83,7 +83,7 @@ func TestLayerNormWithoutAffine(t *testing.T) {
 	}
 
 	for i := 0; i < 4; i++ {
-		if math.Abs(output[i]-expected[i]) > 1e-5 {
+		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-5 {
 			t.Errorf("Output[%d] = %f, expected %f", i, output[i], expected[i])
 		}
 	}
@@ -100,23 +100,23 @@ func TestLayerNormBatch(t *testing.T) {
 	ln := NewLayerNorm(4, 1e-5, false)
 
 	// Input: [1, 2, 3, 4, 5, 6, 7, 8] (2 batches of 4)
-	input := []float64{1, 2, 3, 4, 5, 6, 7, 8}
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8}
 
 	output := ln.Forward(input)
 
 	// Each batch should be normalized independently
-	mean1 := 2.5
-	std1 := math.Sqrt(1.25 + 1e-5)
-	mean2 := 6.5
-	std2 := math.Sqrt(1.25 + 1e-5)
+	mean1 := float32(2.5)
+	std1 := float32(math.Sqrt(1.25 + 1e-5))
+	mean2 := float32(6.5)
+	std2 := float32(math.Sqrt(1.25 + 1e-5))
 
-	expected := []float64{
+	expected := []float32{
 		(1 - mean1) / std1, (2 - mean1) / std1, (3 - mean1) / std1, (4 - mean1) / std1,
 		(5 - mean2) / std2, (6 - mean2) / std2, (7 - mean2) / std2, (8 - mean2) / std2,
 	}
 
 	for i := 0; i < 8; i++ {
-		if math.Abs(output[i]-expected[i]) > 1e-5 {
+		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-5 {
 			t.Errorf("Output[%d] = %f, expected %f", i, output[i], expected[i])
 		}
 	}
@@ -125,21 +125,21 @@ func TestLayerNormBatch(t *testing.T) {
 func TestLayerNormBackward(t *testing.T) {
 	ln := NewLayerNorm(4, 1e-5, false)
 
-	input := []float64{1, 2, 3, 4}
+	input := []float32{1, 2, 3, 4}
 	ln.Forward(input)
 
 	// Pass gradient of all ones
-	grad := []float64{1, 1, 1, 1}
+	grad := []float32{1, 1, 1, 1}
 	outputGrad := ln.Backward(grad)
 
 	// For layer norm with all ones gradient and no affine,
 	// the gradient should sum to zero (since normalization is shift-invariant)
-	sumGrad := 0.0
+	sumGrad := float32(0.0)
 	for i := 0; i < 4; i++ {
 		sumGrad += outputGrad[i]
 	}
 
-	if math.Abs(sumGrad) > 1e-10 {
+	if float32(math.Abs(float64(sumGrad))) > 1e-6 {
 		t.Errorf("Sum of gradients = %f, expected ~0", sumGrad)
 	}
 }
@@ -154,17 +154,17 @@ func TestLayerNormParams(t *testing.T) {
 	}
 
 	// Modify params
-	newParams := make([]float64, 8)
+	newParams := make([]float32, 8)
 	for i := 0; i < 8; i++ {
-		newParams[i] = float64(i + 10)
+		newParams[i] = float32(i + 10)
 	}
 	ln.SetParams(newParams)
 
 	// Verify
 	params2 := ln.Params()
 	for i := 0; i < 8; i++ {
-		if math.Abs(params2[i]-float64(i+10)) > 1e-10 {
-			t.Errorf("Param[%d] = %f, expected %f", i, params2[i], float64(i+10))
+		if float32(math.Abs(float64(params2[i]-float32(i+10)))) > 1e-6 {
+			t.Errorf("Param[%d] = %f, expected %f", i, params2[i], float32(i+10))
 		}
 	}
 }
@@ -181,7 +181,7 @@ func TestLayerNormInOutSize(t *testing.T) {
 }
 
 func TestLayerNormEps(t *testing.T) {
-	ln := NewLayerNorm(4, 1e-6, false)
+	ln := NewLayerNorm(4, float32(1e-6), false)
 
 	if ln.GetEps() != 1e-6 {
 		t.Errorf("Eps = %f, expected 1e-6", ln.GetEps())
@@ -192,12 +192,12 @@ func TestLayerNormNumericalStability(t *testing.T) {
 	// Test with constant input (zero variance)
 	ln := NewLayerNorm(4, 1e-5, false)
 
-	input := []float64{5, 5, 5, 5}
+	input := []float32{5, 5, 5, 5}
 	output := ln.Forward(input)
 
 	// With zero variance, output should be close to beta (0)
 	for i := 0; i < 4; i++ {
-		if math.Abs(output[i]) > 1e-5 {
+		if float32(math.Abs(float64(output[i]))) > 1e-5 {
 			t.Errorf("Output[%d] = %f, expected ~0 for constant input", i, output[i])
 		}
 	}
@@ -206,9 +206,9 @@ func TestLayerNormNumericalStability(t *testing.T) {
 func BenchmarkLayerNormForward(b *testing.B) {
 	ln := NewLayerNorm(1024, 1e-5, true)
 
-	input := make([]float64, 1024)
+	input := make([]float32, 1024)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 
 	b.ResetTimer()
@@ -220,13 +220,13 @@ func BenchmarkLayerNormForward(b *testing.B) {
 func BenchmarkLayerNormBackward(b *testing.B) {
 	ln := NewLayerNorm(1024, 1e-5, true)
 
-	input := make([]float64, 1024)
+	input := make([]float32, 1024)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 	ln.Forward(input)
 
-	grad := make([]float64, 1024)
+	grad := make([]float32, 1024)
 	for i := range grad {
 		grad[i] = 1.0
 	}

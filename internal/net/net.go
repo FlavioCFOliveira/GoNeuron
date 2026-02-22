@@ -19,8 +19,8 @@ import (
 func init() {
 	// Register types for gob encoding/decoding
 	// This is required for encoding/decoding interface values containing these types
-	gob.Register([]float64{})
-	gob.Register([][]float64{})
+	gob.Register([]float32{})
+	gob.Register([][]float32{})
 	gob.Register(activations.ReLU{})
 	gob.Register(activations.Sigmoid{})
 	gob.Register(activations.Tanh{})
@@ -38,7 +38,7 @@ type Network struct {
 
 	// Pre-allocated gradient buffer for training
 	// This avoids allocations in the training loop
-	lossGradBuf []float64
+	lossGradBuf []float32
 }
 
 // New creates a new neural network with the given layers.
@@ -72,7 +72,7 @@ func (n *Network) Clone() *Network {
 }
 
 // Forward performs a forward pass through all layers.
-func (n *Network) Forward(x []float64) []float64 {
+func (n *Network) Forward(x []float32) []float32 {
 	curr := x
 	for i := range n.layers {
 		curr = n.layers[i].Forward(curr)
@@ -81,7 +81,7 @@ func (n *Network) Forward(x []float64) []float64 {
 }
 
 // Backward performs a backward pass through all layers.
-func (n *Network) Backward(grad []float64) []float64 {
+func (n *Network) Backward(grad []float32) []float32 {
 	curr := grad
 	for i := len(n.layers) - 1; i >= 0; i-- {
 		curr = n.layers[i].Backward(curr)
@@ -110,7 +110,7 @@ func (n *Network) Step() {
 
 // Train performs a training step on a single sample.
 // This is optimized for performance with minimal allocations.
-func (n *Network) Train(x []float64, y []float64) float64 {
+func (n *Network) Train(x []float32, y []float32) float32 {
 	// Clear gradients before starting
 	for _, l := range n.layers {
 		l.ClearGradients()
@@ -134,7 +134,7 @@ func (n *Network) Train(x []float64, y []float64) float64 {
 	// Use pre-allocated buffer if possible
 	yPredLen := len(yPred)
 	if cap(n.lossGradBuf) < yPredLen {
-		n.lossGradBuf = make([]float64, yPredLen)
+		n.lossGradBuf = make([]float32, yPredLen)
 	}
 	grad := n.lossGradBuf[:yPredLen]
 
@@ -155,7 +155,7 @@ func (n *Network) Train(x []float64, y []float64) float64 {
 }
 
 // Fit trains the network on the given dataset for a specified number of epochs.
-func (n *Network) Fit(trainX, trainY [][]float64, epochs int, batchSize int, callbacks ...Callback) {
+func (n *Network) Fit(trainX, trainY [][]float32, epochs int, batchSize int, callbacks ...Callback) {
 	for _, cb := range callbacks {
 		cb.OnTrainBegin(n)
 	}
@@ -168,7 +168,7 @@ func (n *Network) Fit(trainX, trainY [][]float64, epochs int, batchSize int, cal
 			cb.OnEpochBegin(epoch, n)
 		}
 
-		totalLoss := 0.0
+		totalLoss := float32(0.0)
 
 		for b := 0; b < numBatches; b++ {
 			for _, cb := range callbacks {
@@ -192,7 +192,7 @@ func (n *Network) Fit(trainX, trainY [][]float64, epochs int, batchSize int, cal
 			}
 		}
 
-		avgLoss := totalLoss / float64(numBatches)
+		avgLoss := totalLoss / float32(numBatches)
 
 		stop := false
 		for _, cb := range callbacks {
@@ -215,7 +215,7 @@ func (n *Network) Fit(trainX, trainY [][]float64, epochs int, batchSize int, cal
 // TrainBatch performs training on a batch of samples.
 // This is optimized for cache locality and reduced allocation overhead.
 // For large batches, it uses parallel processing to maximize CPU utilization.
-func (n *Network) TrainBatch(batchX [][]float64, batchY [][]float64) float64 {
+func (n *Network) TrainBatch(batchX [][]float32, batchY [][]float32) float32 {
 	batchSize := len(batchX)
 	if batchSize == 0 {
 		return 0
@@ -233,8 +233,8 @@ func (n *Network) TrainBatch(batchX [][]float64, batchY [][]float64) float64 {
 }
 
 // ForwardBatch performs forward pass on a batch of samples.
-func (n *Network) ForwardBatch(batchX [][]float64) [][]float64 {
-	results := make([][]float64, len(batchX))
+func (n *Network) ForwardBatch(batchX [][]float32) [][]float32 {
+	results := make([][]float32, len(batchX))
 	for i, x := range batchX {
 		// Reset internal state for layers that support it (e.g., LSTM, GRU)
 		for _, l := range n.layers {
@@ -243,7 +243,7 @@ func (n *Network) ForwardBatch(batchX [][]float64) [][]float64 {
 			}
 		}
 		pred := n.Forward(x)
-		results[i] = make([]float64, len(pred))
+		results[i] = make([]float32, len(pred))
 		copy(results[i], pred)
 	}
 	return results
@@ -251,7 +251,7 @@ func (n *Network) ForwardBatch(batchX [][]float64) [][]float64 {
 
 // TrainTriplet performs a training step using Triplet Margin Loss.
 // It performs three forward passes (anchor, positive, negative) and accumulates gradients.
-func (n *Network) TrainTriplet(anchor, positive, negative []float64, margin float64) float64 {
+func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin float32) float32 {
 	// Clear gradients at the start
 	n.ClearGradients()
 
@@ -269,19 +269,19 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float64, margin floa
 
 	// Concatenate predictions for TripletMarginLoss
 	embDim := len(aPred)
-	tripletPred := make([]float64, embDim*3)
+	tripletPred := make([]float32, embDim*3)
 	copy(tripletPred[0:embDim], aPred)
 	copy(tripletPred[embDim:2*embDim], pPred)
 	copy(tripletPred[2*embDim:3*embDim], nPred)
 
 	// 2. Compute loss
 	// Note: yTrue is not used for TripletMarginLoss, but must have same length as tripletPred
-	dummyY := make([]float64, len(tripletPred))
+	dummyY := make([]float32, len(tripletPred))
 	lVal := n.loss.Forward(tripletPred, dummyY)
 
 	// 3. Compute loss gradient
 	if cap(n.lossGradBuf) < len(tripletPred) {
-		n.lossGradBuf = make([]float64, len(tripletPred))
+		n.lossGradBuf = make([]float32, len(tripletPred))
 	}
 	grad := n.lossGradBuf[:len(tripletPred)]
 
@@ -310,7 +310,7 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float64, margin floa
 }
 
 // SetParams sets all network parameters from a flattened slice.
-func (n *Network) SetParams(params []float64) {
+func (n *Network) SetParams(params []float32) {
 	offset := 0
 	for _, l := range n.layers {
 		lLen := len(l.Params())
@@ -320,7 +320,7 @@ func (n *Network) SetParams(params []float64) {
 }
 
 // accumulateBackward performs a backward pass through all layers and accumulates gradients.
-func (n *Network) accumulateBackward(grad []float64) []float64 {
+func (n *Network) accumulateBackward(grad []float32) []float32 {
 	curr := grad
 	for i := len(n.layers) - 1; i >= 0; i-- {
 		curr = n.layers[i].AccumulateBackward(curr)
@@ -330,7 +330,7 @@ func (n *Network) accumulateBackward(grad []float64) []float64 {
 
 // trainBatchParallel performs training on a batch of samples using parallel processing.
 // Each worker gets its own Network copy to avoid buffer sharing issues.
-func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) float64 {
+func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) float32 {
 	batchSize := len(batchX)
 	numWorkers := min(batchSize, runtime.NumCPU())
 
@@ -341,7 +341,7 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 		workers[i].ClearGradients()
 	}
 
-	losses := make([]float64, batchSize)
+	losses := make([]float32, batchSize)
 	var wg sync.WaitGroup
 
 	// Distribute work across workers
@@ -375,7 +375,7 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 
 				// Compute loss gradient
 				yPredLen := len(yPred)
-				grad := make([]float64, yPredLen)
+				grad := make([]float32, yPredLen)
 
 				if backwardInPlace, ok := netCopy.loss.(loss.BackwardInPlacer); ok {
 					backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
@@ -393,7 +393,7 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 
 	// Sum all gradients from workers into a single buffer
 	totalParams := len(n.Params())
-	sumGrads := make([]float64, totalParams)
+	sumGrads := make([]float32, totalParams)
 
 	for _, w := range workers {
 		wGrads := w.Gradients()
@@ -403,7 +403,7 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 	}
 
 	// Average gradients
-	invBatchSize := 1.0 / float64(batchSize)
+	invBatchSize := float32(1.0 / float64(batchSize))
 	for i := range sumGrads {
 		sumGrads[i] *= invBatchSize
 	}
@@ -415,18 +415,18 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 	n.Step()
 
 	// Compute total loss
-	totalLoss := 0.0
+	totalLoss := float32(0.0)
 	for _, l := range losses {
 		totalLoss += l
 	}
-	return totalLoss / float64(batchSize)
+	return totalLoss / float32(batchSize)
 }
 
 // trainBatchSequential performs training on a batch of samples sequentially.
 // Gradients are accumulated and averaged over the batch.
-func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) float64 {
-	batchSize := float64(len(batchX))
-	var totalLoss float64
+func (n *Network) trainBatchSequential(batchX [][]float32, batchY [][]float32) float32 {
+	batchSize := float32(len(batchX))
+	var totalLoss float32
 
 	// Clear gradients at the start of the batch
 	n.ClearGradients()
@@ -448,7 +448,7 @@ func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) f
 		// Compute loss gradient
 		yPredLen := len(yPred)
 		if cap(n.lossGradBuf) < yPredLen {
-			n.lossGradBuf = make([]float64, yPredLen)
+			n.lossGradBuf = make([]float32, yPredLen)
 		}
 		grad := n.lossGradBuf[:yPredLen]
 
@@ -478,8 +478,8 @@ func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) f
 }
 
 // Params returns all network parameters flattened (copy).
-func (n *Network) Params() []float64 {
-	var params []float64
+func (n *Network) Params() []float32 {
+	var params []float32
 	for _, l := range n.layers {
 		params = append(params, l.Params()...)
 	}
@@ -487,8 +487,8 @@ func (n *Network) Params() []float64 {
 }
 
 // Gradients returns all network gradients flattened (copy).
-func (n *Network) Gradients() []float64 {
-	var gradients []float64
+func (n *Network) Gradients() []float32 {
+	var gradients []float32
 	for _, l := range n.layers {
 		gradients = append(gradients, l.Gradients()...)
 	}
@@ -503,7 +503,7 @@ func (n *Network) ClearGradients() {
 }
 
 // SetGradients sets network gradients from a flattened slice.
-func (n *Network) SetGradients(gradients []float64) {
+func (n *Network) SetGradients(gradients []float32) {
 	offset := 0
 	for _, l := range n.layers {
 		lGrads := l.Gradients()
@@ -570,7 +570,7 @@ func Load(filename string) (*Network, loss.Loss, error) {
 	}
 
 	// Read parameters for all layers
-	var params []float64
+	var params []float32
 	if err := decoder.Decode(&params); err != nil {
 		return nil, nil, fmt.Errorf("failed to read parameters: %w", err)
 	}
@@ -724,11 +724,11 @@ type LayerConfig struct {
 	Type    string
 	InSize  int
 	OutSize int
-	Params  []float64
+	Params  []float32
 
 	// Activation type
 	Activation string
-	Alpha      float64 // For LeakyReLU, PReLU, ELU
+	Alpha      float32 // For LeakyReLU, PReLU, ELU
 
 	// Conv2D & Pooling parameters
 	KernelSize  int
@@ -738,16 +738,16 @@ type LayerConfig struct {
 	OutChannels int
 
 	// Dropout parameters
-	Prob float64
+	Prob float32
 
 	// Normalization parameters
-	Eps             float64
+	Eps             float32
 	Affine          bool
 	NormalizedShape int
 
 	// RBF parameters
 	NumCenters int
-	Gamma      float64
+	Gamma      float32
 }
 
 // ExtractLayerConfig extracts the configuration from a layer.

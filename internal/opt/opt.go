@@ -8,11 +8,11 @@ type Optimizer interface {
 
 	// Step computes updated parameters: params - lr * gradients
 	// Returns a new slice with updated values
-	Step(params, gradients []float64) []float64
+	Step(params, gradients []float32) []float32
 
 	// StepInPlace updates params in-place: params = params - lr * gradients
 	// This avoids allocations for better performance
-	StepInPlace(params, gradients []float64)
+	StepInPlace(params, gradients []float32)
 
 	// NewStep signals the beginning of a new optimization step (e.g., for Adam timestep).
 	NewStep()
@@ -33,12 +33,12 @@ type Optimizer interface {
 
 // SGD (Stochastic Gradient Descent) optimizer.
 type SGD struct {
-	LearningRate float64
+	LearningRate float32
 }
 
 // Step computes updated parameters: params - lr * gradients
-func (s *SGD) Step(params, gradients []float64) []float64 {
-	result := make([]float64, len(params))
+func (s *SGD) Step(params, gradients []float32) []float32 {
+	result := make([]float32, len(params))
 	for i := range params {
 		result[i] = params[i] - s.LearningRate*gradients[i]
 	}
@@ -47,7 +47,7 @@ func (s *SGD) Step(params, gradients []float64) []float64 {
 
 // StepInPlace updates params in-place: params = params - lr * gradients
 // This avoids allocations for better performance
-func (s *SGD) StepInPlace(params, gradients []float64) {
+func (s *SGD) StepInPlace(params, gradients []float32) {
 	for i := range params {
 		params[i] -= s.LearningRate * gradients[i]
 	}
@@ -65,7 +65,7 @@ func (s *SGD) State() map[string]any {
 
 // SetState sets SGD state.
 func (s *SGD) SetState(state map[string]any) {
-	if lr, ok := state["LearningRate"].(float64); ok {
+	if lr, ok := state["LearningRate"].(float32); ok {
 		s.LearningRate = lr
 	}
 }
@@ -86,15 +86,15 @@ func (s *SGD) SetGobState(state any) {
 // Adam maintains per-parameter state (first and second moment estimates).
 // Uses flat slices for momentum buffers (one per layer in the network).
 type Adam struct {
-	LearningRate float64
-	Beta1        float64 // Exponential decay rate for first moment
-	Beta2        float64 // Exponential decay rate for second moment
-	Epsilon      float64 // Small constant for numerical stability
+	LearningRate float32
+	Beta1        float32 // Exponential decay rate for first moment
+	Beta2        float32 // Exponential decay rate for second moment
+	Epsilon      float32 // Small constant for numerical stability
 
 	// Per-layer state - indexed by layer
 	// momentum1[i] and momentum2[i] are for layer i
-	momentum1 [][]float64 // First moment (m) for each layer
-	momentum2 [][]float64 // Second moment (v) for each layer
+	momentum1 [][]float32 // First moment (m) for each layer
+	momentum2 [][]float32 // Second moment (v) for each layer
 
 	// Internal counter to track layer index during training
 	// This is set by the network before calling Step
@@ -105,7 +105,7 @@ type Adam struct {
 }
 
 // NewAdam creates a new Adam optimizer with default values.
-func NewAdam(learningRate float64) *Adam {
+func NewAdam(learningRate float32) *Adam {
 	return &Adam{
 		LearningRate: learningRate,
 		Beta1:        0.9,
@@ -117,7 +117,7 @@ func NewAdam(learningRate float64) *Adam {
 }
 
 // initMoments initializes the moment buffers for given parameter shape.
-func (a *Adam) initMoments(params []float64) {
+func (a *Adam) initMoments(params []float32) {
 	// Ensure we have enough layer buffers
 	for len(a.momentum1) <= a.currentLayer {
 		a.momentum1 = append(a.momentum1, nil)
@@ -126,13 +126,13 @@ func (a *Adam) initMoments(params []float64) {
 
 	// Initialize or resize the buffers for current layer
 	if a.momentum1[a.currentLayer] == nil || len(a.momentum1[a.currentLayer]) != len(params) {
-		a.momentum1[a.currentLayer] = make([]float64, len(params))
-		a.momentum2[a.currentLayer] = make([]float64, len(params))
+		a.momentum1[a.currentLayer] = make([]float32, len(params))
+		a.momentum2[a.currentLayer] = make([]float32, len(params))
 	}
 }
 
 // Step computes updated parameters using Adam
-func (a *Adam) Step(params, gradients []float64) []float64 {
+func (a *Adam) Step(params, gradients []float32) []float32 {
 	a.initMoments(params)
 
 	currentLayer := a.currentLayer
@@ -159,27 +159,27 @@ func (a *Adam) Step(params, gradients []float64) []float64 {
 	// Bias correction: timestep is the number of steps already taken
 	// For first step (timestep=0), use t=1 to avoid division by zero
 	ts := float64(a.timestep + 1)
-	bias1 := 1 - math.Pow(beta1, ts)
-	bias2 := 1 - math.Pow(beta2, ts)
+	bias1 := float32(1 - math.Pow(float64(beta1), ts))
+	bias2 := float32(1 - math.Pow(float64(beta2), ts))
 
 	// Effective learning rate with bias correction
 	// lr_t = lr * sqrt(1 - beta2^t) / (1 - beta1^t)
-	effLR := lr * math.Sqrt(bias2) / bias1
+	effLR := lr * float32(math.Sqrt(float64(bias2))) / bias1
 
-	result := make([]float64, len(params))
+	result := make([]float32, len(params))
 	for i := range params {
 		// Update biased first moment estimate
 		m[i] = beta1*m[i] + (1-beta1)*gradients[i]
 		// Update biased second moment estimate
 		v[i] = beta2*v[i] + (1-beta2)*gradients[i]*gradients[i]
 		// Update parameters
-		result[i] = params[i] - effLR*m[i]/(math.Sqrt(v[i])+eps)
+		result[i] = params[i] - effLR*m[i]/(float32(math.Sqrt(float64(v[i])))+eps)
 	}
 	return result
 }
 
 // StepInPlace updates params in-place using Adam
-func (a *Adam) StepInPlace(params, gradients []float64) {
+func (a *Adam) StepInPlace(params, gradients []float32) {
 	a.initMoments(params)
 
 	currentLayer := a.currentLayer
@@ -206,11 +206,11 @@ func (a *Adam) StepInPlace(params, gradients []float64) {
 	// Bias correction: timestep is the number of steps already taken
 	// For first step (timestep=0), use t=1 to avoid division by zero
 	ts := float64(a.timestep + 1)
-	bias1 := 1 - math.Pow(beta1, ts)
-	bias2 := 1 - math.Pow(beta2, ts)
+	bias1 := float32(1 - math.Pow(float64(beta1), ts))
+	bias2 := float32(1 - math.Pow(float64(beta2), ts))
 
 	// Effective learning rate with bias correction
-	effLR := lr * math.Sqrt(bias2) / bias1
+	effLR := lr * float32(math.Sqrt(float64(bias2))) / bias1
 
 	for i := range params {
 		// Update biased first moment estimate
@@ -218,7 +218,7 @@ func (a *Adam) StepInPlace(params, gradients []float64) {
 		// Update biased second moment estimate
 		v[i] = beta2*v[i] + (1-beta2)*gradients[i]*gradients[i]
 		// Update parameters in-place
-		params[i] -= effLR * m[i] / (math.Sqrt(v[i]) + eps)
+		params[i] -= effLR * m[i] / (float32(math.Sqrt(float64(v[i]))) + eps)
 	}
 }
 
@@ -229,14 +229,14 @@ func (a *Adam) NewStep() {
 }
 
 // adamGobState is a gob-encodable state for Adam optimizer.
-// This struct uses only gob-compatible types (slice of slice of float64).
+// This struct uses only gob-compatible types (slice of slice of float32).
 type adamGobState struct {
-	LearningRate float64
-	Beta1        float64
-	Beta2        float64
-	Epsilon      float64
-	Momentum1    [][]float64
-	Momentum2    [][]float64
+	LearningRate float32
+	Beta1        float32
+	Beta2        float32
+	Epsilon      float32
+	Momentum1    [][]float32
+	Momentum2    [][]float32
 	Timestep     int
 }
 
@@ -256,22 +256,22 @@ func (a *Adam) State() map[string]any {
 // SetState sets Adam state from a map.
 // This is used for JSON encoding and other non-gob serialization.
 func (a *Adam) SetState(state map[string]any) {
-	if lr, ok := state["LearningRate"].(float64); ok {
+	if lr, ok := state["LearningRate"].(float32); ok {
 		a.LearningRate = lr
 	}
-	if b1, ok := state["Beta1"].(float64); ok {
+	if b1, ok := state["Beta1"].(float32); ok {
 		a.Beta1 = b1
 	}
-	if b2, ok := state["Beta2"].(float64); ok {
+	if b2, ok := state["Beta2"].(float32); ok {
 		a.Beta2 = b2
 	}
-	if eps, ok := state["Epsilon"].(float64); ok {
+	if eps, ok := state["Epsilon"].(float32); ok {
 		a.Epsilon = eps
 	}
-	if m1, ok := state["momentum1"].([][]float64); ok {
+	if m1, ok := state["momentum1"].([][]float32); ok {
 		a.momentum1 = m1
 	}
-	if m2, ok := state["momentum2"].([][]float64); ok {
+	if m2, ok := state["momentum2"].([][]float32); ok {
 		a.momentum2 = m2
 	}
 	if ts, ok := state["timestep"].(int); ok {

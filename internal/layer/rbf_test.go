@@ -25,18 +25,18 @@ func TestRBFForward(t *testing.T) {
 	// phi0 = exp(-1.0 * 0) = 1
 	// phi1 = exp(-1.0 * 2) = exp(-2) ≈ 0.135335
 	// y = 1*1 + 1*exp(-2) + 0 = 1 + exp(-2) ≈ 1.135335
-	input := []float64{0, 0}
+	input := []float32{0, 0}
 	output := r.Forward(input)
 
-	expected := 1.0 + math.Exp(-2.0)
-	if math.Abs(output[0]-expected) > 1e-6 {
+	expected := float32(1.0 + math.Exp(-2.0))
+	if float32(math.Abs(float64(output[0]-expected))) > 1e-6 {
 		t.Errorf("output = %v, want %v", output[0], expected)
 	}
 }
 
 func TestRBFFlow(t *testing.T) {
 	r := NewRBF(2, 4, 2, 0.5)
-	input := []float64{0.5, -0.5}
+	input := []float32{0.5, -0.5}
 
 	// Forward pass
 	out := r.Forward(input)
@@ -45,7 +45,7 @@ func TestRBFFlow(t *testing.T) {
 	}
 
 	// Backward pass
-	grad := []float64{0.1, -0.1}
+	grad := []float32{0.1, -0.1}
 	inGrad := r.Backward(grad)
 	if len(inGrad) != 2 {
 		t.Errorf("expected input grad len 2, got %d", len(inGrad))
@@ -59,7 +59,7 @@ func TestRBFFlow(t *testing.T) {
 	}
 
 	for _, g := range grads {
-		if math.IsNaN(g) {
+		if math.IsNaN(float64(g)) {
 			t.Errorf("NaN gradient detected")
 		}
 	}
@@ -67,18 +67,18 @@ func TestRBFFlow(t *testing.T) {
 
 func TestRBFNumericalGradient(t *testing.T) {
 	r := NewRBF(2, 3, 1, 1.0)
-	input := []float64{0.1, 0.2}
+	input := []float32{0.1, 0.2}
 
-	eps := 1e-7
+	eps := float32(1e-4)
 
 	// Get analytical gradient w.r.t input
 	r.ClearGradients()
 	r.Forward(input)
-	analyticalInGrad := make([]float64, 2)
-	copy(analyticalInGrad, r.Backward([]float64{1.0}))
+	analyticalInGrad := make([]float32, 2)
+	copy(analyticalInGrad, r.Backward([]float32{1.0}))
 
 	// Numerical gradient w.r.t input
-	numericalInGrad := make([]float64, 2)
+	numericalInGrad := make([]float32, 2)
 	for i := range input {
 		old := input[i]
 
@@ -93,7 +93,7 @@ func TestRBFNumericalGradient(t *testing.T) {
 	}
 
 	for i := range analyticalInGrad {
-		if math.Abs(analyticalInGrad[i]-numericalInGrad[i]) > 1e-5 {
+		if float32(math.Abs(float64(analyticalInGrad[i]-numericalInGrad[i]))) > 1e-3 {
 			t.Errorf("input gradient mismatch at %d: analytical=%v, numerical=%v", i, analyticalInGrad[i], numericalInGrad[i])
 		}
 	}

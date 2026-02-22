@@ -68,14 +68,14 @@ func main() {
 	vocabSize := len(vocab)
 	maxLen := 10
 
-	tokenize := func(s string) []float64 {
+	tokenize := func(s string) []float32 {
 		words := strings.Fields(strings.ToLower(s))
-		tokens := make([]float64, maxLen)
+		tokens := make([]float32, maxLen)
 		for i := 0; i < maxLen; i++ {
 			if i < len(words) {
 				w := strings.Trim(words[i], ".,!?:;")
 				if id, ok := vocab[w]; ok {
-					tokens[i] = float64(id)
+					tokens[i] = float32(id)
 				} else {
 					tokens[i] = 1.0 // <UNK>
 				}
@@ -87,20 +87,19 @@ func main() {
 	}
 
 	// 3. Prepare Training Data
-	x := make([][]float64, 0)
-	y := make([][]float64, 0)
+	x := make([][]float32, 0)
+	y := make([][]float32, 0)
 
 	for _, s := range posSentences {
 		x = append(x, tokenize(s))
-		y = append(y, []float64{1.0, 0.0}) // One-hot: [Pos, Neg]
+		y = append(y, []float32{1.0, 0.0}) // One-hot: [Pos, Neg]
 	}
 	for _, s := range negSentences {
 		x = append(x, tokenize(s))
-		y = append(y, []float64{0.0, 1.0}) // One-hot: [Pos, Neg]
+		y = append(y, []float32{0.0, 1.0}) // One-hot: [Pos, Neg]
 	}
 
 	// Shuffle
-	rand.Seed(42)
 	rand.Shuffle(len(x), func(i, j int) {
 		x[i], x[j] = x[j], x[i]
 		y[i], y[j] = y[j], y[i]
@@ -153,9 +152,10 @@ func main() {
 		if pred[1] > pred[0] {
 			sentiment = "Negative"
 		}
-		pPos := math.Exp(pred[0])
-		pNeg := math.Exp(pred[1])
+		pPos := float32(math.Exp(float64(pred[0])))
+		pNeg := float32(math.Exp(float64(pred[1])))
+		confidence := float32(math.Max(float64(pPos), float64(pNeg))) * 100
 		fmt.Printf("Sentence: '%-30s' -> Predicted: %-8s (Confidence: %.2f%%)\n",
-			s, sentiment, math.Max(pPos, pNeg)*100)
+			s, sentiment, confidence)
 	}
 }

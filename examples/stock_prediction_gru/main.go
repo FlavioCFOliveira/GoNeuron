@@ -17,12 +17,12 @@ import (
 
 type StockData struct {
 	Date  string
-	Close float64
+	Close float32
 }
 
 type NormalizationParams struct {
-	Min float64
-	Max float64
+	Min float32
+	Max float32
 }
 
 func loadStockData(filepath string) ([]StockData, error) {
@@ -48,7 +48,7 @@ func loadStockData(filepath string) ([]StockData, error) {
 	return data, nil
 }
 
-func minMaxScale(prices []float64) ([]float64, NormalizationParams) {
+func minMaxScale(prices []float32) ([]float32, NormalizationParams) {
 	minVal, maxVal := prices[0], prices[0]
 	for _, p := range prices {
 		if p < minVal {
@@ -58,7 +58,7 @@ func minMaxScale(prices []float64) ([]float64, NormalizationParams) {
 			maxVal = p
 		}
 	}
-	scaled := make([]float64, len(prices))
+	scaled := make([]float32, len(prices))
 	for i, p := range prices {
 		scaled[i] = (p - minVal) / (maxVal - minVal)
 	}
@@ -79,21 +79,21 @@ func main() {
 		log.Fatal(err)
 	}
 
-	prices := make([]float64, len(data))
+	prices := make([]float32, len(data))
 	for i, d := range data {
 		prices[i] = d.Close
 	}
 
 	scaledPrices, normParams := minMaxScale(prices)
 
-	var x [][]float64
-	var y [][]float64
+	var x [][]float32
+	var y [][]float32
 	for i := 0; i <= len(scaledPrices)-lookback-1; i++ {
 		x = append(x, scaledPrices[i:i+lookback])
-		y = append(y, []float64{scaledPrices[i+lookback]})
+		y = append(y, []float32{scaledPrices[i+lookback]})
 	}
 
-	splitIdx := int(float64(len(x)) * trainRatio)
+	splitIdx := int(float32(len(x)) * trainRatio)
 	xTrain, xTest := x[:splitIdx], x[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
@@ -109,11 +109,11 @@ func main() {
 	network.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 20})
 
 	// Evaluation
-	var mse float64
+	var mse float32
 	for i := range xTest {
 		pred := network.Forward(xTest[i])[0]
 		diff := (pred - yTest[i][0]) * (normParams.Max - normParams.Min)
 		mse += diff * diff
 	}
-	fmt.Printf("\nTest RMSE: $%.2f\n", math.Sqrt(mse/float64(len(xTest))))
+	fmt.Printf("\nTest RMSE: $%.2f\n", float32(math.Sqrt(float64(mse/float32(len(xTest))))))
 }

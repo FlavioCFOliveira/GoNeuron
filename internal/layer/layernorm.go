@@ -10,22 +10,22 @@ import (
 type LayerNorm struct {
 	// Normalization parameters
 	normalizedShape int
-	eps             float64
+	eps             float32
 	elementwiseAffine bool
 
 	// Learnable parameters (when affine is enabled)
-	gamma []float64
-	beta  []float64
+	gamma []float32
+	beta  []float32
 
 	// Pre-allocated buffers
-	outputBuf      []float64
-	gradInBuf      []float64
-	gradGammaBuf   []float64
-	gradBetaBuf    []float64
-	gradBuf        []float64 // Temporary gradient buffer
-	savedInput     []float64 // Input saved for backward pass
-	inputMean      float64   // Stored mean for backward
-	inputStd       float64   // Stored std for backward
+	outputBuf      []float32
+	gradInBuf      []float32
+	gradGammaBuf   []float32
+	gradBetaBuf    []float32
+	gradBuf        []float32 // Temporary gradient buffer
+	savedInput     []float32 // Input saved for backward pass
+	inputMean      float32   // Stored mean for backward
+	inputStd       float32   // Stored std for backward
 
 	device Device
 }
@@ -34,22 +34,22 @@ type LayerNorm struct {
 // normalizedShape: the shape of the input from the expected input dimension
 // eps: small value for numerical stability (default 1e-5)
 // elementwiseAffine: whether to learn scale (gamma) and shift (beta) parameters
-func NewLayerNorm(normalizedShape int, eps float64, elementwiseAffine bool) *LayerNorm {
+func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *LayerNorm {
 	l := &LayerNorm{
 		normalizedShape:   normalizedShape,
 		eps:               eps,
 		elementwiseAffine: elementwiseAffine,
-		outputBuf:         make([]float64, normalizedShape),
-		gradInBuf:         make([]float64, normalizedShape),
-		gradBuf:           make([]float64, normalizedShape),
+		outputBuf:         make([]float32, normalizedShape),
+		gradInBuf:         make([]float32, normalizedShape),
+		gradBuf:           make([]float32, normalizedShape),
 		device:            &CPUDevice{},
 	}
 
 	if elementwiseAffine {
-		l.gamma = make([]float64, normalizedShape)
-		l.beta = make([]float64, normalizedShape)
-		l.gradGammaBuf = make([]float64, normalizedShape)
-		l.gradBetaBuf = make([]float64, normalizedShape)
+		l.gamma = make([]float32, normalizedShape)
+		l.beta = make([]float32, normalizedShape)
+		l.gradGammaBuf = make([]float32, normalizedShape)
+		l.gradBetaBuf = make([]float32, normalizedShape)
 
 		// Initialize gamma to 1 and beta to 0
 		for i := 0; i < normalizedShape; i++ {
@@ -69,7 +69,7 @@ func (l *LayerNorm) SetDevice(device Device) {
 // Forward performs a forward pass through the layer normalization layer.
 // x: input tensor of shape [..., normalizedShape]
 // Returns: normalized output with same shape as input
-func (l *LayerNorm) Forward(x []float64) []float64 {
+func (l *LayerNorm) Forward(x []float32) []float32 {
 	// Assume input is [..., normalizedShape]
 	// We normalize across the last dimension
 
@@ -78,17 +78,17 @@ func (l *LayerNorm) Forward(x []float64) []float64 {
 
 	// Ensure output buffer is sized correctly
 	if len(l.outputBuf) != len(x) {
-		l.outputBuf = make([]float64, len(x))
+		l.outputBuf = make([]float32, len(x))
 	}
 	if len(l.gradInBuf) != len(x) {
-		l.gradInBuf = make([]float64, len(x))
+		l.gradInBuf = make([]float32, len(x))
 	}
 
 	output := l.outputBuf
 
 	// Save input for backward pass
 	if cap(l.savedInput) < len(x) {
-		l.savedInput = make([]float64, len(x))
+		l.savedInput = make([]float32, len(x))
 	}
 	copy(l.savedInput, x)
 
@@ -97,21 +97,21 @@ func (l *LayerNorm) Forward(x []float64) []float64 {
 		end := start + l.normalizedShape
 
 		// Compute mean
-		sum := 0.0
+		sum := float32(0.0)
 		for i := start; i < end; i++ {
 			sum += x[i]
 		}
-		mean := sum / float64(l.normalizedShape)
+		mean := sum / float32(l.normalizedShape)
 		l.inputMean = mean
 
 		// Compute std
-		sumSquares := 0.0
+		sumSquares := float32(0.0)
 		for i := start; i < end; i++ {
 			diff := x[i] - mean
 			sumSquares += diff * diff
 		}
-		variance := sumSquares / float64(l.normalizedShape)
-		std := math.Sqrt(variance + l.eps)
+		variance := sumSquares / float32(l.normalizedShape)
+		std := float32(math.Sqrt(float64(variance + l.eps)))
 		l.inputStd = std
 
 		// Normalize and apply affine transformation
@@ -129,12 +129,12 @@ func (l *LayerNorm) Forward(x []float64) []float64 {
 }
 
 // Backward performs backpropagation through the layer normalization layer.
-func (l *LayerNorm) Backward(grad []float64) []float64 {
+func (l *LayerNorm) Backward(grad []float32) []float32 {
 	numSamples := len(grad) / l.normalizedShape
 
 	// Ensure gradInBuf is sized correctly
 	if len(l.gradInBuf) != len(grad) {
-		l.gradInBuf = make([]float64, len(grad))
+		l.gradInBuf = make([]float32, len(grad))
 	}
 
 	mean := l.inputMean
@@ -159,8 +159,8 @@ func (l *LayerNorm) Backward(grad []float64) []float64 {
 		}
 
 		// Compute sum of gamma*grad and sum of gamma*grad*(x-mean)
-		sumGrad := 0.0
-		sumGradXMean := 0.0
+		sumGrad := float32(0.0)
+		sumGradXMean := float32(0.0)
 		for i := start; i < end; i++ {
 			diff := (l.savedInput[i] - mean)
 			sumGrad += gammaProd[i-start]
@@ -170,8 +170,8 @@ func (l *LayerNorm) Backward(grad []float64) []float64 {
 		// Compute gradient for each input
 		for i := start; i < end; i++ {
 			diff := (l.savedInput[i] - mean)
-			gradInput := (gammaProd[i-start] - sumGrad/float64(l.normalizedShape)) / std
-			gradInput -= (diff * sumGradXMean) / (float64(l.normalizedShape) * std * std)
+			gradInput := (gammaProd[i-start] - sumGrad/float32(l.normalizedShape)) / std
+			gradInput -= (diff * sumGradXMean) / (float32(l.normalizedShape) * std * std)
 			l.gradInBuf[i] = gradInput
 		}
 
@@ -189,20 +189,20 @@ func (l *LayerNorm) Backward(grad []float64) []float64 {
 }
 
 // Params returns layer parameters (gamma and beta when affine is enabled).
-func (l *LayerNorm) Params() []float64 {
+func (l *LayerNorm) Params() []float32 {
 	if !l.elementwiseAffine {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	total := len(l.gamma) + len(l.beta)
-	params := make([]float64, total)
+	params := make([]float32, total)
 	copy(params, l.gamma)
 	copy(params[len(l.gamma):], l.beta)
 	return params
 }
 
 // SetParams updates gamma and beta from a flattened slice.
-func (l *LayerNorm) SetParams(params []float64) {
+func (l *LayerNorm) SetParams(params []float32) {
 	if !l.elementwiseAffine {
 		return
 	}
@@ -213,20 +213,20 @@ func (l *LayerNorm) SetParams(params []float64) {
 }
 
 // Gradients returns layer gradients (gamma and beta gradients when affine is enabled).
-func (l *LayerNorm) Gradients() []float64 {
+func (l *LayerNorm) Gradients() []float32 {
 	if !l.elementwiseAffine {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	total := len(l.gradGammaBuf) + len(l.gradBetaBuf)
-	gradients := make([]float64, total)
+	gradients := make([]float32, total)
 	copy(gradients, l.gradGammaBuf)
 	copy(gradients[len(l.gradGammaBuf):], l.gradBetaBuf)
 	return gradients
 }
 
 // SetGradients sets gradients from a flattened slice.
-func (l *LayerNorm) SetGradients(gradients []float64) {
+func (l *LayerNorm) SetGradients(gradients []float32) {
 	if !l.elementwiseAffine {
 		return
 	}
@@ -275,7 +275,7 @@ func (l *LayerNorm) Clone() Layer {
 }
 
 // GetGamma returns the gamma parameters (for affine layers).
-func (l *LayerNorm) GetGamma() []float64 {
+func (l *LayerNorm) GetGamma() []float32 {
 	if !l.elementwiseAffine {
 		return nil
 	}
@@ -283,7 +283,7 @@ func (l *LayerNorm) GetGamma() []float64 {
 }
 
 // GetBeta returns the beta parameters (for affine layers).
-func (l *LayerNorm) GetBeta() []float64 {
+func (l *LayerNorm) GetBeta() []float32 {
 	if !l.elementwiseAffine {
 		return nil
 	}
@@ -291,12 +291,12 @@ func (l *LayerNorm) GetBeta() []float64 {
 }
 
 // GetEps returns the epsilon value for numerical stability.
-func (l *LayerNorm) GetEps() float64 {
+func (l *LayerNorm) GetEps() float32 {
 	return l.eps
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For LayerNorm, gradients are already accumulated in Backward, so this just calls Backward.
-func (l *LayerNorm) AccumulateBackward(grad []float64) []float64 {
+func (l *LayerNorm) AccumulateBackward(grad []float32) []float32 {
 	return l.Backward(grad)
 }

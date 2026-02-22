@@ -11,7 +11,7 @@ func TestDropoutForwardTraining(t *testing.T) {
 	dropout.SetTraining(true)
 
 	// Create input with all ones
-	input := make([]float64, 100)
+	input := make([]float32, 100)
 	for i := range input {
 		input[i] = 1.0
 	}
@@ -38,9 +38,9 @@ func TestDropoutForwardInference(t *testing.T) {
 	dropout := NewDropout(0.5, 100)
 	dropout.SetTraining(false)
 
-	input := make([]float64, 100)
+	input := make([]float32, 100)
 	for i := range input {
-		input[i] = float64(i)
+		input[i] = float32(i)
 	}
 
 	output := dropout.Forward(input)
@@ -59,14 +59,14 @@ func TestDropoutBackward(t *testing.T) {
 	dropout.SetTraining(true)
 
 	// Generate output first
-	input := make([]float64, 10)
+	input := make([]float32, 10)
 	for i := range input {
 		input[i] = 1.0
 	}
 	dropout.Forward(input)
 
 	// Pass gradient of all ones
-	grad := make([]float64, 10)
+	grad := make([]float32, 10)
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -74,13 +74,13 @@ func TestDropoutBackward(t *testing.T) {
 	outputGrad := dropout.Backward(grad)
 
 	// Check that gradient flows only through non-zero positions
-	keepProb := 1.0 - 0.5
-	scale := 1.0 / keepProb
+	keepProb := float32(1.0 - 0.5)
+	scale := float32(1.0 / keepProb)
 
 	for i := 0; i < 10; i++ {
 		if dropout.maskBuf[i] > 0 {
 			// Gradient should be scaled
-			if math.Abs(outputGrad[i]-scale) > 1e-10 {
+			if float32(math.Abs(float64(outputGrad[i]-scale))) > 1e-6 {
 				t.Errorf("Grad[%d] = %f, expected %f (scaled)", i, outputGrad[i], scale)
 			}
 		} else {
@@ -107,8 +107,8 @@ func TestDropoutParams(t *testing.T) {
 	}
 
 	// SetParams and SetGradients should be no-ops
-	dropout.SetParams([]float64{1, 2, 3})
-	dropout.SetGradients([]float64{1, 2, 3})
+	dropout.SetParams([]float32{1, 2, 3})
+	dropout.SetGradients([]float32{1, 2, 3})
 
 	// Verify no change
 	newParams := dropout.Params()
@@ -133,20 +133,20 @@ func TestDropoutReset(t *testing.T) {
 	dropout := NewDropout(0.5, 10)
 	dropout.SetTraining(true)
 
-	input := make([]float64, 10)
+	input := make([]float32, 10)
 	for i := range input {
 		input[i] = 1.0
 	}
 
 	// First forward pass
 	dropout.Forward(input)
-	mask1 := make([]float64, 10)
+	mask1 := make([]float32, 10)
 	copy(mask1, dropout.maskBuf)
 
 	// Reset and forward again
 	dropout.Reset()
 	dropout.Forward(input)
-	mask2 := make([]float64, 10)
+	mask2 := make([]float32, 10)
 	copy(mask2, dropout.maskBuf)
 
 	// Masks should be identical after reset (deterministic)
@@ -159,11 +159,11 @@ func TestDropoutReset(t *testing.T) {
 
 func TestDropoutPValue(t *testing.T) {
 	// Test different dropout probabilities
-	for _, p := range []float64{0.0, 0.25, 0.5, 0.75, 1.0} {
+	for _, p := range []float32{0.0, 0.25, 0.5, 0.75, 1.0} {
 		dropout := NewDropout(p, 100)
 		dropout.SetTraining(true)
 
-		input := make([]float64, 100)
+		input := make([]float32, 100)
 		for i := range input {
 			input[i] = 1.0
 		}
@@ -197,7 +197,7 @@ func BenchmarkDropoutForwardTraining(b *testing.B) {
 	dropout := NewDropout(0.5, 1024)
 	dropout.SetTraining(true)
 
-	input := make([]float64, 1024)
+	input := make([]float32, 1024)
 	for i := range input {
 		input[i] = 1.0
 	}
@@ -212,7 +212,7 @@ func BenchmarkDropoutForwardInference(b *testing.B) {
 	dropout := NewDropout(0.5, 1024)
 	dropout.SetTraining(false)
 
-	input := make([]float64, 1024)
+	input := make([]float32, 1024)
 	for i := range input {
 		input[i] = 1.0
 	}
@@ -227,13 +227,13 @@ func BenchmarkDropoutBackward(b *testing.B) {
 	dropout := NewDropout(0.5, 1024)
 	dropout.SetTraining(true)
 
-	input := make([]float64, 1024)
+	input := make([]float32, 1024)
 	for i := range input {
 		input[i] = 1.0
 	}
 	dropout.Forward(input)
 
-	grad := make([]float64, 1024)
+	grad := make([]float32, 1024)
 	for i := range grad {
 		grad[i] = 1.0
 	}

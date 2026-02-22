@@ -16,21 +16,21 @@ func NewRNG(seed uint64) *RNG {
 	return &RNG{seed: seed}
 }
 
-// RandFloat returns a random float64 in [0, 1).
-func (r *RNG) RandFloat() float64 {
+// RandFloat returns a random float32 in [0, 1).
+func (r *RNG) RandFloat() float32 {
 	r.seed = r.seed*6364136223846793005 + 1
-	return float64(r.seed>>33) / float64(1<<31)
+	return float32(r.seed>>33) / float32(1<<31)
 }
 
 // Layer is a neural network layer.
 type Layer interface {
-	Forward(x []float64) []float64
-	Backward(grad []float64) []float64
-	AccumulateBackward(grad []float64) []float64
-	Params() []float64
-	SetParams([]float64)
-	Gradients() []float64
-	SetGradients([]float64)
+	Forward(x []float32) []float32
+	Backward(grad []float32) []float32
+	AccumulateBackward(grad []float32) []float32
+	Params() []float32
+	SetParams([]float32)
+	Gradients() []float32
+	SetGradients([]float32)
 
 	// Reset clears any internal state for the layer (e.g., LSTM hidden states).
 	Reset()
@@ -53,25 +53,25 @@ type Layer interface {
 
 // Dense is a fully connected layer optimized for performance.
 type Dense struct {
-	weights   []float64
-	biases    []float64
+	weights   []float32
+	biases    []float32
 	act       activations.Activation
 	outSize   int
 	inSize    int
 	device    Device
 
 	// Reusable buffers
-	inputBuf      []float64
-	outputBuf     []float64
-	preActBuf     []float64
-	gradWBuf      []float64
-	gradBBuf      []float64
-	gradInBuf     []float64
-	dzBuf         []float64
+	inputBuf      []float32
+	outputBuf     []float32
+	preActBuf     []float32
+	gradWBuf      []float32
+	gradBBuf      []float32
+	gradInBuf     []float32
+	dzBuf         []float32
 
-	savedInputs  [][]float64
-	savedPreActs [][]float64
-	savedOutput []float64
+	savedInputs  [][]float32
+	savedPreActs [][]float32
+	savedOutput []float32
 }
 
 // NewDense creates a new dense layer with pre-allocated buffers.
@@ -81,10 +81,10 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 
 // NewDenseWithDevice creates a new dense layer with a specific device.
 func NewDenseWithDevice(in, out int, act activations.Activation, device Device) *Dense {
-	weights := make([]float64, out*in)
-	biases := make([]float64, out)
+	weights := make([]float32, out*in)
+	biases := make([]float32, out)
 
-	scale := math.Sqrt(2.0 / (float64(in) + float64(out)))
+	scale := float32(math.Sqrt(2.0 / (float64(in) + float64(out))))
 	rng := NewRNG(uint64(in*1000 + out*100 + 42))
 	for i := range weights {
 		weights[i] = rng.RandFloat()*2*scale - scale
@@ -100,19 +100,19 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 		outSize:      out,
 		inSize:       in,
 		device:       device,
-		inputBuf:     make([]float64, in),
-		outputBuf:    make([]float64, out),
-		preActBuf:    make([]float64, out),
-		gradWBuf:     make([]float64, out*in),
-		gradBBuf:     make([]float64, out),
-		gradInBuf:    make([]float64, in),
-		dzBuf:        make([]float64, out),
-		savedInputs:  make([][]float64, 0),
-		savedPreActs: make([][]float64, 0),
+		inputBuf:     make([]float32, in),
+		outputBuf:    make([]float32, out),
+		preActBuf:    make([]float32, out),
+		gradWBuf:     make([]float32, out*in),
+		gradBBuf:     make([]float32, out),
+		gradInBuf:    make([]float32, in),
+		dzBuf:        make([]float32, out),
+		savedInputs:  make([][]float32, 0),
+		savedPreActs: make([][]float32, 0),
 	}
 }
 
-func (d *Dense) Forward(x []float64) []float64 {
+func (d *Dense) Forward(x []float32) []float32 {
 	copy(d.inputBuf, x)
 	d.saveInput(x)
 
@@ -146,7 +146,7 @@ func (d *Dense) Forward(x []float64) []float64 {
 		copy(output, preAct)
 		batchAct.ActivateBatch(output)
 		if cap(d.savedOutput) < outSize {
-			d.savedOutput = make([]float64, outSize)
+			d.savedOutput = make([]float32, outSize)
 		}
 		copy(d.savedOutput[:outSize], output[:outSize])
 	} else {
@@ -158,7 +158,7 @@ func (d *Dense) Forward(x []float64) []float64 {
 	return output[:outSize]
 }
 
-func (d *Dense) Backward(grad []float64) []float64 {
+func (d *Dense) Backward(grad []float32) []float32 {
 	outSize := d.outSize
 	inSize := d.inSize
 	weights := d.weights
@@ -172,10 +172,10 @@ func (d *Dense) Backward(grad []float64) []float64 {
 		output := d.savedOutput[:outSize]
 		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
 			for k := 0; k < outSize; k++ {
-				sum := 0.0
+				sum := float32(0.0)
 				outK := output[k]
 				for i := 0; i < outSize; i++ {
-					delta := 0.0
+					delta := float32(0.0)
 					if i == k { delta = 1.0 }
 					sum += grad[i] * output[i] * (delta - outK)
 				}
@@ -184,10 +184,10 @@ func (d *Dense) Backward(grad []float64) []float64 {
 			}
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
 			for k := 0; k < outSize; k++ {
-				sum := 0.0
-				softmaxK := math.Exp(output[k])
+				sum := float32(0.0)
+				softmaxK := float32(math.Exp(float64(output[k])))
 				for i := 0; i < outSize; i++ {
-					delta := 0.0
+					delta := float32(0.0)
 					if i == k { delta = 1.0 }
 					sum += grad[i] * (delta - softmaxK)
 				}
@@ -219,7 +219,7 @@ func (d *Dense) Backward(grad []float64) []float64 {
 			limit := chunk + chunkSize
 			if limit > inSize { limit = inSize }
 			for i := chunk; i < limit; i++ {
-				sum := 0.0
+				sum := float32(0.0)
 				for o := 0; o < outSize; o++ {
 					sum += dz[o] * weights[o*inSize+i]
 				}
@@ -231,28 +231,28 @@ func (d *Dense) Backward(grad []float64) []float64 {
 	return gradIn[:inSize]
 }
 
-func (d *Dense) Params() []float64 {
+func (d *Dense) Params() []float32 {
 	total := len(d.weights) + len(d.biases)
-	params := make([]float64, total)
+	params := make([]float32, total)
 	copy(params, d.weights)
 	copy(params[len(d.weights):], d.biases)
 	return params
 }
 
-func (d *Dense) SetParams(params []float64) {
+func (d *Dense) SetParams(params []float32) {
 	copy(d.weights, params[:len(d.weights)])
 	copy(d.biases, params[len(d.weights):])
 }
 
-func (d *Dense) Gradients() []float64 {
+func (d *Dense) Gradients() []float32 {
 	total := len(d.gradWBuf) + len(d.gradBBuf)
-	gradients := make([]float64, total)
+	gradients := make([]float32, total)
 	copy(gradients, d.gradWBuf)
 	copy(gradients[len(d.gradWBuf):], d.gradBBuf)
 	return gradients
 }
 
-func (d *Dense) SetGradients(gradients []float64) {
+func (d *Dense) SetGradients(gradients []float32) {
 	copy(d.gradWBuf, gradients[:len(d.gradWBuf)])
 	copy(d.gradBBuf, gradients[len(d.gradWBuf):])
 }
@@ -270,32 +270,32 @@ func (d *Dense) GetActivation() activations.Activation {
 }
 
 // GetWeights returns the weight matrix.
-func (d *Dense) GetWeights() []float64 {
+func (d *Dense) GetWeights() []float32 {
 	return d.weights
 }
 
 // SetWeight sets a specific weight.
-func (d *Dense) SetWeight(out, in int, val float64) {
+func (d *Dense) SetWeight(out, in int, val float32) {
 	d.weights[out*d.inSize+in] = val
 }
 
 // GetWeight gets a specific weight.
-func (d *Dense) GetWeight(out, in int) float64 {
+func (d *Dense) GetWeight(out, in int) float32 {
 	return d.weights[out*d.inSize+in]
 }
 
 // GetBiases returns the biases.
-func (d *Dense) GetBiases() []float64 {
+func (d *Dense) GetBiases() []float32 {
 	return d.biases
 }
 
 // SetBias sets a specific bias.
-func (d *Dense) SetBias(out int, val float64) {
+func (d *Dense) SetBias(out int, val float32) {
 	d.biases[out] = val
 }
 
 // GetBias gets a specific bias.
-func (d *Dense) GetBias(out int) float64 {
+func (d *Dense) GetBias(out int) float32 {
 	return d.biases[out]
 }
 
@@ -318,19 +318,19 @@ func (d *Dense) Clone() Layer {
 	return newD
 }
 
-func (d *Dense) saveInput(x []float64) {
-	saved := make([]float64, len(x))
+func (d *Dense) saveInput(x []float32) {
+	saved := make([]float32, len(x))
 	copy(saved, x)
 	d.savedInputs = append(d.savedInputs, saved)
 }
 
-func (d *Dense) savePreAct(preAct []float64) {
-	saved := make([]float64, len(preAct))
+func (d *Dense) savePreAct(preAct []float32) {
+	saved := make([]float32, len(preAct))
 	copy(saved, preAct)
 	d.savedPreActs = append(d.savedPreActs, saved)
 }
 
-func (d *Dense) AccumulateBackward(grad []float64) []float64 {
+func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 	outSize := d.outSize
 	inSize := d.inSize
 	weights := d.weights
@@ -347,16 +347,16 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 	savedPreAct := d.savedPreActs[s]
 
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
-		output := make([]float64, outSize)
+		output := make([]float32, outSize)
 		copy(output, savedPreAct)
 		d.act.(activations.BatchActivation).ActivateBatch(output)
 
 		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
 			for k := 0; k < outSize; k++ {
-				sum := 0.0
+				sum := float32(0.0)
 				outK := output[k]
 				for i := 0; i < outSize; i++ {
-					delta := 0.0
+					delta := float32(0.0)
 					if i == k { delta = 1.0 }
 					sum += grad[i] * output[i] * (delta - outK)
 				}
@@ -364,10 +364,10 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 			}
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
 			for k := 0; k < outSize; k++ {
-				sum := 0.0
-				softmaxK := math.Exp(output[k])
+				sum := float32(0.0)
+				softmaxK := float32(math.Exp(float64(output[k])))
 				for i := 0; i < outSize; i++ {
-					delta := 0.0
+					delta := float32(0.0)
 					if i == k { delta = 1.0 }
 					sum += grad[i] * (delta - softmaxK)
 				}
@@ -391,7 +391,7 @@ func (d *Dense) AccumulateBackward(grad []float64) []float64 {
 	}
 
 	for i := 0; i < inSize; i++ {
-		sum := 0.0
+		sum := float32(0.0)
 		for o := 0; o < outSize; o++ {
 			sum += dz[o] * weights[o*inSize+i]
 		}

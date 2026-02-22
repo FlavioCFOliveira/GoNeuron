@@ -13,8 +13,8 @@ import (
 
 // Iris represents the Iris dataset
 type Iris struct {
-	Inputs  [][]float64
-	Targets [][]float64
+	Inputs  [][]float32
+	Targets [][]float32
 }
 
 // LoadIris loads the Iris dataset. It downloads it if not present.
@@ -53,8 +53,8 @@ func LoadIris() (*Iris, error) {
 		return nil, err
 	}
 
-	inputs := make([][]float64, 0)
-	targets := make([][]float64, 0)
+	inputs := make([][]float32, 0)
+	targets := make([][]float32, 0)
 
 	classMap := map[string]int{
 		"Iris-setosa":     0,
@@ -66,9 +66,10 @@ func LoadIris() (*Iris, error) {
 		if len(record) < 5 {
 			continue
 		}
-		input := make([]float64, 4)
+		input := make([]float32, 4)
 		for i := 0; i < 4; i++ {
-			input[i], _ = strconv.ParseFloat(record[i], 64)
+			val, _ := strconv.ParseFloat(record[i], 32)
+			input[i] = float32(val)
 		}
 		classStr := record[4]
 		classIdx, ok := classMap[classStr]
@@ -76,7 +77,7 @@ func LoadIris() (*Iris, error) {
 			continue
 		}
 
-		target := make([]float64, 3)
+		target := make([]float32, 3)
 		target[classIdx] = 1.0
 
 		inputs = append(inputs, input)
@@ -87,13 +88,13 @@ func LoadIris() (*Iris, error) {
 }
 
 // GenerateSineWave generates synthetic sine wave data for regression
-func GenerateSineWave(n int) ([][]float64, [][]float64) {
-	inputs := make([][]float64, n)
-	targets := make([][]float64, n)
+func GenerateSineWave(n int) ([][]float32, [][]float32) {
+	inputs := make([][]float32, n)
+	targets := make([][]float32, n)
 	for i := 0; i < n; i++ {
-		x := rand.Float64() * 2 * math.Pi
-		inputs[i] = []float64{x}
-		targets[i] = []float64{math.Sin(x)}
+		x := rand.Float32() * 2 * float32(math.Pi)
+		inputs[i] = []float32{x}
+		targets[i] = []float32{float32(math.Sin(float64(x)))}
 	}
 	return inputs, targets
 }
@@ -103,8 +104,8 @@ func (i *Iris) Normalize() {
 	if len(i.Inputs) == 0 {
 		return
 	}
-	min := make([]float64, 4)
-	max := make([]float64, 4)
+	min := make([]float32, 4)
+	max := make([]float32, 4)
 	for j := 0; j < 4; j++ {
 		min[j] = i.Inputs[0][j]
 		max[j] = i.Inputs[0][j]

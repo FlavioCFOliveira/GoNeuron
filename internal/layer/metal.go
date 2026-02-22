@@ -10,7 +10,7 @@ package layer
 void* initMetalDevice();
 bool isMetalAvailable(void* device);
 void freeMetalDevice(void* device);
-void matMulMPS(void* device, double* A, double* B, double* C, int M, int N, int K);
+void matMulMPS(void* device, float* A, float* B, float* C, int M, int N, int K);
 */
 import "C"
 import (
@@ -48,10 +48,10 @@ func (d *MetalDevice) Close() {
 
 // MatMul performs matrix multiplication C = A * B using MPS.
 // A: M x K, B: K x N, C: M x N
-func (d *MetalDevice) MatMul(A, B, C []float64, M, N, K int) {
+func (d *MetalDevice) MatMul(A, B, C []float32, M, N, K int) {
 	C.matMulMPS(d.ptr,
-		(*C.double)(unsafe.Pointer(&A[0])),
-		(*C.double)(unsafe.Pointer(&B[0])),
-		(*C.double)(unsafe.Pointer(&C[0])),
+		(*C.float)(unsafe.Pointer(&A[0])),
+		(*C.float)(unsafe.Pointer(&B[0])),
+		(*C.float)(unsafe.Pointer(&C[0])),
 		C.int(M), C.int(N), C.int(K))
 }

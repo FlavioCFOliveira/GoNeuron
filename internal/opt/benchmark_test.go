@@ -7,17 +7,17 @@ import (
 )
 
 // fillRandom fills a slice with random values.
-func fillRandom(slice []float64) {
+func fillRandom(slice []float32) {
 	for i := range slice {
-		slice[i] = rand.Float64()
+		slice[i] = rand.Float32()
 	}
 }
 
 // BenchmarkSGDStep benchmarks SGD Step method.
 func BenchmarkSGDStep(b *testing.B) {
 	sgd := SGD{LearningRate: 0.01}
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -30,8 +30,8 @@ func BenchmarkSGDStep(b *testing.B) {
 // BenchmarkSGDStepInPlace benchmarks SGD StepInPlace method.
 func BenchmarkSGDStepInPlace(b *testing.B) {
 	sgd := SGD{LearningRate: 0.01}
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -44,8 +44,8 @@ func BenchmarkSGDStepInPlace(b *testing.B) {
 // BenchmarkSGDStepSmallLR benchmarks SGD with small learning rate.
 func BenchmarkSGDStepSmallLR(b *testing.B) {
 	sgd := SGD{LearningRate: 0.001}
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -58,8 +58,8 @@ func BenchmarkSGDStepSmallLR(b *testing.B) {
 // BenchmarkSGDStepLargeLR benchmarks SGD with large learning rate.
 func BenchmarkSGDStepLargeLR(b *testing.B) {
 	sgd := SGD{LearningRate: 0.1}
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -72,8 +72,8 @@ func BenchmarkSGDStepLargeLR(b *testing.B) {
 // BenchmarkAdamStep benchmarks Adam Step method.
 func BenchmarkAdamStep(b *testing.B) {
 	adam := NewAdam(0.001)
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -86,8 +86,8 @@ func BenchmarkAdamStep(b *testing.B) {
 // BenchmarkAdamStepInPlace benchmarks Adam StepInPlace method.
 func BenchmarkAdamStepInPlace(b *testing.B) {
 	adam := NewAdam(0.001)
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -100,8 +100,8 @@ func BenchmarkAdamStepInPlace(b *testing.B) {
 // BenchmarkSGDStepSmall benchmarks SGD with small parameter count.
 func BenchmarkSGDStepSmall(b *testing.B) {
 	sgd := SGD{LearningRate: 0.01}
-	params := make([]float64, 10)
-	gradients := make([]float64, 10)
+	params := make([]float32, 10)
+	gradients := make([]float32, 10)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -114,8 +114,8 @@ func BenchmarkSGDStepSmall(b *testing.B) {
 // BenchmarkSGDStepLarge benchmarks SGD with large parameter count.
 func BenchmarkSGDStepLarge(b *testing.B) {
 	sgd := SGD{LearningRate: 0.01}
-	params := make([]float64, 10000)
-	gradients := make([]float64, 10000)
+	params := make([]float32, 10000)
+	gradients := make([]float32, 10000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -127,8 +127,8 @@ func BenchmarkSGDStepLarge(b *testing.B) {
 
 // BenchmarkOptimizerComparison benchmarks all optimizers with same data.
 func BenchmarkOptimizerComparison(b *testing.B) {
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 
@@ -144,8 +144,8 @@ func BenchmarkOptimizerComparison(b *testing.B) {
 
 // BenchmarkOptimizerStepInPlaceComparison benchmarks in-place updates.
 func BenchmarkOptimizerStepInPlaceComparison(b *testing.B) {
-	params := make([]float64, 1000)
-	gradients := make([]float64, 1000)
+	params := make([]float32, 1000)
+	gradients := make([]float32, 1000)
 	fillRandom(params)
 	fillRandom(gradients)
 

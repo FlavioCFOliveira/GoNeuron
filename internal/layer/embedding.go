@@ -5,8 +5,6 @@ import (
 	"math"
 )
 
-// math.RandomFloat is not a standard function, use our own
-
 // Embedding implements an embedding layer for categorical inputs.
 // Maps integer indices to dense embedding vectors.
 type Embedding struct {
@@ -14,14 +12,14 @@ type Embedding struct {
 	num_embeddings int
 	embedding_dim  int
 	padding_idx    int
-	max_norm       float64
+	max_norm       float32
 
 	// Learnable parameters: weight matrix [num_embeddings, embedding_dim]
-	weights []float64
+	weights []float32
 
 	// Pre-allocated buffers
-	outputBuf   []float64
-	gradWeights []float64
+	outputBuf   []float32
+	gradWeights []float32
 
 	// Saved indices for backward pass
 	savedIndices []int
@@ -34,9 +32,9 @@ type Embedding struct {
 // embedding_dim: size of each embedding vector
 func NewEmbedding(num_embeddings, embedding_dim int) *Embedding {
 	// Xavier/Glorot initialization
-	scale := math.Sqrt(3.0 / float64(embedding_dim))
+	scale := float32(math.Sqrt(3.0 / float64(embedding_dim)))
 
-	weights := make([]float64, num_embeddings*embedding_dim)
+	weights := make([]float32, num_embeddings*embedding_dim)
 	rng := NewRNG(42) // Use deterministic RNG for reproducibility
 	for i := range weights {
 		weights[i] = scale * (2*rng.RandFloat() - 1)
@@ -46,8 +44,8 @@ func NewEmbedding(num_embeddings, embedding_dim int) *Embedding {
 		num_embeddings: num_embeddings,
 		embedding_dim:  embedding_dim,
 		weights:        weights,
-		outputBuf:      make([]float64, embedding_dim),
-		gradWeights:    make([]float64, num_embeddings*embedding_dim),
+		outputBuf:      make([]float32, embedding_dim),
+		gradWeights:    make([]float32, num_embeddings*embedding_dim),
 		savedIndices:   make([]int, 0),
 		device:         &CPUDevice{},
 	}
@@ -61,13 +59,13 @@ func (e *Embedding) SetDevice(device Device) {
 // Forward performs a forward pass through the embedding layer.
 // x: input indices of shape [batch_size]
 // Returns: embedded vectors of shape [batch_size, embedding_dim]
-func (e *Embedding) Forward(x []float64) []float64 {
+func (e *Embedding) Forward(x []float32) []float32 {
 	batchSize := len(x)
 	outputSize := batchSize * e.embedding_dim
 
 	// Ensure output buffer is sized correctly
 	if len(e.outputBuf) < outputSize {
-		e.outputBuf = make([]float64, outputSize)
+		e.outputBuf = make([]float32, outputSize)
 	}
 
 	// Save indices for backward pass
@@ -100,7 +98,7 @@ func (e *Embedding) Forward(x []float64) []float64 {
 
 // Backward performs backpropagation through the embedding layer.
 // In embedding layers, gradients are sparse - only the used embeddings get updates.
-func (e *Embedding) Backward(grad []float64) []float64 {
+func (e *Embedding) Backward(grad []float32) []float32 {
 	batchSize := len(e.savedIndices)
 	gradBatchSize := len(grad) / e.embedding_dim
 
@@ -110,7 +108,7 @@ func (e *Embedding) Backward(grad []float64) []float64 {
 	}
 
 	// Gradient w.r.t. input is zero (indices don't have gradients)
-	gradInput := make([]float64, batchSize)
+	gradInput := make([]float32, batchSize)
 
 	for b := 0; b < gradBatchSize; b++ {
 		idx := e.savedIndices[b]
@@ -133,28 +131,28 @@ func (e *Embedding) Backward(grad []float64) []float64 {
 }
 
 // Params returns layer parameters (weights).
-func (e *Embedding) Params() []float64 {
+func (e *Embedding) Params() []float32 {
 	total := len(e.weights)
-	params := make([]float64, total)
+	params := make([]float32, total)
 	copy(params, e.weights)
 	return params
 }
 
 // SetParams updates weights from a flattened slice.
-func (e *Embedding) SetParams(params []float64) {
+func (e *Embedding) SetParams(params []float32) {
 	copy(e.weights, params)
 }
 
 // Gradients returns layer gradients (weight gradients).
-func (e *Embedding) Gradients() []float64 {
+func (e *Embedding) Gradients() []float32 {
 	total := len(e.gradWeights)
-	gradients := make([]float64, total)
+	gradients := make([]float32, total)
 	copy(gradients, e.gradWeights)
 	return gradients
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
-func (e *Embedding) SetGradients(gradients []float64) {
+func (e *Embedding) SetGradients(gradients []float32) {
 	copy(e.gradWeights, gradients)
 }
 
@@ -191,12 +189,12 @@ func (e *Embedding) Clone() Layer {
 }
 
 // GetWeights returns the weights matrix.
-func (e *Embedding) GetWeights() []float64 {
+func (e *Embedding) GetWeights() []float32 {
 	return e.weights
 }
 
 // GetWeight returns the embedding vector for a specific index.
-func (e *Embedding) GetWeight(idx int) []float64 {
+func (e *Embedding) GetWeight(idx int) []float32 {
 	if idx < 0 || idx >= e.num_embeddings {
 		idx = 0
 	}
@@ -205,7 +203,7 @@ func (e *Embedding) GetWeight(idx int) []float64 {
 }
 
 // SetWeight sets the embedding vector for a specific index.
-func (e *Embedding) SetWeight(idx int, values []float64) {
+func (e *Embedding) SetWeight(idx int, values []float32) {
 	if idx < 0 || idx >= e.num_embeddings {
 		return
 	}
@@ -217,6 +215,6 @@ func (e *Embedding) SetWeight(idx int, values []float64) {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For Embedding, gradients are already accumulated in Backward, so this just calls Backward.
-func (e *Embedding) AccumulateBackward(grad []float64) []float64 {
+func (e *Embedding) AccumulateBackward(grad []float32) []float32 {
 	return e.Backward(grad)
 }

@@ -10,7 +10,7 @@ func TestGRUForward(t *testing.T) {
 	gru := NewGRU(3, 5)
 
 	// Input vector
-	x := []float64{1.0, 0.5, -0.5}
+	x := []float32{1.0, 0.5, -0.5}
 
 	// Forward pass
 	output := gru.Forward(x)
@@ -22,7 +22,7 @@ func TestGRUForward(t *testing.T) {
 
 	// Check that output contains valid values
 	for i := 0; i < 5; i++ {
-		if math.IsNaN(output[i]) || math.IsInf(output[i], 0) {
+		if math.IsNaN(float64(output[i])) || math.IsInf(float64(output[i]), 0) {
 			t.Errorf("Output[%d] contains invalid value: %f", i, output[i])
 		}
 	}
@@ -32,11 +32,11 @@ func TestGRUBackward(t *testing.T) {
 	gru := NewGRU(3, 5)
 
 	// Forward pass
-	x := []float64{1.0, 0.5, -0.5}
+	x := []float32{1.0, 0.5, -0.5}
 	gru.Forward(x)
 
 	// Pass gradient of all ones
-	grad := make([]float64, 5)
+	grad := make([]float32, 5)
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -51,7 +51,7 @@ func TestGRUBackward(t *testing.T) {
 
 	// Check that gradients are valid
 	for i := 0; i < 3; i++ {
-		if math.IsNaN(outputGrad[i]) || math.IsInf(outputGrad[i], 0) {
+		if math.IsNaN(float64(outputGrad[i])) || math.IsInf(float64(outputGrad[i]), 0) {
 			t.Errorf("OutputGrad[%d] contains invalid value: %f", i, outputGrad[i])
 		}
 	}
@@ -71,17 +71,17 @@ func TestGRUParams(t *testing.T) {
 	}
 
 	// Modify params and verify
-	newParams := make([]float64, len(params))
+	newParams := make([]float32, len(params))
 	for i := 0; i < len(params); i++ {
-		newParams[i] = float64(i + 10)
+		newParams[i] = float32(i + 10)
 	}
 	gru.SetParams(newParams)
 
 	// Verify
 	params2 := gru.Params()
 	for i := 0; i < len(params2); i++ {
-		if math.Abs(params2[i]-float64(i+10)) > 1e-10 {
-			t.Errorf("Param[%d] = %f, expected %f", i, params2[i], float64(i+10))
+		if float32(math.Abs(float64(params2[i]-float32(i+10)))) > 1e-6 {
+			t.Errorf("Param[%d] = %f, expected %f", i, params2[i], float32(i+10))
 		}
 	}
 }
@@ -101,7 +101,7 @@ func TestGRUReset(t *testing.T) {
 	gru := NewGRU(3, 5)
 
 	// Forward pass
-	x := []float64{1.0, 0.5, -0.5}
+	x := []float32{1.0, 0.5, -0.5}
 	gru.Forward(x)
 
 	// Check that hidden state is set
@@ -127,13 +127,13 @@ func TestGRUSequence(t *testing.T) {
 	gru := NewGRU(3, 5)
 
 	// Multiple time steps
-	sequence := [][]float64{
+	sequence := [][]float32{
 		{1.0, 0.5, -0.5},
 		{0.8, 0.3, -0.2},
 		{0.6, 0.1, -0.4},
 	}
 
-	var outputs [][]float64
+	var outputs [][]float32
 	for _, x := range sequence {
 		output := gru.Forward(x)
 		outputs = append(outputs, output)
@@ -160,11 +160,11 @@ func TestGRUGradients(t *testing.T) {
 	gru := NewGRU(3, 5)
 
 	// Forward pass
-	x := []float64{1.0, 0.5, -0.5}
+	x := []float32{1.0, 0.5, -0.5}
 	gru.Forward(x)
 
 	// Pass gradient
-	grad := make([]float64, 5)
+	grad := make([]float32, 5)
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -185,7 +185,7 @@ func TestGRUGradients(t *testing.T) {
 	// Verify some gradients are non-zero
 	foundNonZero := false
 	for _, g := range gradients {
-		if math.Abs(g) > 1e-10 {
+		if float32(math.Abs(float64(g))) > 1e-10 {
 			foundNonZero = true
 			break
 		}
@@ -200,7 +200,7 @@ func TestGRUSequenceBackprop(t *testing.T) {
 	gru := NewGRU(3, 5)
 
 	// Forward pass for sequence
-	sequence := [][]float64{
+	sequence := [][]float32{
 		{1.0, 0.5, -0.5},
 		{0.8, 0.3, -0.2},
 	}
@@ -210,7 +210,7 @@ func TestGRUSequenceBackprop(t *testing.T) {
 	}
 
 	// Backward pass for last time step
-	grad := make([]float64, 5)
+	grad := make([]float32, 5)
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -223,9 +223,9 @@ func TestGRUSequenceBackprop(t *testing.T) {
 	gradients := gru.Gradients()
 
 	// Check that gradients were accumulated
-	sum := 0.0
+	sum := float32(0.0)
 	for _, g := range gradients {
-		sum += math.Abs(g)
+		sum += float32(math.Abs(float64(g)))
 	}
 	if sum < 1e-10 {
 		t.Errorf("Sum of gradients = %f, expected non-zero", sum)
@@ -244,13 +244,13 @@ func TestGRUParamsConsistency(t *testing.T) {
 	gru2.SetParams(params)
 
 	// Forward pass with same input should give same result
-	x := []float64{1.0, 0.5, -0.5, 0.2}
+	x := []float32{1.0, 0.5, -0.5, 0.2}
 
 	output1 := gru1.Forward(x)
 	output2 := gru2.Forward(x)
 
 	for i := 0; i < 8; i++ {
-		if math.Abs(output1[i]-output2[i]) > 1e-10 {
+		if float32(math.Abs(float64(output1[i]-output2[i]))) > 1e-6 {
 			t.Errorf("Output mismatch at [%d]: %f vs %f", i, output1[i], output2[i])
 		}
 	}
@@ -260,9 +260,9 @@ func BenchmarkGRUForward(b *testing.B) {
 	gru := NewGRU(64, 128)
 
 	// Input vector
-	x := make([]float64, 64)
+	x := make([]float32, 64)
 	for i := range x {
-		x[i] = float64(i) * 0.01
+		x[i] = float32(i) * 0.01
 	}
 
 	b.ResetTimer()
@@ -275,14 +275,14 @@ func BenchmarkGRUBackward(b *testing.B) {
 	gru := NewGRU(64, 128)
 
 	// Input vector
-	x := make([]float64, 64)
+	x := make([]float32, 64)
 	for i := range x {
-		x[i] = float64(i) * 0.01
+		x[i] = float32(i) * 0.01
 	}
 
 	gru.Forward(x)
 
-	grad := make([]float64, 128)
+	grad := make([]float32, 128)
 	for i := range grad {
 		grad[i] = 1.0
 	}
@@ -297,15 +297,15 @@ func BenchmarkGRUFull(b *testing.B) {
 	gru := NewGRU(64, 128)
 
 	// Input vector
-	x := make([]float64, 64)
+	x := make([]float32, 64)
 	for i := range x {
-		x[i] = float64(i) * 0.01
+		x[i] = float32(i) * 0.01
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		gru.Forward(x)
-		gru.Backward(make([]float64, 128))
+		gru.Backward(make([]float32, 128))
 	}
 }
 
@@ -313,11 +313,11 @@ func BenchmarkGRUSequence(b *testing.B) {
 	gru := NewGRU(32, 64)
 
 	// Sequence of 10 time steps
-	sequence := make([][]float64, 10)
+	sequence := make([][]float32, 10)
 	for t := range sequence {
-		sequence[t] = make([]float64, 32)
+		sequence[t] = make([]float32, 32)
 		for i := range sequence[t] {
-			sequence[t][i] = float64(i) * 0.01
+			sequence[t][i] = float32(i) * 0.01
 		}
 	}
 
@@ -327,7 +327,7 @@ func BenchmarkGRUSequence(b *testing.B) {
 			gru.Forward(x)
 		}
 		for t := len(sequence) - 1; t >= 0; t-- {
-			grad := make([]float64, 64)
+			grad := make([]float32, 64)
 			for j := range grad {
 				grad[j] = 1.0
 			}
@@ -339,11 +339,9 @@ func BenchmarkGRUSequence(b *testing.B) {
 func BenchmarkGRUParams(b *testing.B) {
 	gru := NewGRU(128, 256)
 
-	params := gru.Params()
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		gru.SetParams(params)
+		gru.Params()
 	}
 }
 
@@ -351,7 +349,6 @@ func BenchmarkGRUSetParams(b *testing.B) {
 	gru := NewGRU(128, 256)
 
 	params := gru.Params()
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		gru.SetParams(params)

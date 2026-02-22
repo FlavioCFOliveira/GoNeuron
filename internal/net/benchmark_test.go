@@ -12,9 +12,9 @@ import (
 )
 
 // fillRandom fills a slice with random values.
-func fillRandom(slice []float64) {
+func fillRandom(slice []float32) {
 	for i := range slice {
-		slice[i] = rand.Float64()
+		slice[i] = rand.Float32()
 	}
 }
 
@@ -27,7 +27,7 @@ func BenchmarkNetworkForward(b *testing.B) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := make([]float64, 784)
+	input := make([]float32, 784)
 	fillRandom(input)
 
 	b.ResetTimer()
@@ -45,8 +45,8 @@ func BenchmarkNetworkBackward(b *testing.B) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := make([]float64, 784)
-	grad := make([]float64, 10)
+	input := make([]float32, 784)
+	grad := make([]float32, 10)
 	fillRandom(input)
 	fillRandom(grad)
 
@@ -68,8 +68,8 @@ func BenchmarkNetworkTrain(b *testing.B) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := make([]float64, 784)
-	target := make([]float64, 10)
+	input := make([]float32, 784)
+	target := make([]float32, 10)
 	fillRandom(input)
 	fillRandom(target)
 
@@ -89,11 +89,11 @@ func BenchmarkNetworkTrainBatchSequential(b *testing.B) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	batchSize := 64
-	batchX := make([][]float64, batchSize)
-	batchY := make([][]float64, batchSize)
+	batchX := make([][]float32, batchSize)
+	batchY := make([][]float32, batchSize)
 	for i := 0; i < batchSize; i++ {
-		batchX[i] = make([]float64, 784)
-		batchY[i] = make([]float64, 10)
+		batchX[i] = make([]float32, 784)
+		batchY[i] = make([]float32, 10)
 		fillRandom(batchX[i])
 		fillRandom(batchY[i])
 	}
@@ -114,11 +114,11 @@ func BenchmarkNetworkTrainBatchParallel(b *testing.B) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	batchSize := 64
-	batchX := make([][]float64, batchSize)
-	batchY := make([][]float64, batchSize)
+	batchX := make([][]float32, batchSize)
+	batchY := make([][]float32, batchSize)
 	for i := 0; i < batchSize; i++ {
-		batchX[i] = make([]float64, 784)
-		batchY[i] = make([]float64, 10)
+		batchX[i] = make([]float32, 784)
+		batchY[i] = make([]float32, 10)
 		fillRandom(batchX[i])
 		fillRandom(batchY[i])
 	}
@@ -139,11 +139,11 @@ func BenchmarkNetworkTrainLargeBatch(b *testing.B) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	batchSize := 256
-	batchX := make([][]float64, batchSize)
-	batchY := make([][]float64, batchSize)
+	batchX := make([][]float32, batchSize)
+	batchY := make([][]float32, batchSize)
 	for i := 0; i < batchSize; i++ {
-		batchX[i] = make([]float64, 784)
-		batchY[i] = make([]float64, 10)
+		batchX[i] = make([]float32, 784)
+		batchY[i] = make([]float32, 10)
 		fillRandom(batchX[i])
 		fillRandom(batchY[i])
 	}
@@ -178,8 +178,8 @@ func BenchmarkNetworkGradients(b *testing.B) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	input := make([]float64, 784)
-	target := make([]float64, 10)
+	input := make([]float32, 784)
+	target := make([]float32, 10)
 	fillRandom(input)
 	fillRandom(target)
 

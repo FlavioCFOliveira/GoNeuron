@@ -10,20 +10,20 @@ import (
 func TestSGDStep(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := []float64{1.0, 2.0, 3.0}
-	gradients := []float64{0.1, 0.2, 0.3}
+	params := []float32{1.0, 2.0, 3.0}
+	gradients := []float32{0.1, 0.2, 0.3}
 
 	updated := sgd.Step(params, gradients)
 
 	// Expected: params - lr * gradients
-	expected := []float64{
-		1.0 - 0.1*0.1,  // 0.99
-		2.0 - 0.1*0.2,  // 1.98
-		3.0 - 0.1*0.3,  // 2.97
+	expected := []float32{
+		1.0 - 0.1*0.1, // 0.99
+		2.0 - 0.1*0.2, // 1.98
+		3.0 - 0.1*0.3, // 2.97
 	}
 
 	for i := range updated {
-		if math.Abs(updated[i]-expected[i]) > 1e-10 {
+		if float32(math.Abs(float64(updated[i]-expected[i]))) > 1e-6 {
 			t.Errorf("updated[%d] = %v, want %v", i, updated[i], expected[i])
 		}
 	}
@@ -33,20 +33,20 @@ func TestSGDStep(t *testing.T) {
 func TestSGDStepInPlace(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := []float64{1.0, 2.0, 3.0}
-	gradients := []float64{0.1, 0.2, 0.3}
+	params := []float32{1.0, 2.0, 3.0}
+	gradients := []float32{0.1, 0.2, 0.3}
 
 	sgd.StepInPlace(params, gradients)
 
 	// params should be updated in-place
-	expected := []float64{
-		1.0 - 0.1*0.1,  // 0.99
-		2.0 - 0.1*0.2,  // 1.98
-		3.0 - 0.1*0.3,  // 2.97
+	expected := []float32{
+		1.0 - 0.1*0.1, // 0.99
+		2.0 - 0.1*0.2, // 1.98
+		3.0 - 0.1*0.3, // 2.97
 	}
 
 	for i := range params {
-		if math.Abs(params[i]-expected[i]) > 1e-10 {
+		if float32(math.Abs(float64(params[i]-expected[i]))) > 1e-6 {
 			t.Errorf("params[%d] = %v, want %v", i, params[i], expected[i])
 		}
 	}
@@ -56,8 +56,8 @@ func TestSGDStepInPlace(t *testing.T) {
 func TestSGDStepInPlaceModifiesInput(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := []float64{1.0, 2.0}
-	gradients := []float64{0.1, 0.1}
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.1, 0.1}
 
 	// Store original values
 	original0 := params[0]
@@ -72,19 +72,19 @@ func TestSGDStepInPlaceModifiesInput(t *testing.T) {
 
 // TestSGDLearningRateEffect tests that larger learning rates cause larger updates.
 func TestSGDLearningRateEffect(t *testing.T) {
-	gradients := []float64{1.0, 2.0}
+	gradients := []float32{1.0, 2.0}
 
 	// Small learning rate
 	sgd1 := &SGD{LearningRate: 0.01}
-	updated1 := sgd1.Step([]float64{0.0, 0.0}, gradients)
+	updated1 := sgd1.Step([]float32{0.0, 0.0}, gradients)
 
 	// Large learning rate
 	sgd2 := &SGD{LearningRate: 0.5}
-	updated2 := sgd2.Step([]float64{0.0, 0.0}, gradients)
+	updated2 := sgd2.Step([]float32{0.0, 0.0}, gradients)
 
 	// Check that larger LR causes larger update
 	for i := range gradients {
-		if math.Abs(updated1[i]) >= math.Abs(updated2[i]) {
+		if float32(math.Abs(float64(updated1[i]))) >= float32(math.Abs(float64(updated2[i]))) {
 			t.Errorf("With larger learning rate, update should be larger at index %d", i)
 		}
 	}
@@ -94,14 +94,14 @@ func TestSGDLearningRateEffect(t *testing.T) {
 func TestSGDZeroLearningRate(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.0}
 
-	params := []float64{1.0, 2.0, 3.0}
-	gradients := []float64{1.0, 1.0, 1.0}
+	params := []float32{1.0, 2.0, 3.0}
+	gradients := []float32{1.0, 1.0, 1.0}
 
 	updated := sgd.Step(params, gradients)
 
 	// With zero LR, params should not change
 	for i := range params {
-		if math.Abs(updated[i]-params[i]) > 1e-10 {
+		if float32(math.Abs(float64(updated[i]-params[i]))) > 1e-10 {
 			t.Errorf("With zero LR, param[%d] should not change: %v vs %v", i, updated[i], params[i])
 		}
 	}
@@ -111,14 +111,14 @@ func TestSGDZeroLearningRate(t *testing.T) {
 func TestSGDZeroGradients(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := []float64{1.0, 2.0, 3.0}
-	gradients := []float64{0.0, 0.0, 0.0}
+	params := []float32{1.0, 2.0, 3.0}
+	gradients := []float32{0.0, 0.0, 0.0}
 
 	updated := sgd.Step(params, gradients)
 
 	// With zero gradients, params should not change
 	for i := range params {
-		if math.Abs(updated[i]-params[i]) > 1e-10 {
+		if float32(math.Abs(float64(updated[i]-params[i]))) > 1e-10 {
 			t.Errorf("With zero gradients, param[%d] should not change: %v vs %v", i, updated[i], params[i])
 		}
 	}
@@ -128,14 +128,14 @@ func TestSGDZeroGradients(t *testing.T) {
 func TestSGDNegativeGradients(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := []float64{0.0}
-	gradients := []float64{-0.5} // Negative gradient
+	params := []float32{0.0}
+	gradients := []float32{-0.5} // Negative gradient
 
 	updated := sgd.Step(params, gradients)
 
 	// Negative gradient should increase parameter (move in positive direction)
-	expected := 0.0 - 0.1*(-0.5) // = 0.05
-	if math.Abs(updated[0]-expected) > 1e-10 {
+	expected := float32(0.0 - 0.1*(-0.5)) // = 0.05
+	if float32(math.Abs(float64(updated[0]-expected))) > 1e-6 {
 		t.Errorf("updated = %v, want %v", updated[0], expected)
 	}
 }
@@ -179,8 +179,8 @@ func TestAdamCustomBeta(t *testing.T) {
 func TestAdamStep(t *testing.T) {
 	adam := NewAdam(0.1)
 
-	params := []float64{1.0, 2.0}
-	gradients := []float64{0.1, 0.2}
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.1, 0.2}
 
 	updated := adam.Step(params, gradients)
 
@@ -197,7 +197,7 @@ func TestAdamStep(t *testing.T) {
 
 	for i := range updated {
 		// Check that Adam makes reasonable updates
-		if math.IsNaN(updated[i]) || math.IsInf(updated[i], 0) {
+		if math.IsNaN(float64(updated[i])) || math.IsInf(float64(updated[i]), 0) {
 			t.Errorf("Adam produced NaN or Inf at index %d: %v", i, updated[i])
 		}
 	}
@@ -207,8 +207,8 @@ func TestAdamStep(t *testing.T) {
 func TestAdamStepInPlace(t *testing.T) {
 	adam := NewAdam(0.1)
 
-	params := []float64{1.0, 2.0}
-	gradients := []float64{0.1, 0.2}
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.1, 0.2}
 
 	// First call initializes moments
 	adam.StepInPlace(params, gradients)
@@ -223,7 +223,7 @@ func TestAdamStepInPlace(t *testing.T) {
 
 	// Check no NaN or Inf
 	for i := range params {
-		if math.IsNaN(params[i]) || math.IsInf(params[i], 0) {
+		if math.IsNaN(float64(params[i])) || math.IsInf(float64(params[i]), 0) {
 			t.Errorf("Param[%d] is NaN or Inf: %v", i, params[i])
 		}
 	}
@@ -234,16 +234,16 @@ func TestAdamConvergence(t *testing.T) {
 	adam := NewAdam(0.5) // Higher LR for faster convergence in test
 
 	// Minimize f(x, y) = x^2 + y^2 starting from (10, 10)
-	params := []float64{10.0, 10.0}
+	params := []float32{10.0, 10.0}
 
 	for i := 0; i < 50; i++ {
 		// Gradient: [2x, 2y]
-		gradients := []float64{2.0 * params[0], 2.0 * params[1]}
+		gradients := []float32{2.0 * params[0], 2.0 * params[1]}
 		params = adam.Step(params, gradients)
 	}
 
 	// With higher LR, should converge well
-	if math.Abs(params[0]) > 0.5 || math.Abs(params[1]) > 0.5 {
+	if float32(math.Abs(float64(params[0]))) > 0.5 || float32(math.Abs(float64(params[1]))) > 0.5 {
 		t.Errorf("After convergence, params = %v, should be near [0, 0]", params)
 	}
 }
@@ -252,8 +252,8 @@ func TestAdamConvergence(t *testing.T) {
 func TestAdamBiasCorrection(t *testing.T) {
 	adam := NewAdam(0.1)
 
-	params := []float64{0.0}
-	gradients := []float64{1.0}
+	params := []float32{0.0}
+	gradients := []float32{1.0}
 
 	// First step: bias correction is important
 	updated1 := adam.Step(params, gradients)
@@ -267,7 +267,7 @@ func TestAdamBiasCorrection(t *testing.T) {
 
 	// After many steps, bias correction is less important
 	// Updates should be similar but not identical
-	diff := math.Abs(updated1[0] - updated10[0])
+	diff := float32(math.Abs(float64(updated1[0] - updated10[0])))
 	// They should be different due to bias correction
 	if diff < 0.001 {
 		t.Log("Note: Bias correction effect is small at this precision")
@@ -280,8 +280,8 @@ func TestOptimizerInterface(t *testing.T) {
 	var _ Optimizer = &Adam{}
 
 	// Verify both can be used through interface
-	params := []float64{1.0, 2.0}
-	gradients := []float64{0.1, 0.2}
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.1, 0.2}
 
 	sgd := &SGD{LearningRate: 0.1}
 	adam := NewAdam(0.1)
@@ -299,11 +299,11 @@ func TestSGDMultipleSteps(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
 	// Gradient descent on f(x) = x^2, gradient = 2x
-	x := 10.0
+	x := float32(10.0)
 
 	for i := 0; i < 10; i++ {
-		gradient := 2.0 * x
-		x = x - sgd.LearningRate*gradient
+		gradient := float32(2.0) * x
+		x = x - float32(sgd.LearningRate)*gradient
 	}
 
 	// After 10 steps with LR=0.1:
@@ -312,9 +312,9 @@ func TestSGDMultipleSteps(t *testing.T) {
 	// x_3 = 6.4 - 0.1*12.8 = 5.12
 	// x_n = 10 * 0.8^n
 	// x_10 = 10 * 0.8^10 ≈ 1.07
-	expected := 10.0 * math.Pow(0.8, 10)
+	expected := float32(10.0 * math.Pow(0.8, 10))
 
-	if math.Abs(x-expected) > 0.01 {
+	if float32(math.Abs(float64(x-expected))) > 0.01 {
 		t.Errorf("After 10 steps, x = %v, want ~%v", x, expected)
 	}
 }
@@ -324,17 +324,17 @@ func TestSGDConvergence(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
 	// Minimize f(x, y) = x^2 + y^2 starting from (10, 10)
-	params := []float64{10.0, 10.0}
+	params := []float32{10.0, 10.0}
 
 	for i := 0; i < 50; i++ {
 		// Gradient: [2x, 2y]
-		gradients := []float64{2.0 * params[0], 2.0 * params[1]}
+		gradients := []float32{2.0 * params[0], 2.0 * params[1]}
 		params = sgd.Step(params, gradients)
 	}
 
 	// After 50 steps: x = 10 * 0.8^50 ≈ very small
 	// Should be close to minimum at (0, 0)
-	if math.Abs(params[0]) > 0.01 || math.Abs(params[1]) > 0.01 {
+	if float32(math.Abs(float64(params[0]))) > 0.01 || float32(math.Abs(float64(params[1]))) > 0.01 {
 		t.Errorf("After convergence, params = %v, should be near [0, 0]", params)
 	}
 }
@@ -343,11 +343,11 @@ func TestSGDConvergence(t *testing.T) {
 func TestSGDStepInPlaceNoAllocation(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := make([]float64, 100)
-	gradients := make([]float64, 100)
+	params := make([]float32, 100)
+	gradients := make([]float32, 100)
 
 	for i := range params {
-		params[i] = float64(i)
+		params[i] = float32(i)
 		gradients[i] = 0.1
 	}
 
@@ -367,14 +367,14 @@ func TestSGDStepInPlaceNoAllocation(t *testing.T) {
 func TestSGDLargeLearningRate(t *testing.T) {
 	sgd := &SGD{LearningRate: 1.0}
 
-	params := []float64{1.0}
-	gradients := []float64{1.0}
+	params := []float32{1.0}
+	gradients := []float32{1.0}
 
 	updated := sgd.Step(params, gradients)
 
 	// With LR=1, gradient step should be full step
-	expected := 0.0
-	if math.Abs(updated[0]-expected) > 1e-10 {
+	expected := float32(0.0)
+	if float32(math.Abs(float64(updated[0]-expected))) > 1e-6 {
 		t.Errorf("With LR=1, updated = %v, want %v", updated[0], expected)
 	}
 }
@@ -384,17 +384,17 @@ func TestSGDDivergenceWithLargeLR(t *testing.T) {
 	sgd := &SGD{LearningRate: 2.0} // Very large LR
 
 	// Minimize f(x) = x^2 starting from x=1
-	x := 1.0
+	x := float32(1.0)
 
 	for i := 0; i < 5; i++ {
-		gradient := 2.0 * x
-		x = x - sgd.LearningRate*gradient
+		gradient := float32(2.0) * x
+		x = x - float32(sgd.LearningRate)*gradient
 		// x_n+1 = x_n - 2*2*x_n = x_n * (1 - 4) = -3 * x_n
 		// x_5 = 1 * (-3)^5 = -243
 	}
 
 	// Should diverge (oscillate and grow)
-	if math.Abs(x) < 100 {
+	if float32(math.Abs(float64(x))) < 100 {
 		t.Errorf("With very large LR, should diverge, got %v", x)
 	}
 }
@@ -403,15 +403,15 @@ func TestSGDDivergenceWithLargeLR(t *testing.T) {
 func TestOptimizerPrecision(t *testing.T) {
 	sgd := SGD{LearningRate: 1e-10} // Very small LR
 
-	params := []float64{1.0}
-	gradients := []float64{1e-8}
+	params := []float32{1.0}
+	gradients := []float32{1e-8}
 
 	updated := sgd.Step(params, gradients)
 
 	// Update should be small but non-zero
 	// At this precision, the update might be lost
 	// Just check it doesn't crash and produces reasonable output
-	if math.IsNaN(updated[0]) || math.IsInf(updated[0], 0) {
+	if math.IsNaN(float64(updated[0])) || math.IsInf(float64(updated[0]), 0) {
 		t.Errorf("Got NaN or Inf: %v", updated[0])
 	}
 }
@@ -421,17 +421,17 @@ func TestSGDSymmetric(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
 	// Positive gradient from positive params
-	params1 := []float64{1.0}
-	grad1 := []float64{0.5}
+	params1 := []float32{1.0}
+	grad1 := []float32{0.5}
 	updated1 := sgd.Step(params1, grad1)
 
 	// Negative gradient from negative params
-	params2 := []float64{-1.0}
-	grad2 := []float64{-0.5}
+	params2 := []float32{-1.0}
+	grad2 := []float32{-0.5}
 	updated2 := sgd.Step(params2, grad2)
 
 	// Results should be symmetric
-	if math.Abs(updated1[0]-(-updated2[0])) > 1e-10 {
+	if float32(math.Abs(float64(updated1[0]-(-updated2[0])))) > 1e-6 {
 		t.Errorf("SGD not symmetric: updated1 = %v, -updated2 = %v", updated1[0], -updated2[0])
 	}
 }
@@ -440,11 +440,11 @@ func TestSGDSymmetric(t *testing.T) {
 func TestSGDAdditive(t *testing.T) {
 	sgd := &SGD{LearningRate: 0.1}
 
-	params := []float64{0.0}
+	params := []float32{0.0}
 
 	// Apply gradient g1 then g2
-	grad1 := []float64{1.0}
-	grad2 := []float64{2.0}
+	grad1 := []float32{1.0}
+	grad2 := []float32{2.0}
 
 	// Step 1
 	params1 := sgd.Step(params, grad1)
@@ -452,10 +452,10 @@ func TestSGDAdditive(t *testing.T) {
 	params2 := sgd.Step(params1, grad2)
 
 	// Should equal applying combined gradient
-	combinedGrad := []float64{3.0}
+	combinedGrad := []float32{3.0}
 	paramsCombined := sgd.Step(params, combinedGrad)
 
-	if math.Abs(params2[0]-paramsCombined[0]) > 1e-10 {
+	if float32(math.Abs(float64(params2[0]-paramsCombined[0]))) > 1e-6 {
 		t.Errorf("SGD not additive: sequential = %v, combined = %v", params2[0], paramsCombined[0])
 	}
 }
@@ -464,14 +464,14 @@ func TestSGDAdditive(t *testing.T) {
 func TestAdamZeroGradient(t *testing.T) {
 	adam := NewAdam(0.1)
 
-	params := []float64{1.0, 2.0}
-	gradients := []float64{0.0, 0.0}
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.0, 0.0}
 
 	updated := adam.Step(params, gradients)
 
 	// With zero gradients, params should not change
 	for i := range params {
-		if math.Abs(updated[i]-params[i]) > 1e-10 {
+		if float32(math.Abs(float64(updated[i]-params[i]))) > 1e-10 {
 			t.Errorf("With zero gradients, param[%d] should not change", i)
 		}
 	}
@@ -483,11 +483,11 @@ func TestSGDMultipleParameters(t *testing.T) {
 
 	// 1000 parameters
 	n := 1000
-	params := make([]float64, n)
-	gradients := make([]float64, n)
+	params := make([]float32, n)
+	gradients := make([]float32, n)
 
 	for i := 0; i < n; i++ {
-		params[i] = float64(i)
+		params[i] = float32(i)
 		gradients[i] = 1.0
 	}
 
@@ -495,8 +495,8 @@ func TestSGDMultipleParameters(t *testing.T) {
 
 	// Check a few random indices
 	for _, idx := range []int{0, 100, 500, 999} {
-		expected := float64(idx) - 0.01
-		if math.Abs(updated[idx]-expected) > 1e-10 {
+		expected := float32(idx) - 0.01
+		if float32(math.Abs(float64(updated[idx]-expected))) > 1e-6 {
 			t.Errorf("updated[%d] = %v, want %v", idx, updated[idx], expected)
 		}
 	}

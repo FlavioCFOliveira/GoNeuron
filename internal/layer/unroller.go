@@ -9,10 +9,10 @@ type SequenceUnroller struct {
 	base        Layer
 	timeSteps   int
 	returnSeq   bool
-	inputBuf    []float64
-	outputBuf   []float64
-	gradInBuf   []float64
-	storedInput [][]float64
+	inputBuf    []float32
+	outputBuf   []float32
+	gradInBuf   []float32
+	storedInput [][]float32
 }
 
 func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnroller {
@@ -25,14 +25,14 @@ func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnr
 		base:        base,
 		timeSteps:   timeSteps,
 		returnSeq:   returnSeq,
-		inputBuf:    make([]float64, timeSteps*base.InSize()),
-		outputBuf:   make([]float64, outSize),
-		gradInBuf:   make([]float64, timeSteps*base.InSize()),
-		storedInput: make([][]float64, timeSteps),
+		inputBuf:    make([]float32, timeSteps*base.InSize()),
+		outputBuf:   make([]float32, outSize),
+		gradInBuf:   make([]float32, timeSteps*base.InSize()),
+		storedInput: make([][]float32, timeSteps),
 	}
 }
 
-func (s *SequenceUnroller) Forward(x []float64) []float64 {
+func (s *SequenceUnroller) Forward(x []float32) []float32 {
 	inSize := s.base.InSize()
 	outSize := s.base.OutSize()
 
@@ -46,7 +46,7 @@ func (s *SequenceUnroller) Forward(x []float64) []float64 {
 	if bi, ok := s.base.(*Bidirectional); ok {
 		for t := 0; t < s.timeSteps; t++ {
 			if s.storedInput[t] == nil {
-				s.storedInput[t] = make([]float64, inSize)
+				s.storedInput[t] = make([]float32, inSize)
 			}
 			copy(s.storedInput[t], x[t*inSize:(t+1)*inSize])
 			bi.Forward(s.storedInput[t])
@@ -67,7 +67,7 @@ func (s *SequenceUnroller) Forward(x []float64) []float64 {
 	} else {
 		for t := 0; t < s.timeSteps; t++ {
 			if s.storedInput[t] == nil {
-				s.storedInput[t] = make([]float64, inSize)
+				s.storedInput[t] = make([]float32, inSize)
 			}
 			copy(s.storedInput[t], x[t*inSize:(t+1)*inSize])
 
@@ -84,21 +84,21 @@ func (s *SequenceUnroller) Forward(x []float64) []float64 {
 	return s.outputBuf
 }
 
-func (s *SequenceUnroller) Backward(grad []float64) []float64 {
+func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 	outSize := s.base.OutSize()
 	inSize := s.base.InSize()
 
 	if bi, ok := s.base.(*Bidirectional); ok {
 		// Bidirectional BPTT
-		fGradNext := make([]float64, bi.forward.OutSize())
-		bGradNext := make([]float64, bi.backward.OutSize())
+		fGradNext := make([]float32, bi.forward.OutSize())
+		bGradNext := make([]float32, bi.backward.OutSize())
 
 		fOutSize := bi.forward.OutSize()
 		bOutSize := bi.backward.OutSize()
 
 		// Forward layer: Backward from T-1 to 0
 		for t := s.timeSteps - 1; t >= 0; t-- {
-			currentGrad := make([]float64, fOutSize)
+			currentGrad := make([]float32, fOutSize)
 			copy(currentGrad, fGradNext)
 			if s.returnSeq {
 				for i := 0; i < fOutSize; i++ {
@@ -116,7 +116,7 @@ func (s *SequenceUnroller) Backward(grad []float64) []float64 {
 
 		// Backward layer: Backward from 0 to T-1 (its own reverse)
 		for t := 0; t < s.timeSteps; t++ {
-			currentGrad := make([]float64, bOutSize)
+			currentGrad := make([]float32, bOutSize)
 			copy(currentGrad, bGradNext)
 			if s.returnSeq {
 				for i := 0; i < bOutSize; i++ {
@@ -138,9 +138,9 @@ func (s *SequenceUnroller) Backward(grad []float64) []float64 {
 			copy(bGradNext, currentGrad)
 		}
 	} else {
-		dhNext := make([]float64, outSize)
+		dhNext := make([]float32, outSize)
 		for t := s.timeSteps - 1; t >= 0; t-- {
-			currentGrad := make([]float64, outSize)
+			currentGrad := make([]float32, outSize)
 			copy(currentGrad, dhNext)
 			if s.returnSeq {
 				for i := 0; i < outSize; i++ {
@@ -160,17 +160,19 @@ func (s *SequenceUnroller) Backward(grad []float64) []float64 {
 	return s.gradInBuf
 }
 
-func (s *SequenceUnroller) Params() []float64 { return s.base.Params() }
-func (s *SequenceUnroller) SetParams(p []float64) { s.base.SetParams(p) }
-func (s *SequenceUnroller) Gradients() []float64 { return s.base.Gradients() }
-func (s *SequenceUnroller) SetGradients(g []float64) { s.base.SetGradients(g) }
-func (s *SequenceUnroller) SetDevice(device Device) { s.base.SetDevice(device) }
-func (s *SequenceUnroller) Reset() { s.base.Reset() }
-func (s *SequenceUnroller) ClearGradients() { s.base.ClearGradients() }
-func (s *SequenceUnroller) Clone() Layer { return NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq) }
-func (s *SequenceUnroller) InSize() int { return s.timeSteps * s.base.InSize() }
+func (s *SequenceUnroller) Params() []float32             { return s.base.Params() }
+func (s *SequenceUnroller) SetParams(p []float32)        { s.base.SetParams(p) }
+func (s *SequenceUnroller) Gradients() []float32         { return s.base.Gradients() }
+func (s *SequenceUnroller) SetGradients(g []float32)     { s.base.SetGradients(g) }
+func (s *SequenceUnroller) SetDevice(device Device)      { s.base.SetDevice(device) }
+func (s *SequenceUnroller) Reset()                       { s.base.Reset() }
+func (s *SequenceUnroller) ClearGradients()              { s.base.ClearGradients() }
+func (s *SequenceUnroller) Clone() Layer                 { return NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq) }
+func (s *SequenceUnroller) InSize() int                  { return s.timeSteps * s.base.InSize() }
 func (s *SequenceUnroller) OutSize() int {
-	if s.returnSeq { return s.timeSteps * s.base.OutSize() }
+	if s.returnSeq {
+		return s.timeSteps * s.base.OutSize()
+	}
 	return s.base.OutSize()
 }
-func (s *SequenceUnroller) AccumulateBackward(grad []float64) []float64 { return s.Backward(grad) }
+func (s *SequenceUnroller) AccumulateBackward(grad []float32) []float32 { return s.Backward(grad) }

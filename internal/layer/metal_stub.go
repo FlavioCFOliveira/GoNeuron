@@ -15,6 +15,6 @@ func (d *MetalDevice) IsAvailable() bool {
 	return false
 }
 
-func (d *MetalDevice) MatMul(A, B, C []float64, M, N, K int) {
+func (d *MetalDevice) MatMul(A, B, C []float32, M, N, K int) {
 	// No-op on non-macOS
 }

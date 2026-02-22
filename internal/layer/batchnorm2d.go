@@ -10,27 +10,27 @@ import (
 type BatchNorm2D struct {
 	// Normalization parameters
 	numFeatures int
-	eps         float64
-	momentum    float64
+	eps         float32
+	momentum    float32
 	affine      bool
 
 	// Learnable parameters (when affine is enabled)
-	gamma []float64
-	beta  []float64
+	gamma []float32
+	beta  []float32
 
 	// Running statistics (for inference)
-	runningMean []float64
-	runningVar  []float64
+	runningMean []float32
+	runningVar  []float32
 
 	// Pre-allocated buffers
-	outputBuf         []float64
-	gradInBuf         []float64
-	gradGammaBuf      []float64
-	gradBetaBuf       []float64
-	savedInput        []float64
-	savedMean         []float64
-	savedVar          []float64
-	savedStd          []float64
+	outputBuf         []float32
+	gradInBuf         []float32
+	gradGammaBuf      []float32
+	gradBetaBuf       []float32
+	savedInput        []float32
+	savedMean         []float32
+	savedVar          []float32
+	savedStd          []float32
 	numelPerChannel   int
 
 	device Device
@@ -41,27 +41,27 @@ type BatchNorm2D struct {
 // eps: small value for numerical stability (default 1e-5)
 // momentum: for running average of mean/var (default 0.1)
 // affine: whether to learn scale (gamma) and shift (beta) parameters
-func NewBatchNorm2D(numFeatures int, eps float64, momentum float64, affine bool) *BatchNorm2D {
+func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool) *BatchNorm2D {
 	l := &BatchNorm2D{
 		numFeatures: numFeatures,
 		eps:         eps,
 		momentum:    momentum,
 		affine:      affine,
-		outputBuf:   make([]float64, 0),
-		gradInBuf:   make([]float64, 0),
-		runningMean: make([]float64, numFeatures),
-		runningVar:  make([]float64, numFeatures),
-		savedMean:   make([]float64, numFeatures),
-		savedVar:    make([]float64, numFeatures),
-		savedStd:    make([]float64, numFeatures),
+		outputBuf:   make([]float32, 0),
+		gradInBuf:   make([]float32, 0),
+		runningMean: make([]float32, numFeatures),
+		runningVar:  make([]float32, numFeatures),
+		savedMean:   make([]float32, numFeatures),
+		savedVar:    make([]float32, numFeatures),
+		savedStd:    make([]float32, numFeatures),
 		device:      &CPUDevice{},
 	}
 
 	if affine {
-		l.gamma = make([]float64, numFeatures)
-		l.beta = make([]float64, numFeatures)
-		l.gradGammaBuf = make([]float64, numFeatures)
-		l.gradBetaBuf = make([]float64, numFeatures)
+		l.gamma = make([]float32, numFeatures)
+		l.beta = make([]float32, numFeatures)
+		l.gradGammaBuf = make([]float32, numFeatures)
+		l.gradBetaBuf = make([]float32, numFeatures)
 
 		// Initialize gamma to 1 and beta to 0
 		for i := 0; i < numFeatures; i++ {
@@ -81,9 +81,9 @@ func (b *BatchNorm2D) SetDevice(device Device) {
 // Forward performs a forward pass through the batch normalization layer.
 // x: input tensor of shape [batchSize * numFeatures * spatialSize]
 // Returns: normalized output with same shape as input
-func (b *BatchNorm2D) Forward(x []float64) []float64 {
+func (b *BatchNorm2D) Forward(x []float32) []float32 {
 	if len(x) == 0 {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	// Infer dimensions
@@ -93,17 +93,17 @@ func (b *BatchNorm2D) Forward(x []float64) []float64 {
 
 	// Ensure output buffer is sized correctly
 	if len(b.outputBuf) != total {
-		b.outputBuf = make([]float64, total)
+		b.outputBuf = make([]float32, total)
 	}
 	if len(b.gradInBuf) != total {
-		b.gradInBuf = make([]float64, total)
+		b.gradInBuf = make([]float32, total)
 	}
 
 	output := b.outputBuf
 
 	// Save input for backward pass
 	if cap(b.savedInput) < total {
-		b.savedInput = make([]float64, total)
+		b.savedInput = make([]float32, total)
 	}
 	copy(b.savedInput, x)
 
@@ -112,24 +112,24 @@ func (b *BatchNorm2D) Forward(x []float64) []float64 {
 
 	for f := 0; f < numFeatures; f++ {
 		// Compute batch mean
-		sum := 0.0
+		sum := float32(0.0)
 		for s := 0; s < numel; s++ {
 			idx := s*numFeatures + f
 			sum += x[idx]
 		}
-		mean := sum / float64(numel)
+		mean := sum / float32(numel)
 		b.savedMean[f] = mean
 		b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
 
 		// Compute batch variance
-		sumSquares := 0.0
+		sumSquares := float32(0.0)
 		for s := 0; s < numel; s++ {
 			idx := s*numFeatures + f
 			diff := x[idx] - mean
 			sumSquares += diff * diff
 		}
-		variance := sumSquares / float64(numel)
-		std := math.Sqrt(variance + b.eps)
+		variance := sumSquares / float32(numel)
+		std := float32(math.Sqrt(float64(variance + b.eps)))
 		b.savedVar[f] = variance
 		b.savedStd[f] = std
 		b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
@@ -150,13 +150,13 @@ func (b *BatchNorm2D) Forward(x []float64) []float64 {
 }
 
 // Backward performs backpropagation through the batch normalization layer.
-func (b *BatchNorm2D) Backward(grad []float64) []float64 {
+func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 	numel := b.numelPerChannel
 	numFeatures := b.numFeatures
 
 	// Ensure gradInBuf is sized correctly
 	if len(b.gradInBuf) != len(grad) {
-		b.gradInBuf = make([]float64, len(grad))
+		b.gradInBuf = make([]float32, len(grad))
 	}
 
 	for f := 0; f < numFeatures; f++ {
@@ -164,8 +164,8 @@ func (b *BatchNorm2D) Backward(grad []float64) []float64 {
 		std := b.savedStd[f]
 
 		// Compute sum of gradients and sum of gradients * (x - mean)
-		sumGrad := 0.0
-		sumGradXMean := 0.0
+		sumGrad := float32(0.0)
+		sumGradXMean := float32(0.0)
 		for s := 0; s < numel; s++ {
 			idx := s*numFeatures + f
 			diff := b.savedInput[idx] - mean
@@ -182,7 +182,7 @@ func (b *BatchNorm2D) Backward(grad []float64) []float64 {
 			if b.affine {
 				gradInput *= b.gamma[f]
 			}
-			gradInput = gradInput/std - sumGrad/float64(numel)/std - diff*sumGradXMean/float64(numel)/std/std/std
+			gradInput = gradInput/std - sumGrad/float32(numel)/std - diff*sumGradXMean/float32(numel)/std/std/std
 
 			b.gradInBuf[idx] = gradInput // This is gradient w.r.t. input, no need to accumulate across samples in the SAME pass
 		}
@@ -202,20 +202,20 @@ func (b *BatchNorm2D) Backward(grad []float64) []float64 {
 }
 
 // Params returns layer parameters (gamma and beta when affine is enabled).
-func (b *BatchNorm2D) Params() []float64 {
+func (b *BatchNorm2D) Params() []float32 {
 	if !b.affine {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	total := len(b.gamma) + len(b.beta)
-	params := make([]float64, total)
+	params := make([]float32, total)
 	copy(params, b.gamma)
 	copy(params[len(b.gamma):], b.beta)
 	return params
 }
 
 // SetParams updates gamma and beta from a flattened slice.
-func (b *BatchNorm2D) SetParams(params []float64) {
+func (b *BatchNorm2D) SetParams(params []float32) {
 	if !b.affine {
 		return
 	}
@@ -226,20 +226,20 @@ func (b *BatchNorm2D) SetParams(params []float64) {
 }
 
 // Gradients returns layer gradients (gamma and beta gradients when affine is enabled).
-func (b *BatchNorm2D) Gradients() []float64 {
+func (b *BatchNorm2D) Gradients() []float32 {
 	if !b.affine {
-		return make([]float64, 0)
+		return make([]float32, 0)
 	}
 
 	total := len(b.gradGammaBuf) + len(b.gradBetaBuf)
-	gradients := make([]float64, total)
+	gradients := make([]float32, total)
 	copy(gradients, b.gradGammaBuf)
 	copy(gradients[len(b.gradGammaBuf):], b.gradBetaBuf)
 	return gradients
 }
 
 // SetGradients sets gradients from a flattened slice.
-func (b *BatchNorm2D) SetGradients(gradients []float64) {
+func (b *BatchNorm2D) SetGradients(gradients []float32) {
 	if !b.affine {
 		return
 	}
@@ -290,7 +290,7 @@ func (b *BatchNorm2D) Clone() Layer {
 }
 
 // GetGamma returns the gamma parameters (for affine layers).
-func (b *BatchNorm2D) GetGamma() []float64 {
+func (b *BatchNorm2D) GetGamma() []float32 {
 	if !b.affine {
 		return nil
 	}
@@ -298,7 +298,7 @@ func (b *BatchNorm2D) GetGamma() []float64 {
 }
 
 // GetBeta returns the beta parameters (for affine layers).
-func (b *BatchNorm2D) GetBeta() []float64 {
+func (b *BatchNorm2D) GetBeta() []float32 {
 	if !b.affine {
 		return nil
 	}
@@ -306,27 +306,27 @@ func (b *BatchNorm2D) GetBeta() []float64 {
 }
 
 // GetRunningMean returns the running mean statistics.
-func (b *BatchNorm2D) GetRunningMean() []float64 {
+func (b *BatchNorm2D) GetRunningMean() []float32 {
 	return b.runningMean
 }
 
 // GetRunningVar returns the running variance statistics.
-func (b *BatchNorm2D) GetRunningVar() []float64 {
+func (b *BatchNorm2D) GetRunningVar() []float32 {
 	return b.runningVar
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For BatchNorm2D, gradients are already accumulated in Backward, so this just calls Backward.
-func (b *BatchNorm2D) AccumulateBackward(grad []float64) []float64 {
+func (b *BatchNorm2D) AccumulateBackward(grad []float32) []float32 {
 	return b.Backward(grad)
 }
 
 // GetEps returns the epsilon value for numerical stability.
-func (b *BatchNorm2D) GetEps() float64 {
+func (b *BatchNorm2D) GetEps() float32 {
 	return b.eps
 }
 
 // GetMomentum returns the momentum value.
-func (b *BatchNorm2D) GetMomentum() float64 {
+func (b *BatchNorm2D) GetMomentum() float32 {
 	return b.momentum
 }
