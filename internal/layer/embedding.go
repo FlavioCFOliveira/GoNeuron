@@ -165,6 +165,22 @@ func (e *Embedding) Reset() {
 	e.savedIndices = make([]int, 0)
 }
 
+// ClearGradients zeroes out the accumulated gradients.
+func (e *Embedding) ClearGradients() {
+	for i := range e.gradWeights {
+		e.gradWeights[i] = 0
+	}
+}
+
+// Clone creates a deep copy of the embedding layer.
+func (e *Embedding) Clone() Layer {
+	newE := NewEmbedding(e.num_embeddings, e.embedding_dim)
+	copy(newE.weights, e.weights)
+	newE.padding_idx = e.padding_idx
+	newE.max_norm = e.max_norm
+	return newE
+}
+
 // GetWeights returns the weights matrix.
 func (e *Embedding) GetWeights() []float64 {
 	return e.weights
@@ -188,4 +204,10 @@ func (e *Embedding) SetWeight(idx int, values []float64) {
 	for i := 0; i < e.embedding_dim && i < len(values); i++ {
 		e.weights[start+i] = values[i]
 	}
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For Embedding, gradients are already accumulated in Backward, so this just calls Backward.
+func (e *Embedding) AccumulateBackward(grad []float64) []float64 {
+	return e.Backward(grad)
 }

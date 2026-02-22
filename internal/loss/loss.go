@@ -371,10 +371,13 @@ func (b BCEWithLogitsLoss) BackwardInPlace(yPred, yTrue, grad []float64) {
 }
 
 // NLLLoss (Negative Log Likelihood) loss for classification.
-// This is typically used with log-probabilities as input.
+// This is typically used with log-probabilities as input (e.g., from LogSoftmax).
+// When input is log-probabilities: loss = -sum(y_true * log_pred) / n
+// When input is probabilities: use CrossEntropy instead.
 type NLLLoss struct{}
 
-// Forward computes negative log likelihood: -sum(y_true * log(y_pred)) / n
+// Forward computes negative log likelihood from log-probabilities.
+// Input should be log-probabilities (e.g., output of LogSoftmax).
 func (n NLLLoss) Forward(yPred, yTrue []float64) float64 {
 	nLen := len(yPred)
 	if nLen != len(yTrue) {
@@ -382,20 +385,21 @@ func (n NLLLoss) Forward(yPred, yTrue []float64) float64 {
 	}
 
 	var sum float64
-	const eps = 1e-10
 	for i := 0; i < nLen; i++ {
-		// Clip to avoid log(0)
-		pred := yPred[i]
-		if pred < eps {
-			pred = eps
+		// yPred is assumed to be log-probability, so use directly
+		// Clip to avoid issues with -inf
+		logPred := yPred[i]
+		if logPred < -700 { // exp(-700) is essentially 0
+			logPred = -700
 		}
-		sum -= yTrue[i] * math.Log(pred)
+		sum -= yTrue[i] * logPred
 	}
 	return sum / float64(nLen)
 }
 
-// Backward computes gradient for NLL loss.
-// For one-hot encoded targets: grad[i] = -y_true[i] / (y_pred[i] * n)
+// Backward computes gradient for NLL loss with log-probabilities.
+// For log-prob input: grad[i] = -y_true[i] / n
+// This is combined with LogSoftmax's gradient in the Dense layer.
 func (n NLLLoss) Backward(yPred, yTrue []float64) []float64 {
 	nLen := len(yPred)
 	if nLen != len(yTrue) {
@@ -403,13 +407,8 @@ func (n NLLLoss) Backward(yPred, yTrue []float64) []float64 {
 	}
 
 	grad := make([]float64, nLen)
-	const eps = 1e-10
 	for i := 0; i < nLen; i++ {
-		pred := yPred[i]
-		if pred < eps {
-			pred = eps
-		}
-		grad[i] = -yTrue[i] / (pred * float64(nLen))
+		grad[i] = -yTrue[i] / float64(nLen)
 	}
 	return grad
 }
@@ -421,13 +420,8 @@ func (n NLLLoss) BackwardInPlace(yPred, yTrue, grad []float64) {
 		panic("NLLLoss: slices must have same length")
 	}
 
-	const eps = 1e-10
 	for i := 0; i < nLen; i++ {
-		pred := yPred[i]
-		if pred < eps {
-			pred = eps
-		}
-		grad[i] = -yTrue[i] / (pred * float64(nLen))
+		grad[i] = -yTrue[i] / float64(nLen)
 	}
 }
 

@@ -12,6 +12,12 @@ type Activation interface {
 	Derivative(x float64) float64
 }
 
+// BatchActivation is an activation function that can process batches.
+type BatchActivation interface {
+	// ActivateBatch computes activation for a slice of values.
+	ActivateBatch(x []float64) []float64
+}
+
 // ReLU activation function.
 type ReLU struct{}
 
@@ -318,6 +324,20 @@ func (e ELU) Derivative(x float64) float64 {
 		return 1
 	}
 	return e.Alpha * math.Exp(x)
+}
+
+// Linear (identity) activation function.
+// Often used for the output layer in regression or when no activation is desired.
+type Linear struct{}
+
+// Activate computes f(x) = x (identity)
+func (l Linear) Activate(x float64) float64 {
+	return x
+}
+
+// Derivative computes f'(x) = 1
+func (l Linear) Derivative(x float64) float64 {
+	return 1
 }
 
 // SELU (Scaled Exponential Linear Unit) activation function.

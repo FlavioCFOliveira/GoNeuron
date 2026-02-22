@@ -44,6 +44,14 @@ type GRU struct {
 	dResetBuf  []float64
 	dCellBuf   []float64
 
+	// Reusable buffers for backward pass
+	dhBuf          []float64
+	dhCandidateBuf []float64
+	dUpdateBiBuf   []float64 // dL/dz before activation derivative
+	dxBuf          []float64
+	dhPrevBuf      []float64
+	hPrevBuf       []float64
+
 	// Gate outputs stored for backprop
 	updateGateOut []float64
 	resetGateOut  []float64
@@ -112,6 +120,13 @@ func NewGRU(inSize, outSize int) *GRU {
 		dUpdateBuf: make([]float64, outSize),
 		dResetBuf:  make([]float64, outSize),
 		dCellBuf:   make([]float64, outSize),
+
+		dhBuf:          make([]float64, outSize),
+		dhCandidateBuf: make([]float64, outSize),
+		dUpdateBiBuf:   make([]float64, outSize),
+		dxBuf:          make([]float64, inSize),
+		dhPrevBuf:      make([]float64, outSize),
+		hPrevBuf:       make([]float64, outSize),
 
 		updateGateOut: make([]float64, outSize),
 		resetGateOut:  make([]float64, outSize),
@@ -231,17 +246,6 @@ func (g *GRU) Backward(grad []float64) []float64 {
 	outSize := g.outSize
 	inSize := g.inSize
 
-	// Clear gradient buffers
-	for i := range g.gradInputWeights {
-		g.gradInputWeights[i] = 0
-	}
-	for i := range g.gradRecurrentWeights {
-		g.gradRecurrentWeights[i] = 0
-	}
-	for i := range g.gradBiases {
-		g.gradBiases[i] = 0
-	}
-
 	// Get time step index
 	ts := g.timeStep - 1
 	if ts < 0 || ts >= len(g.storedHiddenStates) {
@@ -252,29 +256,33 @@ func (g *GRU) Backward(grad []float64) []float64 {
 	}
 
 	// Get saved states
-	hPrev := make([]float64, outSize)
+	hPrev := g.hPrevBuf
 	if ts > 0 {
 		copy(hPrev, g.storedHiddenStates[ts-1])
+	} else {
+		for i := range hPrev {
+			hPrev[i] = 0
+		}
 	}
 
 	updateStart, resetStart, cellStart := 0, outSize, outSize*2
 
 	// Compute gradient of loss w.r.t. hidden state
 	// dL/dh = dL/doutput + dL+1/dh_next
-	dh := make([]float64, outSize)
+	dh := g.dhBuf
 	for i := 0; i < outSize; i++ {
 		dh[i] = grad[i]
 	}
 
 	// Compute dh_candidate = dh * (h - h_prev) = dh * (1 - z) * dh_candidate/d(h_candidate)
 	// Actually: dL/dh_candidate = dL/dh * (1 - z)
-	dhCandidate := make([]float64, outSize)
+	dhCandidate := g.dhCandidateBuf
 	for i := 0; i < outSize; i++ {
 		dhCandidate[i] = dh[i] * (1 - g.updateGateOut[i])
 	}
 
 	// Compute dL/dz = dL/dh * (h_candidate - h_prev)
-	dUpdate := make([]float64, outSize)
+	dUpdate := g.dUpdateBiBuf
 	for i := 0; i < outSize; i++ {
 		dUpdate[i] = dh[i] * (g.cellGateOut[i] - hPrev[i])
 	}
@@ -342,7 +350,7 @@ func (g *GRU) Backward(grad []float64) []float64 {
 
 	// Compute gradient w.r.t. input (for previous layer)
 	// All 3 gates use input weights: update, reset, and cell candidate
-	dx := make([]float64, inSize)
+	dx := g.dxBuf
 	for i := 0; i < inSize; i++ {
 		sum := 0.0
 		for gateIdx := 0; gateIdx < 3; gateIdx++ {
@@ -363,7 +371,7 @@ func (g *GRU) Backward(grad []float64) []float64 {
 
 	// Compute gradient w.r.t. previous hidden state
 	// Update and reset gates use h_prev directly, cell candidate uses reset * h_prev
-	dhPrev := make([]float64, outSize)
+	dhPrev := g.dhPrevBuf
 	for i := 0; i < outSize; i++ {
 		sum := 0.0
 		// Update gate contribution
@@ -388,9 +396,8 @@ func (g *GRU) Backward(grad []float64) []float64 {
 		grad[i] += dhPrev[i]
 	}
 
-	// Copy to inputBuf and return
-	copy(g.inputBuf, dx)
-	return g.inputBuf
+	g.timeStep--
+	return dx
 }
 
 // Params returns all GRU parameters flattened (copy).
@@ -443,4 +450,32 @@ func (g *GRU) OutSize() int {
 // Hidden returns the current hidden state of the GRU.
 func (g *GRU) Hidden() []float64 {
 	return g.cellBuf
+}
+
+// ClearGradients zeroes out the accumulated gradients.
+func (g *GRU) ClearGradients() {
+	for i := range g.gradInputWeights {
+		g.gradInputWeights[i] = 0
+	}
+	for i := range g.gradRecurrentWeights {
+		g.gradRecurrentWeights[i] = 0
+	}
+	for i := range g.gradBiases {
+		g.gradBiases[i] = 0
+	}
+}
+
+// Clone creates a deep copy of the GRU layer.
+func (g *GRU) Clone() Layer {
+	newG := NewGRU(g.inSize, g.outSize)
+	copy(newG.inputWeights, g.inputWeights)
+	copy(newG.recurrentWeights, g.recurrentWeights)
+	copy(newG.biases, g.biases)
+	return newG
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For GRU, gradients are already accumulated in Backward, so this just calls Backward.
+func (g *GRU) AccumulateBackward(grad []float64) []float64 {
+	return g.Backward(grad)
 }

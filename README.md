@@ -8,7 +8,7 @@ A pure Go neural network library with no external dependencies. Built for perfor
 ## Features
 
 - **Pure Go** - No external BLAS or C dependencies
-- **Multiple Layer Types** - Dense, Conv2D, LSTM
+- **Multiple Layer Types** - Dense, Conv2D, LSTM, GRU, MaxPool2D, AvgPool2D, Dropout, BatchNorm2D, LayerNorm, Embedding, Flatten
 - **Activation Functions** - ReLU, Sigmoid, Tanh, LeakyReLU, Softmax
 - **Loss Functions** - MSE, CrossEntropy, Huber
 - **Optimizers** - SGD, Adam
@@ -77,25 +77,6 @@ func main() {
             trainX[i], pred[0], trainY[i][0])
     }
 }
-```
-
-## Running Examples
-
-```bash
-# XOR training example
-go run cmd/xor/main.go
-
-# MLP example
-go run cmd/mlp/main.go
-
-# CNN example
-go run cmd/cnn/main.go
-
-# LSTM example
-go run cmd/lstm/main.go
-
-# All inference examples
-go run cmd/inference/main.go
 ```
 
 ## Usage Guides
@@ -281,9 +262,6 @@ opt.NewAdam(lr float64) *Adam  // Default: beta1=0.9, beta2=0.999, eps=1e-8
 
 ## Limitations
 
-- No pooling layers (MaxPool/AvgPool)
-- No dropout layer
-- No batch normalization
 - No GPU acceleration (CPU only)
 - Deterministic initialization (fixed seed=42)
 

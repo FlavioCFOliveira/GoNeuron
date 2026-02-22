@@ -74,8 +74,8 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 		}
 	}
 
-	// Test MaxPool2D
-	maxPool := NewMaxPool2D(2, 2, 0)
+	// Test MaxPool2D (single channel input)
+	maxPool := NewMaxPool2D(1, 2, 2, 0)
 	input2 := make([]float64, 64)
 	for i := range input2 {
 		input2[i] = float64(i % 16)

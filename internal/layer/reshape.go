@@ -67,6 +67,12 @@ func (f *Flatten) Backward(grad []float64) []float64 {
 	return grad
 }
 
+// AccumulateBackward performs backpropagation and accumulates gradients.
+func (f *Flatten) AccumulateBackward(grad []float64) []float64 {
+	// Gradient flows through unchanged - just need to return correct size
+	return grad
+}
+
 // Params returns layer parameters (empty for Flatten).
 func (f *Flatten) Params() []float64 {
 	return make([]float64, 0)
@@ -101,6 +107,20 @@ func (f *Flatten) OutSize() int {
 // Reset resets the flatten layer.
 func (f *Flatten) Reset() {
 	f.inputShape = make([]int, 0)
+}
+
+// ClearGradients zeroes out the accumulated gradients (no-op for Flatten).
+func (f *Flatten) ClearGradients() {
+	// No parameters to clear
+}
+
+// Clone creates a deep copy of the flatten layer.
+func (f *Flatten) Clone() Layer {
+	newF := NewFlatten()
+	newF.startDim = f.startDim
+	newF.endDim = f.endDim
+	newF.outSize = f.outSize
+	return newF
 }
 
 // OutputShape returns the output shape as a slice.

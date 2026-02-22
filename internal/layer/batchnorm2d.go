@@ -146,19 +146,9 @@ func (b *BatchNorm2D) Backward(grad []float64) []float64 {
 	numel := b.numelPerChannel
 	numFeatures := b.numFeatures
 
-	// Clear input gradient buffer
-	for i := range b.gradInBuf {
-		b.gradInBuf[i] = 0
-	}
-
-	// Clear parameter gradients (if affine)
-	if b.affine {
-		for i := range b.gradGammaBuf {
-			b.gradGammaBuf[i] = 0
-		}
-		for i := range b.gradBetaBuf {
-			b.gradBetaBuf[i] = 0
-		}
+	// Ensure gradInBuf is sized correctly
+	if len(b.gradInBuf) != len(grad) {
+		b.gradInBuf = make([]float64, len(grad))
 	}
 
 	for f := 0; f < numFeatures; f++ {
@@ -186,7 +176,7 @@ func (b *BatchNorm2D) Backward(grad []float64) []float64 {
 			}
 			gradInput = gradInput/std - sumGrad/float64(numel)/std - diff*sumGradXMean/float64(numel)/std/std/std
 
-			b.gradInBuf[idx] += gradInput
+			b.gradInBuf[idx] = gradInput // This is gradient w.r.t. input, no need to accumulate across samples in the SAME pass
 		}
 
 		// Accumulate parameter gradients
@@ -266,6 +256,30 @@ func (b *BatchNorm2D) Reset() {
 	// No state to reset
 }
 
+// ClearGradients zeroes out the accumulated gradients.
+func (b *BatchNorm2D) ClearGradients() {
+	if b.affine {
+		for i := range b.gradGammaBuf {
+			b.gradGammaBuf[i] = 0
+		}
+		for i := range b.gradBetaBuf {
+			b.gradBetaBuf[i] = 0
+		}
+	}
+}
+
+// Clone creates a deep copy of the batch normalization layer.
+func (b *BatchNorm2D) Clone() Layer {
+	newB := NewBatchNorm2D(b.numFeatures, b.eps, b.momentum, b.affine)
+	if b.affine {
+		copy(newB.gamma, b.gamma)
+		copy(newB.beta, b.beta)
+	}
+	copy(newB.runningMean, b.runningMean)
+	copy(newB.runningVar, b.runningVar)
+	return newB
+}
+
 // GetGamma returns the gamma parameters (for affine layers).
 func (b *BatchNorm2D) GetGamma() []float64 {
 	if !b.affine {
@@ -290,6 +304,12 @@ func (b *BatchNorm2D) GetRunningMean() []float64 {
 // GetRunningVar returns the running variance statistics.
 func (b *BatchNorm2D) GetRunningVar() []float64 {
 	return b.runningVar
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For BatchNorm2D, gradients are already accumulated in Backward, so this just calls Backward.
+func (b *BatchNorm2D) AccumulateBackward(grad []float64) []float64 {
+	return b.Backward(grad)
 }
 
 // GetEps returns the epsilon value for numerical stability.

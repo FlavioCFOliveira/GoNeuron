@@ -35,6 +35,20 @@ func New(layers []layer.Layer, loss loss.Loss, optimizer opt.Optimizer) *Network
 	}
 }
 
+// Clone creates a deep copy of the network.
+func (n *Network) Clone() *Network {
+	newLayers := make([]layer.Layer, len(n.layers))
+	for i, l := range n.layers {
+		newLayers[i] = l.Clone()
+	}
+
+	return &Network{
+		layers: newLayers,
+		loss:   n.loss, // Loss functions are usually stateless
+		opt:    n.opt,  // Note: Optimizer is shared, but we only use it in Step() which is sequential
+	}
+}
+
 // Forward performs a forward pass through all layers.
 func (n *Network) Forward(x []float64) []float64 {
 	curr := x
@@ -56,6 +70,9 @@ func (n *Network) Backward(grad []float64) []float64 {
 // Step performs one optimization step using the stored optimizer.
 // This computes updated parameters and sets them back to layers.
 func (n *Network) Step() {
+	// Signal a new optimization step (increment timestep for Adam)
+	n.opt.NewStep()
+
 	for _, l := range n.layers {
 		params := l.Params()
 		gradients := l.Gradients()
@@ -69,6 +86,11 @@ func (n *Network) Step() {
 // Train performs a training step on a single sample.
 // This is optimized for performance with minimal allocations.
 func (n *Network) Train(x []float64, y []float64) float64 {
+	// Clear gradients before starting
+	for _, l := range n.layers {
+		l.ClearGradients()
+	}
+
 	// Forward pass
 	yPred := n.Forward(x)
 
@@ -112,14 +134,175 @@ func (n *Network) TrainBatch(batchX [][]float64, batchY [][]float64) float64 {
 	// Parallel overhead dominates for small batches
 	const parallelThreshold = 16
 
-	// Force sequential for now due to bug in parallel training
+	if batchSize >= parallelThreshold {
+		return n.trainBatchParallel(batchX, batchY)
+	}
+
 	return n.trainBatchSequential(batchX, batchY)
+}
 
-	// if batchSize >= parallelThreshold {
-	// 	return n.trainBatchParallel(batchX, batchY)
-	// }
+// ForwardBatch performs forward pass on a batch of samples.
+func (n *Network) ForwardBatch(batchX [][]float64) [][]float64 {
+	results := make([][]float64, len(batchX))
+	for i, x := range batchX {
+		pred := n.Forward(x)
+		results[i] = make([]float64, len(pred))
+		copy(results[i], pred)
+	}
+	return results
+}
 
-	// return n.trainBatchSequential(batchX, batchY)
+// TrainTriplet performs a training step using Triplet Margin Loss.
+// It performs three forward passes (anchor, positive, negative) and accumulates gradients.
+func (n *Network) TrainTriplet(anchor, positive, negative []float64, margin float64) float64 {
+	// Clear gradients at the start
+	n.ClearGradients()
+	for _, l := range n.layers {
+		if resettable, ok := l.(interface{ ClearSavedData() }); ok {
+			resettable.ClearSavedData()
+		}
+	}
+
+	// 1. Forward passes
+	aPred := n.Forward(anchor)
+	pPred := n.Forward(positive)
+	nPred := n.Forward(negative)
+
+	// Concatenate predictions for TripletMarginLoss
+	embDim := len(aPred)
+	tripletPred := make([]float64, embDim*3)
+	copy(tripletPred[0:embDim], aPred)
+	copy(tripletPred[embDim:2*embDim], pPred)
+	copy(tripletPred[2*embDim:3*embDim], nPred)
+
+	// 2. Compute loss
+	// Note: yTrue is not used for TripletMarginLoss, but must have same length as tripletPred
+	dummyY := make([]float64, len(tripletPred))
+	lVal := n.loss.Forward(tripletPred, dummyY)
+
+	// 3. Compute loss gradient
+	if cap(n.lossGradBuf) < len(tripletPred) {
+		n.lossGradBuf = make([]float64, len(tripletPred))
+	}
+	grad := n.lossGradBuf[:len(tripletPred)]
+
+	if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
+		backwardInPlace.BackwardInPlace(tripletPred, dummyY, grad)
+	} else {
+		grad = n.loss.Backward(tripletPred, dummyY)
+	}
+
+	// 4. Backward passes (accumulating gradients)
+	// The order of Backward calls matters for layers with saved state (like Dense with savedInputs)
+	// We need to pass the corresponding part of the loss gradient to each pass.
+	// Since we use AccumulateBackward, we must be careful about how layers handle multiple passes.
+
+	// Anchor gradient
+	_ = n.accumulateBackward(grad[0:embDim])
+	// Positive gradient
+	_ = n.accumulateBackward(grad[embDim : 2*embDim])
+	// Negative gradient
+	_ = n.accumulateBackward(grad[2*embDim : 3*embDim])
+
+	// 5. Optimization step
+	n.Step()
+
+	return lVal
+}
+
+// accumulateBackward performs a backward pass through all layers and accumulates gradients.
+func (n *Network) accumulateBackward(grad []float64) []float64 {
+	curr := grad
+	for i := len(n.layers) - 1; i >= 0; i-- {
+		curr = n.layers[i].AccumulateBackward(curr)
+	}
+	return curr
+}
+
+// trainBatchParallel performs training on a batch of samples using parallel processing.
+// Each worker gets its own Network copy to avoid buffer sharing issues.
+func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) float64 {
+	batchSize := len(batchX)
+	numWorkers := min(batchSize, runtime.NumCPU())
+
+	// Create network copies for each worker
+	workers := make([]*Network, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		workers[i] = n.Clone()
+		workers[i].ClearGradients()
+	}
+
+	losses := make([]float64, batchSize)
+	var wg sync.WaitGroup
+
+	// Distribute work across workers
+	chunkSize := (batchSize + numWorkers - 1) / numWorkers
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := min(start+chunkSize, batchSize)
+		if start >= end {
+			continue
+		}
+
+		wg.Add(1)
+		go func(workerIdx, s, e int) {
+			defer wg.Done()
+			netCopy := workers[workerIdx]
+
+			for i := s; i < e; i++ {
+				// Forward pass
+				yPred := netCopy.Forward(batchX[i])
+
+				// Compute loss
+				losses[i] = netCopy.loss.Forward(yPred, batchY[i])
+
+				// Compute loss gradient
+				yPredLen := len(yPred)
+				grad := make([]float64, yPredLen)
+
+				if backwardInPlace, ok := netCopy.loss.(loss.BackwardInPlacer); ok {
+					backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
+				} else {
+					grad = netCopy.loss.Backward(yPred, batchY[i])
+				}
+
+				// Backward pass (accumulates into netCopy's layer buffers)
+				_ = netCopy.accumulateBackward(grad)
+			}
+		}(w, start, end)
+	}
+
+	wg.Wait()
+
+	// Sum all gradients from workers into a single buffer
+	totalParams := len(n.Params())
+	sumGrads := make([]float64, totalParams)
+
+	for _, w := range workers {
+		wGrads := w.Gradients()
+		for i := range sumGrads {
+			sumGrads[i] += wGrads[i]
+		}
+	}
+
+	// Average gradients
+	invBatchSize := 1.0 / float64(batchSize)
+	for i := range sumGrads {
+		sumGrads[i] *= invBatchSize
+	}
+
+	// Set averaged gradients back to original network
+	n.SetGradients(sumGrads)
+
+	// Optimization step
+	n.Step()
+
+	// Compute total loss
+	totalLoss := 0.0
+	for _, l := range losses {
+		totalLoss += l
+	}
+	return totalLoss / float64(batchSize)
 }
 
 // trainBatchSequential performs training on a batch of samples sequentially.
@@ -128,11 +311,8 @@ func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) f
 	batchSize := float64(len(batchX))
 	var totalLoss float64
 
-	// Get gradient buffers from all layers
-	allGradients := make([][]float64, len(n.layers))
-	for i, l := range n.layers {
-		allGradients[i] = l.Gradients()
-	}
+	// Clear gradients at the start of the batch
+	n.ClearGradients()
 
 	// Forward and backward pass for all samples
 	// Accumulate gradients over the batch
@@ -158,122 +338,18 @@ func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) f
 	}
 
 	// Average gradients by dividing each by batch size
-	// Apply to each layer's gradient buffer in-place
-	for _, grads := range allGradients {
-		for i := range grads {
-			grads[i] /= batchSize
+	// Apply directly to layer gradient buffers (which were accumulated during backward)
+	for _, l := range n.layers {
+		grads := l.Gradients() // Get current accumulated gradients
+		for j := range grads {
+			grads[j] /= batchSize
 		}
+		l.SetGradients(grads) // Set averaged gradients back
 	}
 
 	// Single optimization step (averaged over batch)
 	n.Step()
 	return totalLoss / batchSize
-}
-
-// trainBatchParallel performs training on a batch of samples using parallel processing.
-// Each sample's forward/backward pass is computed in parallel, then gradients are averaged.
-func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) float64 {
-	batchSize := len(batchX)
-
-	// Get number of workers (CPU cores)
-	numWorkers := min(batchSize, runtime.NumCPU())
-
-	// Pre-allocate gradient buffers for each sample
-	// We need to copy gradients after each sample's backward pass
-	// because the layer gradient buffers will be overwritten
-	totalParams := len(n.Params())
-	sampleGradients := make([][]float64, batchSize)
-	for i := 0; i < batchSize; i++ {
-		sampleGradients[i] = make([]float64, totalParams)
-	}
-
-	losses := make([]float64, batchSize)
-
-	// Worker function - process samples in parallel
-	var wg sync.WaitGroup
-	worker := func(start, end int) {
-		defer wg.Done()
-		for i := start; i < end; i++ {
-			// Forward pass
-			yPred := n.Forward(batchX[i])
-
-			// Compute loss
-			losses[i] = n.loss.Forward(yPred, batchY[i])
-
-			// Compute loss gradient
-			yPredLen := len(yPred)
-			if cap(n.lossGradBuf) < yPredLen {
-				n.lossGradBuf = make([]float64, yPredLen)
-			}
-			grad := n.lossGradBuf[:yPredLen]
-
-			if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
-				backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
-			} else {
-				grad = n.loss.Backward(yPred, batchY[i])
-			}
-
-			// Backward pass
-			_ = n.Backward(grad)
-
-			// Save a copy of gradients for this sample
-			// Use the pre-allocated buffer instead of allocating
-			copy(sampleGradients[i], n.Gradients())
-		}
-	}
-
-	// Distribute work across workers
-	chunkSize := (batchSize + numWorkers - 1) / numWorkers
-	for i := 0; i < numWorkers; i++ {
-		start := i * chunkSize
-		end := min(start+chunkSize, batchSize)
-		if start < end {
-			wg.Add(1)
-			go worker(start, end)
-		}
-	}
-
-	wg.Wait()
-
-	// Accumulate gradients from all samples
-	totalLoss := 0.0
-	for i := 0; i < batchSize; i++ {
-		totalLoss += losses[i]
-	}
-
-	// Average gradients by dividing each by batch size
-	if batchSize > 0 && len(sampleGradients) > 0 {
-		avgGrads := sampleGradients[0] // Reuse first buffer as accumulator
-
-		// Sum all gradients into avgGrads
-		for i := 1; i < batchSize; i++ {
-			for j := range avgGrads {
-				avgGrads[j] += sampleGradients[i][j]
-			}
-		}
-
-		// Average and apply to each layer
-		offset := 0
-		for _, l := range n.layers {
-			gradLen := len(l.Gradients())
-			layerGrads := avgGrads[offset : offset+gradLen]
-
-			// Average gradients in-place
-			for i := 0; i < gradLen; i++ {
-				layerGrads[i] /= float64(batchSize)
-			}
-
-			// Apply gradient step in-place to layer's gradients buffer
-			// Then use Step to get updated params and set them back
-			params := l.Params()
-			updated := n.opt.Step(params, layerGrads)
-			l.SetParams(updated)
-
-			offset += gradLen
-		}
-	}
-
-	return totalLoss / float64(batchSize)
 }
 
 // Params returns all network parameters flattened (copy).
@@ -292,6 +368,24 @@ func (n *Network) Gradients() []float64 {
 		gradients = append(gradients, l.Gradients()...)
 	}
 	return gradients
+}
+
+// ClearGradients zeroes out all layer gradients.
+func (n *Network) ClearGradients() {
+	for _, l := range n.layers {
+		l.ClearGradients()
+	}
+}
+
+// SetGradients sets network gradients from a flattened slice.
+func (n *Network) SetGradients(gradients []float64) {
+	offset := 0
+	for _, l := range n.layers {
+		lGrads := l.Gradients()
+		gradLen := len(lGrads)
+		l.SetGradients(gradients[offset : offset+gradLen])
+		offset += gradLen
+	}
 }
 
 // Layers returns the network's layers slice.
@@ -459,8 +553,25 @@ type LayerConfig struct {
 	InSize  int
 	OutSize int
 	Params  []float64
-	// Activation type for Dense layers
+
+	// Activation type
 	Activation string
+	Alpha      float64 // For LeakyReLU, PReLU, ELU
+
+	// Conv2D & Pooling parameters
+	KernelSize  int
+	Stride      int
+	Padding     int
+	InChannels  int
+	OutChannels int
+
+	// Dropout parameters
+	Prob float64
+
+	// Normalization parameters
+	Eps             float64
+	Affine          bool
+	NormalizedShape int
 }
 
 // ExtractLayerConfig extracts the configuration from a layer.
@@ -471,21 +582,71 @@ func ExtractLayerConfig(l layer.Layer) LayerConfig {
 		Params:  l.Params(),
 	}
 
-	// For Dense layers, we can extract more information
-	if dense, ok := l.(*layer.Dense); ok {
+	// Identify layer type and extract parameters
+	switch v := l.(type) {
+	case *layer.Dense:
 		cfg.Type = "Dense"
-		cfg.InSize = dense.InSize()
-		cfg.OutSize = dense.OutSize()
-		cfg.Activation = getActivationType(dense.Activation())
-		cfg.Params = dense.Params()
-	}
-
-	// For LSTM layers
-	if lstm, ok := l.(*layer.LSTM); ok {
+		cfg.InSize = v.InSize()
+		cfg.OutSize = v.OutSize()
+		cfg.Activation = getActivationType(v.Activation())
+		if prelu, ok := v.Activation().(*activations.PReLU); ok {
+			cfg.Alpha = prelu.Alpha
+		} else if leaky, ok := v.Activation().(*activations.LeakyReLU); ok {
+			cfg.Alpha = leaky.Alpha
+		} else if elu, ok := v.Activation().(activations.ELU); ok {
+			cfg.Alpha = elu.Alpha
+		} else if eluPtr, ok := v.Activation().(*activations.ELU); ok {
+			cfg.Alpha = eluPtr.Alpha
+		}
+	case *layer.Conv2D:
+		cfg.Type = "Conv2D"
+		cfg.InChannels = v.InSize() // InSize for Conv2D returns inChannels
+		cfg.OutChannels = v.OutSize()
+		cfg.KernelSize = v.GetKernelSize()
+		cfg.Stride = v.GetStride()
+		cfg.Padding = v.GetPadding()
+		cfg.Activation = getActivationType(v.GetActivation())
+	case *layer.LSTM:
 		cfg.Type = "LSTM"
-		cfg.InSize = lstm.InSize()
-		cfg.OutSize = lstm.OutSize()
-		cfg.Params = lstm.Params()
+		cfg.InSize = v.InSize()
+		cfg.OutSize = v.OutSize()
+	case *layer.GRU:
+		cfg.Type = "GRU"
+		cfg.InSize = v.InSize()
+		cfg.OutSize = v.OutSize()
+	case *layer.Dropout:
+		cfg.Type = "Dropout"
+		cfg.Prob = v.GetP()
+		cfg.InSize = v.InSize()
+	case *layer.LayerNorm:
+		cfg.Type = "LayerNorm"
+		cfg.NormalizedShape = v.InSize()
+		cfg.Eps = v.GetEps()
+		cfg.Affine = v.GetGamma() != nil
+	case *layer.BatchNorm2D:
+		cfg.Type = "BatchNorm2D"
+		cfg.InChannels = v.InSize()
+		cfg.Eps = v.GetEps()
+		cfg.Affine = v.GetGamma() != nil
+	case *layer.MaxPool2D:
+		cfg.Type = "MaxPool2D"
+		cfg.InChannels = v.InSize() / (v.GetKernelSize() * v.GetKernelSize()) // Approximate
+		cfg.KernelSize = v.GetKernelSize()
+		cfg.Stride = v.GetStride()
+		cfg.Padding = v.GetPadding()
+	case *layer.AvgPool2D:
+		cfg.Type = "AvgPool2D"
+		cfg.KernelSize = v.GetKernelSize()
+		cfg.Stride = v.GetStride()
+		cfg.Padding = v.GetPadding()
+	case *layer.Embedding:
+		cfg.Type = "Embedding"
+		cfg.InSize = v.InSize() // num_embeddings
+		cfg.OutSize = v.OutSize() // embedding_dim
+	case *layer.Flatten:
+		cfg.Type = "Flatten"
+	default:
+		cfg.Type = "Unknown"
 	}
 
 	return cfg
@@ -493,55 +654,105 @@ func ExtractLayerConfig(l layer.Layer) LayerConfig {
 
 // CreateLayer creates a new layer from the configuration.
 func (c *LayerConfig) CreateLayer() (layer.Layer, error) {
-	if c.Type == "LSTM" {
-		lstm := layer.NewLSTM(c.InSize, c.OutSize)
-		lstm.SetParams(c.Params)
-		return lstm, nil
-	}
+	var l layer.Layer
+	var err error
 
-	if c.Type != "Dense" {
+	switch c.Type {
+	case "Dense":
+		act := c.createActivation()
+		l = layer.NewDense(c.InSize, c.OutSize, act)
+	case "Conv2D":
+		act := c.createActivation()
+		l = layer.NewConv2D(c.InChannels, c.OutChannels, c.KernelSize, c.Stride, c.Padding, act)
+	case "LSTM":
+		l = layer.NewLSTM(c.InSize, c.OutSize)
+	case "GRU":
+		l = layer.NewGRU(c.InSize, c.OutSize)
+	case "Dropout":
+		l = layer.NewDropout(c.Prob, c.InSize)
+	case "LayerNorm":
+		l = layer.NewLayerNorm(c.NormalizedShape, c.Eps, c.Affine)
+	case "BatchNorm2D":
+		l = layer.NewBatchNorm2D(c.InChannels, c.Eps, 0.1, c.Affine)
+	case "MaxPool2D":
+		l = layer.NewMaxPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
+	case "AvgPool2D":
+		// Note: AvgPool2D currently assumes 1 channel or handles internally
+		l = layer.NewAvgPool2D(c.KernelSize, c.Stride, c.Padding)
+	case "Embedding":
+		l = layer.NewEmbedding(c.InSize, c.OutSize)
+	case "Flatten":
+		l = layer.NewFlatten()
+	default:
 		return nil, fmt.Errorf("unsupported layer type: %s", c.Type)
 	}
 
-	var act activations.Activation
-	switch c.Activation {
-	case "ReLU":
-		act = activations.ReLU{}
-	case "Sigmoid":
-		act = activations.Sigmoid{}
-	case "Tanh":
-		act = activations.Tanh{}
-	case "LeakyReLU":
-		act = activations.NewLeakyReLU(0.01)
-	default:
-		act = activations.ReLU{}
+	if l != nil {
+		l.SetParams(c.Params)
 	}
 
-	dense := layer.NewDense(c.InSize, c.OutSize, act)
-	dense.SetParams(c.Params)
-	return dense, nil
+	return l, err
+}
+
+func (c *LayerConfig) createActivation() activations.Activation {
+	switch c.Activation {
+	case "ReLU":
+		return activations.ReLU{}
+	case "Sigmoid":
+		return activations.Sigmoid{}
+	case "Tanh":
+		return activations.Tanh{}
+	case "LeakyReLU":
+		return activations.NewLeakyReLU(c.Alpha)
+	case "PReLU":
+		return activations.NewPReLU(c.Alpha)
+	case "ELU":
+		return activations.NewELU(c.Alpha)
+	case "GELU":
+		return activations.GELU{}
+	case "SiLU":
+		return activations.SiLU{}
+	case "SELU":
+		return activations.SELU{}
+	case "Softmax":
+		return activations.Softmax{}
+	case "LogSoftmax":
+		return activations.LogSoftmax{}
+	case "Linear":
+		return activations.Linear{}
+	default:
+		return activations.ReLU{}
+	}
 }
 
 // Helper functions for activation type detection
 func getActivationType(act activations.Activation) string {
 	switch act.(type) {
-	case activations.ReLU:
+	case activations.ReLU, *activations.ReLU:
 		return "ReLU"
-	case activations.Sigmoid:
+	case activations.Sigmoid, *activations.Sigmoid:
 		return "Sigmoid"
-	case activations.Tanh:
+	case activations.Tanh, *activations.Tanh:
 		return "Tanh"
 	case *activations.LeakyReLU:
 		return "LeakyReLU"
+	case *activations.PReLU:
+		return "PReLU"
+	case activations.ELU, *activations.ELU:
+		return "ELU"
+	case activations.GELU, *activations.GELU:
+		return "GELU"
+	case activations.SiLU, *activations.SiLU:
+		return "SiLU"
+	case activations.SELU, *activations.SELU:
+		return "SELU"
+	case activations.Softmax, *activations.Softmax:
+		return "Softmax"
+	case activations.LogSoftmax, *activations.LogSoftmax:
+		return "LogSoftmax"
+	case activations.Linear, *activations.Linear:
+		return "Linear"
 	default:
 		return "ReLU"
 	}
-}
-
-// min returns the minimum of two integers.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

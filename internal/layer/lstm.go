@@ -46,6 +46,13 @@ type LSTM struct {
 	dCellBuf   []float64
 	dOutputBuf []float64
 
+	// Reusable buffers for backward pass to avoid allocations
+	dcBuf      []float64
+	dxBuf      []float64
+	dhPrevBuf  []float64
+	cPrevBuf   []float64
+	hPrevBuf   []float64
+
 	// Gate outputs stored for backprop (one per gate)
 	inputGateOut  []float64
 	forgetGateOut []float64
@@ -118,6 +125,12 @@ func NewLSTM(inSize, outSize int) *LSTM {
 		dForgetBuf: make([]float64, outSize),
 		dCellBuf:   make([]float64, outSize),
 		dOutputBuf: make([]float64, outSize),
+
+		dcBuf:     make([]float64, outSize),
+		dxBuf:     make([]float64, inSize),
+		dhPrevBuf: make([]float64, outSize),
+		cPrevBuf:  make([]float64, outSize),
+		hPrevBuf:  make([]float64, outSize),
 
 		inputGateOut:  make([]float64, outSize),
 		forgetGateOut: make([]float64, outSize),
@@ -246,17 +259,6 @@ func (l *LSTM) Forward(x []float64) []float64 {
 // grad: gradient of loss w.r.t. output (length outSize)
 // Returns: gradient of loss w.r.t. input (length inSize)
 func (l *LSTM) Backward(grad []float64) []float64 {
-	// Clear gradient buffers
-	for i := range l.gradInputWeights {
-		l.gradInputWeights[i] = 0
-	}
-	for i := range l.gradRecurrentWeights {
-		l.gradRecurrentWeights[i] = 0
-	}
-	for i := range l.gradBiases {
-		l.gradBiases[i] = 0
-	}
-
 	// Get time step index
 	ts := l.timeStep - 1
 	if ts < 0 || ts >= len(l.storedCellStates) {
@@ -268,13 +270,21 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 
 	// Get saved states
 	c := l.storedCellStates[ts]
-	cPrev := make([]float64, l.outSize)
+	cPrev := l.cPrevBuf
 	if ts > 0 {
 		copy(cPrev, l.storedCellStates[ts-1])
+	} else {
+		for i := range cPrev {
+			cPrev[i] = 0
+		}
 	}
-	hPrev := make([]float64, l.outSize)
+	hPrev := l.hPrevBuf
 	if ts > 0 {
 		copy(hPrev, l.storedHiddenStates[ts-1])
+	} else {
+		for i := range hPrev {
+			hPrev[i] = 0
+		}
 	}
 
 	// Gate outputs (fg unused in this function but kept for reference)
@@ -284,7 +294,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 	// Compute dc (gradient w.r.t. cell state)
 	// dc = dL/dh * o * (1 - tanh(c)^2) + dL+1/dc_next * f_next
 	// Start with contribution from current hidden state
-	dc := make([]float64, l.outSize)
+	dc := l.dcBuf
 	for i := 0; i < l.outSize; i++ {
 		tanhC := math.Tanh(c[i])
 		dc[i] = grad[i] * og[i] * (1 - tanhC*tanhC)
@@ -375,7 +385,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 
 	// === Compute gradient w.r.t. input (for previous layer) ===
 	// dL/dx = sum_over_gates(W_x^T * d_gate)
-	dx := make([]float64, l.inSize)
+	dx := l.dxBuf
 	for i := 0; i < l.inSize; i++ {
 		sum := 0.0
 		for g := 0; g < 4; g++ {
@@ -398,7 +408,7 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 
 	// === Compute gradient w.r.t. previous hidden state ===
 	// dL/dh_prev = sum_over_gates(W_h^T * d_gate)
-	dhPrev := make([]float64, l.outSize)
+	dhPrev := l.dhPrevBuf
 	for i := 0; i < l.outSize; i++ {
 		sum := 0.0
 		for g := 0; g < 4; g++ {
@@ -424,9 +434,8 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 		grad[i] += dhPrev[i]
 	}
 
-	// Copy to inputBuf and return
-	copy(l.inputBuf, dx)
-	return l.inputBuf
+	l.timeStep--
+	return dx
 }
 
 // Params returns all LSTM parameters flattened (copy).
@@ -479,4 +488,32 @@ func (l *LSTM) OutSize() int {
 // Hidden returns the current hidden state of the LSTM.
 func (l *LSTM) Hidden() []float64 {
 	return l.hiddenBuf
+}
+
+// ClearGradients zeroes out the accumulated gradients.
+func (l *LSTM) ClearGradients() {
+	for i := range l.gradInputWeights {
+		l.gradInputWeights[i] = 0
+	}
+	for i := range l.gradRecurrentWeights {
+		l.gradRecurrentWeights[i] = 0
+	}
+	for i := range l.gradBiases {
+		l.gradBiases[i] = 0
+	}
+}
+
+// Clone creates a deep copy of the LSTM layer.
+func (l *LSTM) Clone() Layer {
+	newL := NewLSTM(l.inSize, l.outSize)
+	copy(newL.inputWeights, l.inputWeights)
+	copy(newL.recurrentWeights, l.recurrentWeights)
+	copy(newL.biases, l.biases)
+	return newL
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For LSTM, gradients are already accumulated in Backward, so this just calls Backward.
+func (l *LSTM) AccumulateBackward(grad []float64) []float64 {
+	return l.Backward(grad)
 }

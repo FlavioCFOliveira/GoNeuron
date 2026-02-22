@@ -113,6 +113,12 @@ func (d *Dropout) Backward(grad []float64) []float64 {
 	return d.gradInBuf
 }
 
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For Dropout, we just apply the mask and return the input gradient.
+func (d *Dropout) AccumulateBackward(grad []float64) []float64 {
+	return d.Backward(grad)
+}
+
 // Params returns layer parameters (empty for Dropout - no learnable params).
 func (d *Dropout) Params() []float64 {
 	return d.gradParams
@@ -146,6 +152,18 @@ func (d *Dropout) OutSize() int {
 // Reset resets the dropout layer (clears RNG state for reproducibility).
 func (d *Dropout) Reset() {
 	d.rng = NewRNG(42)
+}
+
+// ClearGradients zeroes out the accumulated gradients (no-op for Dropout).
+func (d *Dropout) ClearGradients() {
+	// No parameters to clear
+}
+
+// Clone creates a deep copy of the dropout layer.
+func (d *Dropout) Clone() Layer {
+	newD := NewDropout(d.p, d.inSize)
+	newD.training = d.training
+	return newD
 }
 
 // GetP returns the dropout probability.

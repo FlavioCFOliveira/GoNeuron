@@ -52,10 +52,13 @@ for o := 0; o < outSize; o++ {
 ```bash
 go mod download      # Download dependencies
 go test ./...        # Run tests
-go build ./cmd/...   # Build all executables
-./xor                # Run XOR training example
 go test -bench=. -benchmem ./...  # Run benchmarks with memory stats
 ```
+
+## Examples
+
+- **Location**: Always use the `examples/` folder at the project root for any neural network examples.
+- **Structure**: Each example must have its own dedicated subfolder containing all necessary files (code, data, etc.).
 
 ## Adding New Components
 

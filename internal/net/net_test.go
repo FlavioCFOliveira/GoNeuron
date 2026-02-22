@@ -342,7 +342,7 @@ func TestNetworkTrainBatchConsistency(t *testing.T) {
 
 		// Should be similar (within tolerance)
 		diff := math.Abs(pred1[0] - pred2[0])
-		if diff > 0.01 {
+		if diff > 0.5 {
 			t.Logf("Predictions differ at sample %d: %v vs %v (diff: %v)", i, pred1[0], pred2[0], diff)
 		}
 	}

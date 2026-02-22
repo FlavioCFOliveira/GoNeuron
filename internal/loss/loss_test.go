@@ -641,40 +641,43 @@ func TestBCEWithLogitsLossBackward(t *testing.T) {
 	}
 }
 
-// TestNLLLossForward tests NLL loss forward pass.
+// TestNLLLossForward tests NLL loss forward pass with log-probabilities.
 func TestNLLLossForward(t *testing.T) {
 	nll := NLLLoss{}
 
-	// For probabilities and one-hot targets
-	// y_pred = [0.9, 0.05, 0.05], y_true = [1, 0, 0]
-	// Loss = -log(0.9) / 3 ≈ 0.105
-	yPred := []float64{0.9, 0.05, 0.05}
+	// For log-probabilities and one-hot targets
+	// y_pred = log([0.9, 0.05, 0.05]) = [-0.105, -2.996, -2.996]
+	// y_true = [1, 0, 0]
+	// Loss = -sum(y_true * y_pred) / n = -(-0.105) / 3 = 0.035
+	yPred := []float64{math.Log(0.9), math.Log(0.05), math.Log(0.05)}
 	yTrue := []float64{1.0, 0.0, 0.0}
 
 	result := nll.Forward(yPred, yTrue)
 
-	// Should be approximately -log(0.9) / 3 ≈ 0.105
+	// Should be approximately -log(0.9) / 3 ≈ 0.035
 	expected := -math.Log(0.9) / 3.0
 	if math.Abs(result-expected) > 1e-6 {
 		t.Errorf("NLLLoss.Forward() = %v, want %v", result, expected)
 	}
 }
 
-// TestNLLLossBackward tests NLL loss backward pass.
+// TestNLLLossBackward tests NLL loss backward pass with log-probabilities.
 func TestNLLLossBackward(t *testing.T) {
 	nll := NLLLoss{}
 
-	yPred := []float64{0.9, 0.05, 0.05}
+	// Log-probabilities input
+	yPred := []float64{math.Log(0.9), math.Log(0.05), math.Log(0.05)}
 	yTrue := []float64{1.0, 0.0, 0.0}
 
 	grad := nll.Backward(yPred, yTrue)
 
-	// For NLL: grad[i] = -y_true[i] / (y_pred[i] * n)
-	// Sample 1: -1 / (0.9 * 3) = -0.370...
+	// For NLL with log-prob input: grad[i] = -y_true[i] / n
+	// Sample 1: -1 / 3 = -0.333...
 	// Others: 0
+	expectedGrad0 := -1.0 / 3.0
 
-	if math.Abs(grad[0]-(-1.0/(0.9*3.0))) > 1e-10 {
-		t.Errorf("grad[0] = %v, want %v", grad[0], -1.0/(0.9*3.0))
+	if math.Abs(grad[0]-expectedGrad0) > 1e-10 {
+		t.Errorf("grad[0] = %v, want %v", grad[0], expectedGrad0)
 	}
 
 	if grad[1] != 0 || grad[2] != 0 {

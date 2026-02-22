@@ -134,13 +134,11 @@ func (a *AvgPool2D) Forward(input []float64) []float64 {
 // Backward performs backpropagation through the average pooling layer.
 func (a *AvgPool2D) Backward(grad []float64) []float64 {
 	totalInput := len(a.savedInput)
-	if len(a.gradInBuf) != totalInput {
-		a.gradInBuf = make([]float64, totalInput)
-	}
+	gradIn := a.gradInBuf[:totalInput]
 
 	// Clear gradient buffer
-	for i := range a.gradInBuf {
-		a.gradInBuf[i] = 0
+	for i := range gradIn {
+		gradIn[i] = 0
 	}
 
 	outH := a.outputHeight
@@ -169,7 +167,7 @@ func (a *AvgPool2D) Backward(grad []float64) []float64 {
 
 						if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
 							inputIdx := inH*inputWidth + inW
-							a.gradInBuf[inputIdx] += gradPerInput
+							gradIn[inputIdx] += gradPerInput
 						}
 					}
 				}
@@ -177,7 +175,7 @@ func (a *AvgPool2D) Backward(grad []float64) []float64 {
 		}
 	}
 
-	return a.gradInBuf
+	return gradIn
 }
 
 // Params returns layer parameters (empty for AvgPool2D).
@@ -218,6 +216,21 @@ func (a *AvgPool2D) Reset() {
 	a.outputWidth = 0
 }
 
+// ClearGradients zeroes out the accumulated gradients (no-op for AvgPool2D).
+func (a *AvgPool2D) ClearGradients() {
+	// No parameters to clear
+}
+
+// Clone creates a deep copy of the average pooling layer.
+func (a *AvgPool2D) Clone() Layer {
+	newA := NewAvgPool2D(a.kernelSize, a.stride, a.padding)
+	newA.inputHeight = a.inputHeight
+	newA.inputWidth = a.inputWidth
+	newA.outputHeight = a.outputHeight
+	newA.outputWidth = a.outputWidth
+	return newA
+}
+
 // GetKernelSize returns the kernel size.
 func (a *AvgPool2D) GetKernelSize() int {
 	return a.kernelSize
@@ -231,4 +244,10 @@ func (a *AvgPool2D) GetStride() int {
 // GetPadding returns the padding.
 func (a *AvgPool2D) GetPadding() int {
 	return a.padding
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For AvgPool2D, gradients are already accumulated in Backward, so this just calls Backward.
+func (a *AvgPool2D) AccumulateBackward(grad []float64) []float64 {
+	return a.Backward(grad)
 }

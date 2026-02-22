@@ -5,6 +5,7 @@ import "math"
 
 // Optimizer updates network parameters based on gradients.
 type Optimizer interface {
+
 	// Step computes updated parameters: params - lr * gradients
 	// Returns a new slice with updated values
 	Step(params, gradients []float64) []float64
@@ -12,6 +13,9 @@ type Optimizer interface {
 	// StepInPlace updates params in-place: params = params - lr * gradients
 	// This avoids allocations for better performance
 	StepInPlace(params, gradients []float64)
+
+	// NewStep signals the beginning of a new optimization step (e.g., for Adam timestep).
+	NewStep()
 }
 
 // SGD (Stochastic Gradient Descent) optimizer.
@@ -36,18 +40,29 @@ func (s SGD) StepInPlace(params, gradients []float64) {
 	}
 }
 
+// NewStep signals the beginning of a new optimization step (no-op for SGD).
+func (s SGD) NewStep() {}
+
 // Adam optimizer for faster convergence.
 // Adam maintains per-parameter state (first and second moment estimates).
+// Uses flat slices for momentum buffers (one per layer in the network).
 type Adam struct {
 	LearningRate float64
 	Beta1        float64 // Exponential decay rate for first moment
 	Beta2        float64 // Exponential decay rate for second moment
 	Epsilon      float64 // Small constant for numerical stability
 
-	// Per-parameter state - lazily initialized
-	momentum1 [][]float64 // First moment (m)
-	momentum2 [][]float64 // Second moment (v)
-	timestep  int         // Current timestep for bias correction
+	// Per-layer state - indexed by layer
+	// momentum1[i] and momentum2[i] are for layer i
+	momentum1 [][]float64 // First moment (m) for each layer
+	momentum2 [][]float64 // Second moment (v) for each layer
+
+	// Internal counter to track layer index during training
+	// This is set by the network before calling Step
+	currentLayer int
+
+	// Global timestep for bias correction
+	timestep int
 }
 
 // NewAdam creates a new Adam optimizer with default values.
@@ -57,25 +72,23 @@ func NewAdam(learningRate float64) *Adam {
 		Beta1:        0.9,
 		Beta2:        0.999,
 		Epsilon:      1e-8,
+		currentLayer: 0,
 		timestep:     0,
 	}
 }
 
 // initMoments initializes the moment buffers for given parameter shape.
 func (a *Adam) initMoments(params []float64) {
-	if a.momentum1 == nil {
-		a.momentum1 = make([][]float64, 1)
-		a.momentum2 = make([][]float64, 1)
+	// Ensure we have enough layer buffers
+	for len(a.momentum1) <= a.currentLayer {
+		a.momentum1 = append(a.momentum1, nil)
+		a.momentum2 = append(a.momentum2, nil)
 	}
-	// Ensure we have at least one buffer
-	if len(a.momentum1) == 0 {
-		a.momentum1 = append(a.momentum1, make([]float64, len(params)))
-		a.momentum2 = append(a.momentum2, make([]float64, len(params)))
-	}
-	// Reuse existing buffers if size matches
-	if len(a.momentum1[0]) != len(params) {
-		a.momentum1[0] = make([]float64, len(params))
-		a.momentum2[0] = make([]float64, len(params))
+
+	// Initialize or resize the buffers for current layer
+	if a.momentum1[a.currentLayer] == nil || len(a.momentum1[a.currentLayer]) != len(params) {
+		a.momentum1[a.currentLayer] = make([]float64, len(params))
+		a.momentum2[a.currentLayer] = make([]float64, len(params))
 	}
 }
 
@@ -83,18 +96,35 @@ func (a *Adam) initMoments(params []float64) {
 func (a *Adam) Step(params, gradients []float64) []float64 {
 	a.initMoments(params)
 
-	a.timestep++
-	lr := a.LearningRate
-	beta1 := a.Beta1
-	beta2 := a.Beta2
-	eps := a.Epsilon
+	currentLayer := a.currentLayer
+	a.currentLayer++
 
-	m := a.momentum1[0]
-	v := a.momentum2[0]
+	lr := a.LearningRate
+	// Use default values if not set
+	beta1 := a.Beta1
+	if beta1 == 0 {
+		beta1 = 0.9
+	}
+	beta2 := a.Beta2
+	if beta2 == 0 {
+		beta2 = 0.999
+	}
+	eps := a.Epsilon
+	if eps == 0 {
+		eps = 1e-8
+	}
+
+	m := a.momentum1[currentLayer]
+	v := a.momentum2[currentLayer]
 
 	// Bias correction factors: 1 - beta^t
-	bias1 := 1 - math.Pow(beta1, float64(a.timestep))
-	bias2 := 1 - math.Pow(beta2, float64(a.timestep))
+	// Timestep must be at least 1 for math.Pow to work correctly for bias correction
+	ts := float64(a.timestep)
+	if ts < 1 {
+		ts = 1
+	}
+	bias1 := 1 - math.Pow(beta1, ts)
+	bias2 := 1 - math.Pow(beta2, ts)
 
 	result := make([]float64, len(params))
 	for i := range params {
@@ -116,18 +146,34 @@ func (a *Adam) Step(params, gradients []float64) []float64 {
 func (a *Adam) StepInPlace(params, gradients []float64) {
 	a.initMoments(params)
 
-	a.timestep++
-	lr := a.LearningRate
-	beta1 := a.Beta1
-	beta2 := a.Beta2
-	eps := a.Epsilon
+	currentLayer := a.currentLayer
+	a.currentLayer++
 
-	m := a.momentum1[0]
-	v := a.momentum2[0]
+	lr := a.LearningRate
+	// Use default values if not set
+	beta1 := a.Beta1
+	if beta1 == 0 {
+		beta1 = 0.9
+	}
+	beta2 := a.Beta2
+	if beta2 == 0 {
+		beta2 = 0.999
+	}
+	eps := a.Epsilon
+	if eps == 0 {
+		eps = 1e-8
+	}
+
+	m := a.momentum1[currentLayer]
+	v := a.momentum2[currentLayer]
 
 	// Bias correction factors: 1 - beta^t
-	bias1 := 1 - math.Pow(beta1, float64(a.timestep))
-	bias2 := 1 - math.Pow(beta2, float64(a.timestep))
+	ts := float64(a.timestep)
+	if ts < 1 {
+		ts = 1
+	}
+	bias1 := 1 - math.Pow(beta1, ts)
+	bias2 := 1 - math.Pow(beta2, ts)
 
 	for i := range params {
 		// Update biased first moment estimate
@@ -141,4 +187,10 @@ func (a *Adam) StepInPlace(params, gradients []float64) {
 		// Update parameters in-place
 		params[i] -= lr * mHat / (math.Sqrt(vHat) + eps)
 	}
+}
+
+// NewStep signals the beginning of a new optimization step for Adam.
+func (a *Adam) NewStep() {
+	a.timestep++
+	a.currentLayer = 0
 }

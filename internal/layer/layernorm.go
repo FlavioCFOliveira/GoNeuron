@@ -124,19 +124,9 @@ func (l *LayerNorm) Forward(x []float64) []float64 {
 func (l *LayerNorm) Backward(grad []float64) []float64 {
 	numSamples := len(grad) / l.normalizedShape
 
-	// Clear input gradient buffer
-	for i := range l.gradInBuf {
-		l.gradInBuf[i] = 0
-	}
-
-	// Clear parameter gradients (if affine)
-	if l.elementwiseAffine {
-		for i := range l.gradGammaBuf {
-			l.gradGammaBuf[i] = 0
-		}
-		for i := range l.gradBetaBuf {
-			l.gradBetaBuf[i] = 0
-		}
+	// Ensure gradInBuf is sized correctly
+	if len(l.gradInBuf) != len(grad) {
+		l.gradInBuf = make([]float64, len(grad))
 	}
 
 	mean := l.inputMean
@@ -174,7 +164,7 @@ func (l *LayerNorm) Backward(grad []float64) []float64 {
 			diff := (l.savedInput[i] - mean)
 			gradInput := (gammaProd[i-start] - sumGrad/float64(l.normalizedShape)) / std
 			gradInput -= (diff * sumGradXMean) / (float64(l.normalizedShape) * std * std)
-			l.gradInBuf[i] += gradInput
+			l.gradInBuf[i] = gradInput
 		}
 
 		// Accumulate parameter gradients
@@ -253,6 +243,28 @@ func (l *LayerNorm) Reset() {
 	// No state to reset
 }
 
+// ClearGradients zeroes out the accumulated gradients.
+func (l *LayerNorm) ClearGradients() {
+	if l.elementwiseAffine {
+		for i := range l.gradGammaBuf {
+			l.gradGammaBuf[i] = 0
+		}
+		for i := range l.gradBetaBuf {
+			l.gradBetaBuf[i] = 0
+		}
+	}
+}
+
+// Clone creates a deep copy of the layer normalization layer.
+func (l *LayerNorm) Clone() Layer {
+	newL := NewLayerNorm(l.normalizedShape, l.eps, l.elementwiseAffine)
+	if l.elementwiseAffine {
+		copy(newL.gamma, l.gamma)
+		copy(newL.beta, l.beta)
+	}
+	return newL
+}
+
 // GetGamma returns the gamma parameters (for affine layers).
 func (l *LayerNorm) GetGamma() []float64 {
 	if !l.elementwiseAffine {
@@ -272,4 +284,10 @@ func (l *LayerNorm) GetBeta() []float64 {
 // GetEps returns the epsilon value for numerical stability.
 func (l *LayerNorm) GetEps() float64 {
 	return l.eps
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For LayerNorm, gradients are already accumulated in Backward, so this just calls Backward.
+func (l *LayerNorm) AccumulateBackward(grad []float64) []float64 {
+	return l.Backward(grad)
 }

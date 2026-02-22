@@ -39,6 +39,7 @@ type Conv2D struct {
 	outputBuf   []float64 // Contains post-activation values (activation(z))
 	gradWeights []float64
 	gradBiases  []float64
+	gradInBuf   []float64
 
 	// Saved input for backward pass
 	savedInput []float64
@@ -160,6 +161,11 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 		c.outputBuf = make([]float64, requiredOutput)
 	}
 
+	// Ensure gradInBuf is sized correctly for backward pass
+	if len(c.gradInBuf) < totalInput {
+		c.gradInBuf = make([]float64, totalInput)
+	}
+
 	// Save input for backward pass
 	if cap(c.savedInput) < len(input) {
 		c.savedInput = make([]float64, len(input))
@@ -174,39 +180,63 @@ func (c *Conv2D) Forward(input []float64) []float64 {
 	// Input layout: [inChannels, inputHeight, inputWidth]
 	// Output layout: [outChannels, outH, outW]
 	outSize := outH * outW
+	kernelSize := c.kernelSize
+	stride := c.stride
+	padding := c.padding
+	inChannels := c.inChannels
+	outChannels := c.outChannels
 
-	for oc := 0; oc < c.outChannels; oc++ {
-		for oh := 0; oh < outH; oh++ {
-			for ow := 0; ow < outW; ow++ {
-				// Compute convolution at this position
-				sum := c.biases[oc]
+	// Clear pre-activation buffer
+	for i := 0; i < requiredOutput; i++ {
+		c.preActBuf[i] = 0
+	}
 
-				for ic := 0; ic < c.inChannels; ic++ {
-					for kh := 0; kh < c.kernelSize; kh++ {
-						for kw := 0; kw < c.kernelSize; kw++ {
-							// Calculate input position with padding
-							inH := oh*c.stride + kh - c.padding
-							inW := ow*c.stride + kw - c.padding
+	// Pre-compute weight stride values
+	icWeightStride := kernelSize * kernelSize
+	ocWeightStride := inChannels * icWeightStride
 
-							var val float64
-							if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
-								idx := ic*inputHeight*inputWidth + inH*inputWidth + inW
-								val = input[idx]
+	for oc := 0; oc < outChannels; oc++ {
+		ocWeightBase := oc * ocWeightStride
+		ocOutBase := oc * outSize
+
+		for ic := 0; ic < inChannels; ic++ {
+			icWeightBase := ocWeightBase + ic*icWeightStride
+			inputChannelOffset := ic * inputHeight * inputWidth
+
+			for kh := 0; kh < kernelSize; kh++ {
+				khWeightBase := icWeightBase + kh*kernelSize
+
+				for kw := 0; kw < kernelSize; kw++ {
+					weightIdx := khWeightBase + kw
+					wVal := c.weights[weightIdx]
+
+					for oh := 0; oh < outH; oh++ {
+						inH := oh*stride + kh - padding
+						if inH >= 0 && inH < inputHeight {
+							inHOffset := inputChannelOffset + inH*inputWidth
+							ohOffset := ocOutBase + oh*outW
+							for ow := 0; ow < outW; ow++ {
+								inW := ow*stride + kw - padding
+								if inW >= 0 && inW < inputWidth {
+									inputIdx := inHOffset + inW
+									pos := ohOffset + ow
+									c.preActBuf[pos] += wVal * input[inputIdx]
+								}
 							}
-
-							weightIdx := oc*c.inChannels*c.kernelSize*c.kernelSize +
-								ic*c.kernelSize*c.kernelSize +
-								kh*c.kernelSize + kw
-							sum += val * c.weights[weightIdx]
 						}
 					}
 				}
+			}
+		}
 
-				// Store pre-activation
-				pos := oc*outSize + oh*outW + ow
+		// Add bias and apply activation for this output channel
+		biasVal := c.biases[oc]
+		for oh := 0; oh < outH; oh++ {
+			ohOffset := ocOutBase + oh*outW
+			for ow := 0; ow < outW; ow++ {
+				pos := ohOffset + ow
+				sum := c.preActBuf[pos] + biasVal
 				c.preActBuf[pos] = sum
-
-				// Apply activation
 				c.outputBuf[pos] = c.activation.Activate(sum)
 			}
 		}
@@ -226,23 +256,33 @@ func (c *Conv2D) Backward(grad []float64) []float64 {
 	kernelSize := c.kernelSize
 	inChannels := c.inChannels
 	outChannels := c.outChannels
+	stride := c.stride
+	padding := c.padding
+	inputHeight := c.inputHeight
+	inputWidth := c.inputWidth
 
-	// Clear gradient buffers
-	for i := range c.gradWeights {
-		c.gradWeights[i] = 0
+	// Use pre-allocated input gradient buffer
+	gradInput := c.gradInBuf[:inChannels*inputHeight*inputWidth]
+
+	// Clear input gradient buffer
+	for i := range gradInput {
+		gradInput[i] = 0
 	}
-	for i := range c.gradBiases {
-		c.gradBiases[i] = 0
-	}
 
-	// Input gradient buffer
-	gradInput := make([]float64, inChannels*c.inputHeight*c.inputWidth)
+	// Pre-compute weight stride values
+	icWeightStride := kernelSize * kernelSize
+	ocWeightStride := inChannels * icWeightStride
 
-	// For each output position and channel
+	// For each output channel
 	for oc := 0; oc < outChannels; oc++ {
+		ocWeightBase := oc * ocWeightStride
+		ocOutBase := oc * outSize
+
+		// For each output position
 		for oh := 0; oh < outH; oh++ {
+			ohOffset := ocOutBase + oh*outW
 			for ow := 0; ow < outW; ow++ {
-				pos := oc*outSize + oh*outW + ow
+				pos := ohOffset + ow
 
 				// Gradient after activation: dL/dz = dL/d(output) * activation'(z)
 				gradAfterAct := grad[pos] * c.activation.Derivative(c.preActBuf[pos])
@@ -252,30 +292,27 @@ func (c *Conv2D) Backward(grad []float64) []float64 {
 
 				// For each input channel and kernel position
 				for ic := 0; ic < inChannels; ic++ {
+					icWeightBase := ocWeightBase + ic*icWeightStride
+					inputChannelOffset := ic * inputHeight * inputWidth
+
 					for kh := 0; kh < kernelSize; kh++ {
-						for kw := 0; kw < kernelSize; kw++ {
-							// Calculate input position
-							inH := oh*c.stride + kh - c.padding
-							inW := ow*c.stride + kw - c.padding
+						inH := oh*stride + kh - padding
+						if inH >= 0 && inH < inputHeight {
+							inHOffset := inputChannelOffset + inH*inputWidth
+							khWeightBase := icWeightBase + kh*kernelSize
 
-							var inputVal float64
-							if inH >= 0 && inH < c.inputHeight && inW >= 0 && inW < c.inputWidth {
-								inputIdx := ic*c.inputHeight*c.inputWidth + inH*c.inputWidth + inW
-								inputVal = c.savedInput[inputIdx]
-							}
+							for kw := 0; kw < kernelSize; kw++ {
+								inW := ow*stride + kw - padding
+								if inW >= 0 && inW < inputWidth {
+									inputIdx := inHOffset + inW
+									weightIdx := khWeightBase + kw
 
-							// Weight index
-							weightIdx := oc*inChannels*kernelSize*kernelSize +
-								ic*kernelSize*kernelSize +
-								kh*kernelSize + kw
+									// Accumulate weight gradient
+									c.gradWeights[weightIdx] += gradAfterAct * c.savedInput[inputIdx]
 
-							// Accumulate weight gradient
-							c.gradWeights[weightIdx] += gradAfterAct * inputVal
-
-							// Accumulate input gradient
-							if inH >= 0 && inH < c.inputHeight && inW >= 0 && inW < c.inputWidth {
-								inputGradIdx := ic*c.inputHeight*c.inputWidth + inH*c.inputWidth + inW
-								gradInput[inputGradIdx] += gradAfterAct * c.weights[weightIdx]
+									// Accumulate input gradient
+									gradInput[inputIdx] += gradAfterAct * c.weights[weightIdx]
+								}
 							}
 						}
 					}
@@ -318,6 +355,32 @@ func (c *Conv2D) SetGradients(gradients []float64) {
 	copy(c.gradBiases, gradients[len(c.gradWeights):])
 }
 
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For Conv2D, gradients are already accumulated in Backward, so this just calls Backward.
+func (c *Conv2D) AccumulateBackward(grad []float64) []float64 {
+	return c.Backward(grad)
+}
+
+// ClearGradients zeroes out the accumulated gradients.
+func (c *Conv2D) ClearGradients() {
+	for i := range c.gradWeights {
+		c.gradWeights[i] = 0
+	}
+	for i := range c.gradBiases {
+		c.gradBiases[i] = 0
+	}
+}
+
+// Clone creates a deep copy of the convolutional layer.
+func (c *Conv2D) Clone() Layer {
+	newC := NewConv2D(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.activation)
+	copy(newC.weights, c.weights)
+	copy(newC.biases, c.biases)
+	newC.setInputHeight = c.setInputHeight
+	newC.setInputWidth = c.setInputWidth
+	return newC
+}
+
 // InSize returns the number of input channels.
 func (c *Conv2D) InSize() int {
 	return c.inChannels
@@ -343,4 +406,24 @@ func (c *Conv2D) OutputBuf() []float64 {
 // This is useful for chaining layers efficiently.
 func (c *Conv2D) SetOutputBuf(buf []float64) {
 	c.outputBuf = buf
+}
+
+// GetKernelSize returns the kernel size.
+func (c *Conv2D) GetKernelSize() int {
+	return c.kernelSize
+}
+
+// GetStride returns the stride.
+func (c *Conv2D) GetStride() int {
+	return c.stride
+}
+
+// GetPadding returns the padding.
+func (c *Conv2D) GetPadding() int {
+	return c.padding
+}
+
+// GetActivation returns the activation function.
+func (c *Conv2D) GetActivation() activations.Activation {
+	return c.activation
 }

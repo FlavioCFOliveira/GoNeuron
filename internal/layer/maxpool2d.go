@@ -1,7 +1,10 @@
 // Package layer provides neural network layer implementations.
 package layer
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // MaxPool2D implements 2D max pooling.
 // Downsamples by taking the maximum over sliding windows.
@@ -12,7 +15,8 @@ type MaxPool2D struct {
 	stride     int
 	padding    int
 
-	// Input dimensions (inferred during forward)
+	// Input/output dimensions
+	inChannels  int
 	inputHeight int
 	inputWidth  int
 
@@ -30,11 +34,13 @@ type MaxPool2D struct {
 }
 
 // NewMaxPool2D creates a new 2D max pooling layer.
+// inChannels: number of input channels
 // kernelSize: size of pooling window (square)
 // stride: stride for pooling (defaults to kernelSize)
 // padding: zero padding size
-func NewMaxPool2D(kernelSize, stride, padding int) *MaxPool2D {
+func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
 	return &MaxPool2D{
+		inChannels:   inChannels,
 		kernelSize:   kernelSize,
 		stride:       stride,
 		padding:      padding,
@@ -62,35 +68,52 @@ func (m *MaxPool2D) Forward(input []float64) []float64 {
 		return make([]float64, 0)
 	}
 
-	// Infer input dimensions
-	channelSize := totalInput
+	if m.inChannels <= 0 {
+		panic("MaxPool2D: inChannels not set. Use NewMaxPool2D with inChannels parameter.")
+	}
+
+	if totalInput%m.inChannels != 0 {
+		panic(fmt.Sprintf("MaxPool2D: input length %d not divisible by inChannels %d", totalInput, m.inChannels))
+	}
+
+	channelSize := totalInput / m.inChannels
+
+	// Infer input dimensions (assuming square for now)
 	m.inputHeight = int(math.Sqrt(float64(channelSize)))
 	if m.inputHeight*m.inputHeight == channelSize {
 		m.inputWidth = m.inputHeight
 	} else {
 		m.inputWidth = channelSize / m.inputHeight
+		if m.inputHeight*m.inputWidth != channelSize {
+			// Fall back
+			m.inputWidth = channelSize / m.inputHeight
+		}
 	}
 
 	// Compute output dimensions
 	m.outputHeight, m.outputWidth = m.computeOutputSize(m.inputHeight, m.inputWidth)
 
-	outChannels := 1 // For now, assume single channel
+	outChannels := m.inChannels // Each channel is pooled independently
 	outSize := m.outputHeight * m.outputWidth
 
 	// Ensure buffers are sized correctly
 	requiredOutput := outChannels * outSize
 	if len(m.outputBuf) < requiredOutput {
 		m.outputBuf = make([]float64, requiredOutput)
+	}
+	if cap(m.argmaxBuf) < requiredOutput {
 		m.argmaxBuf = make([]int, requiredOutput)
+	}
+	if cap(m.gradInBuf) < totalInput {
 		m.gradInBuf = make([]float64, totalInput)
 	}
 
-	if cap(m.savedInput) < len(input) {
-		m.savedInput = make([]float64, len(input))
+	if cap(m.savedInput) < totalInput {
+		m.savedInput = make([]float64, totalInput)
 	}
 	copy(m.savedInput, input)
 
-	// Max pooling: for each output position
+	// Max pooling: for each channel, then for each output position
 	outH := m.outputHeight
 	outW := m.outputWidth
 	kernelSize := m.kernelSize
@@ -99,30 +122,38 @@ func (m *MaxPool2D) Forward(input []float64) []float64 {
 	inputHeight := m.inputHeight
 	inputWidth := m.inputWidth
 
-	for oh := 0; oh < outH; oh++ {
-		for ow := 0; ow < outW; ow++ {
-			maxVal := math.Inf(-1)
-			maxIdx := -1
+	channelStride := inputHeight * inputWidth
+	outputChannelStride := outH * outW
 
-			for kh := 0; kh < kernelSize; kh++ {
-				for kw := 0; kw < kernelSize; kw++ {
-					// Calculate input position with padding
-					inH := oh*stride + kh - padding
-					inW := ow*stride + kw - padding
+	for c := 0; c < outChannels; c++ {
+		channelOffset := c * channelStride
+		outputOffset := c * outputChannelStride
 
-					if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
-						idx := inH*inputWidth + inW
-						if input[idx] > maxVal {
-							maxVal = input[idx]
-							maxIdx = idx
+		for oh := 0; oh < outH; oh++ {
+			for ow := 0; ow < outW; ow++ {
+				maxVal := math.Inf(-1)
+				maxIdx := -1
+
+				for kh := 0; kh < kernelSize; kh++ {
+					for kw := 0; kw < kernelSize; kw++ {
+						// Calculate input position with padding
+						inH := oh*stride + kh - padding
+						inW := ow*stride + kw - padding
+
+						if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
+							idx := channelOffset + inH*inputWidth + inW
+							if input[idx] > maxVal {
+								maxVal = input[idx]
+								maxIdx = idx
+							}
 						}
 					}
 				}
-			}
 
-			pos := oh*outW + ow
-			m.outputBuf[pos] = maxVal
-			m.argmaxBuf[pos] = maxIdx
+				pos := outputOffset + oh*outW + ow
+				m.outputBuf[pos] = maxVal
+				m.argmaxBuf[pos] = maxIdx
+			}
 		}
 	}
 
@@ -132,26 +163,33 @@ func (m *MaxPool2D) Forward(input []float64) []float64 {
 // Backward performs backpropagation through the max pooling layer.
 func (m *MaxPool2D) Backward(grad []float64) []float64 {
 	totalInput := len(m.savedInput)
-	if len(m.gradInBuf) != totalInput {
-		m.gradInBuf = make([]float64, totalInput)
-	}
+	gradIn := m.gradInBuf[:totalInput]
 
 	// Clear gradient buffer
-	for i := range m.gradInBuf {
-		m.gradInBuf[i] = 0
+	for i := range gradIn {
+		gradIn[i] = 0
 	}
 
-	// For each output position, pass gradient only to the max input position
-	for pos := 0; pos < len(m.argmaxBuf); pos++ {
-		gradVal := grad[pos]
-		maxIdx := m.argmaxBuf[pos]
+	outChannels := m.inChannels
+	outH := m.outputHeight
+	outW := m.outputWidth
+	outputChannelStride := outH * outW
 
-		if maxIdx >= 0 {
-			m.gradInBuf[maxIdx] += gradVal
+	// For each output position, pass gradient only to the max input position
+	for c := 0; c < outChannels; c++ {
+		outputOffset := c * outputChannelStride
+
+		for pos := 0; pos < len(m.argmaxBuf)/outChannels; pos++ {
+			gradVal := grad[outputOffset+pos]
+			maxIdx := m.argmaxBuf[outputOffset+pos]
+
+			if maxIdx >= 0 {
+				gradIn[maxIdx] += gradVal
+			}
 		}
 	}
 
-	return m.gradInBuf
+	return gradIn
 }
 
 // Params returns layer parameters (empty for MaxPool2D).
@@ -174,14 +212,20 @@ func (m *MaxPool2D) SetGradients(gradients []float64) {
 	// No parameters to set
 }
 
-// InSize returns the input size (flattened).
+// InSize returns the total input size (channels * height * width).
 func (m *MaxPool2D) InSize() int {
-	return m.inputHeight * m.inputWidth
+	if m.inputHeight == 0 || m.inputWidth == 0 {
+		return 0
+	}
+	return m.inChannels * m.inputHeight * m.inputWidth
 }
 
-// OutSize returns the output size (flattened).
+// OutSize returns the total output size (channels * outputHeight * outputWidth).
 func (m *MaxPool2D) OutSize() int {
-	return m.outputHeight * m.outputWidth
+	if m.outputHeight == 0 || m.outputWidth == 0 {
+		return 0
+	}
+	return m.inChannels * m.outputHeight * m.outputWidth
 }
 
 // Reset resets the max pooling layer.
@@ -190,6 +234,21 @@ func (m *MaxPool2D) Reset() {
 	m.inputWidth = 0
 	m.outputHeight = 0
 	m.outputWidth = 0
+}
+
+// ClearGradients zeroes out the accumulated gradients (no-op for MaxPool2D).
+func (m *MaxPool2D) ClearGradients() {
+	// No parameters to clear
+}
+
+// Clone creates a deep copy of the max pooling layer.
+func (m *MaxPool2D) Clone() Layer {
+	newM := NewMaxPool2D(m.inChannels, m.kernelSize, m.stride, m.padding)
+	newM.inputHeight = m.inputHeight
+	newM.inputWidth = m.inputWidth
+	newM.outputHeight = m.outputHeight
+	newM.outputWidth = m.outputWidth
+	return newM
 }
 
 // GetKernelSize returns the kernel size.
@@ -210,4 +269,10 @@ func (m *MaxPool2D) GetPadding() int {
 // GetArgmax returns the argmax indices buffer (for testing/verification).
 func (m *MaxPool2D) GetArgmax() []int {
 	return m.argmaxBuf
+}
+
+// AccumulateBackward performs backpropagation and accumulates gradients.
+// For MaxPool2D, gradients are already accumulated in Backward, so this just calls Backward.
+func (m *MaxPool2D) AccumulateBackward(grad []float64) []float64 {
+	return m.Backward(grad)
 }
