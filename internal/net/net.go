@@ -16,6 +16,20 @@ import (
 	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
+func init() {
+	// Register types for gob encoding/decoding
+	// This is required for encoding/decoding interface values containing these types
+	gob.Register([]float64{})
+	gob.Register([][]float64{})
+	gob.Register(activations.ReLU{})
+	gob.Register(activations.Sigmoid{})
+	gob.Register(activations.Tanh{})
+	gob.Register(loss.MSE{})
+	gob.Register(&loss.Huber{})
+	gob.Register(&opt.SGD{})
+	gob.Register(&opt.Adam{})
+}
+
 // Network is a collection of layers that can be forwarded and backwarded.
 type Network struct {
 	layers []layer.Layer
@@ -93,6 +107,14 @@ func (n *Network) Train(x []float64, y []float64) float64 {
 	// Clear gradients before starting
 	for _, l := range n.layers {
 		l.ClearGradients()
+	}
+
+	// Reset internal state for layers that support it (e.g., LSTM, GRU)
+	// This is critical to prevent state from one sample affecting another
+	for _, l := range n.layers {
+		if resettable, ok := l.(interface{ Reset() }); ok {
+			resettable.Reset()
+		}
 	}
 
 	// Forward pass
@@ -207,6 +229,12 @@ func (n *Network) TrainBatch(batchX [][]float64, batchY [][]float64) float64 {
 func (n *Network) ForwardBatch(batchX [][]float64) [][]float64 {
 	results := make([][]float64, len(batchX))
 	for i, x := range batchX {
+		// Reset internal state for layers that support it (e.g., LSTM, GRU)
+		for _, l := range n.layers {
+			if resettable, ok := l.(interface{ Reset() }); ok {
+				resettable.Reset()
+			}
+		}
 		pred := n.Forward(x)
 		results[i] = make([]float64, len(pred))
 		copy(results[i], pred)
@@ -219,9 +247,11 @@ func (n *Network) ForwardBatch(batchX [][]float64) [][]float64 {
 func (n *Network) TrainTriplet(anchor, positive, negative []float64, margin float64) float64 {
 	// Clear gradients at the start
 	n.ClearGradients()
+
+	// Reset internal state for layers that support it (e.g., LSTM, GRU)
 	for _, l := range n.layers {
-		if resettable, ok := l.(interface{ ClearSavedData() }); ok {
-			resettable.ClearSavedData()
+		if resettable, ok := l.(interface{ Reset() }); ok {
+			resettable.Reset()
 		}
 	}
 
@@ -322,6 +352,14 @@ func (n *Network) trainBatchParallel(batchX [][]float64, batchY [][]float64) flo
 			netCopy := workers[workerIdx]
 
 			for i := s; i < e; i++ {
+				// Reset internal state for layers that support it (e.g., LSTM, GRU)
+				// This is critical to prevent state from one sample affecting another
+				for _, l := range netCopy.layers {
+					if resettable, ok := l.(interface{ Reset() }); ok {
+						resettable.Reset()
+					}
+				}
+
 				// Forward pass
 				yPred := netCopy.Forward(batchX[i])
 
@@ -389,6 +427,14 @@ func (n *Network) trainBatchSequential(batchX [][]float64, batchY [][]float64) f
 	// Forward and backward pass for all samples
 	// Accumulate gradients over the batch
 	for i := 0; i < len(batchX); i++ {
+		// Reset internal state for layers that support it (e.g., LSTM, GRU)
+		// This is critical to prevent state from one sample affecting another
+		for _, l := range n.layers {
+			if resettable, ok := l.(interface{ Reset() }); ok {
+				resettable.Reset()
+			}
+		}
+
 		yPred := n.Forward(batchX[i])
 		totalLoss += n.loss.Forward(yPred, batchY[i])
 
@@ -536,11 +582,11 @@ func Load(filename string) (*Network, loss.Loss, error) {
 		offset += numParams
 	}
 
-	// Read optimizer state
-	var optState map[string]any
-	if err := decoder.Decode(&optState); err != nil {
+	// Read optimizer state (gob-compatible format)
+	var optGobState any
+	if err := decoder.Decode(&optGobState); err != nil {
 		// Older versions might not have optimizer state
-		optState = nil
+		optGobState = nil
 	}
 
 	// Create network with default optimizer
@@ -554,8 +600,8 @@ func Load(filename string) (*Network, loss.Loss, error) {
 		optimizer = &opt.SGD{LearningRate: 0.1}
 	}
 
-	if optState != nil {
-		optimizer.SetState(optState)
+	if optGobState != nil {
+		optimizer.SetGobState(optGobState)
 	}
 
 	// Create network with reconstructed loss
@@ -627,8 +673,9 @@ func (n *Network) Encode(w io.Writer) error {
 		return fmt.Errorf("failed to encode params: %w", err)
 	}
 
-	// Write optimizer state
-	if err := encoder.Encode(n.opt.State()); err != nil {
+	// Write optimizer state using gob-compatible format
+	optGobState := n.opt.GobState()
+	if err := encoder.Encode(optGobState); err != nil {
 		return fmt.Errorf("failed to encode optimizer state: %w", err)
 	}
 

@@ -22,6 +22,13 @@ type Optimizer interface {
 
 	// SetState sets the optimizer state from a serialized map.
 	SetState(state map[string]any)
+
+	// GobState returns the optimizer state in a gob-encodable format.
+	// This is used for checkpointing with gob encoding.
+	GobState() any
+
+	// SetGobState sets the optimizer state from a gob-encodable format.
+	SetGobState(state any)
 }
 
 // SGD (Stochastic Gradient Descent) optimizer.
@@ -30,7 +37,7 @@ type SGD struct {
 }
 
 // Step computes updated parameters: params - lr * gradients
-func (s SGD) Step(params, gradients []float64) []float64 {
+func (s *SGD) Step(params, gradients []float64) []float64 {
 	result := make([]float64, len(params))
 	for i := range params {
 		result[i] = params[i] - s.LearningRate*gradients[i]
@@ -40,26 +47,38 @@ func (s SGD) Step(params, gradients []float64) []float64 {
 
 // StepInPlace updates params in-place: params = params - lr * gradients
 // This avoids allocations for better performance
-func (s SGD) StepInPlace(params, gradients []float64) {
+func (s *SGD) StepInPlace(params, gradients []float64) {
 	for i := range params {
 		params[i] -= s.LearningRate * gradients[i]
 	}
 }
 
 // NewStep signals the beginning of a new optimization step (no-op for SGD).
-func (s SGD) NewStep() {}
+func (s *SGD) NewStep() {}
 
 // State returns SGD state.
-func (s SGD) State() map[string]any {
+func (s *SGD) State() map[string]any {
 	return map[string]any{
 		"LearningRate": s.LearningRate,
 	}
 }
 
 // SetState sets SGD state.
-func (s SGD) SetState(state map[string]any) {
+func (s *SGD) SetState(state map[string]any) {
 	if lr, ok := state["LearningRate"].(float64); ok {
 		s.LearningRate = lr
+	}
+}
+
+// GobState returns SGD state in a gob-encodable format.
+func (s *SGD) GobState() any {
+	return *s
+}
+
+// SetGobState sets SGD state from a gob-decoded value.
+func (s *SGD) SetGobState(state any) {
+	if st, ok := state.(SGD); ok {
+		s.LearningRate = st.LearningRate
 	}
 }
 
@@ -137,11 +156,9 @@ func (a *Adam) Step(params, gradients []float64) []float64 {
 	m := a.momentum1[currentLayer]
 	v := a.momentum2[currentLayer]
 
-	// Bias correction factors: 1 - beta^t
-	ts := float64(a.timestep)
-	if ts < 1 {
-		ts = 1
-	}
+	// Bias correction: timestep is the number of steps already taken
+	// For first step (timestep=0), use t=1 to avoid division by zero
+	ts := float64(a.timestep + 1)
 	bias1 := 1 - math.Pow(beta1, ts)
 	bias2 := 1 - math.Pow(beta2, ts)
 
@@ -186,11 +203,9 @@ func (a *Adam) StepInPlace(params, gradients []float64) {
 	m := a.momentum1[currentLayer]
 	v := a.momentum2[currentLayer]
 
-	// Bias correction factors: 1 - beta^t
-	ts := float64(a.timestep)
-	if ts < 1 {
-		ts = 1
-	}
+	// Bias correction: timestep is the number of steps already taken
+	// For first step (timestep=0), use t=1 to avoid division by zero
+	ts := float64(a.timestep + 1)
 	bias1 := 1 - math.Pow(beta1, ts)
 	bias2 := 1 - math.Pow(beta2, ts)
 
@@ -213,6 +228,18 @@ func (a *Adam) NewStep() {
 	a.currentLayer = 0
 }
 
+// adamGobState is a gob-encodable state for Adam optimizer.
+// This struct uses only gob-compatible types (slice of slice of float64).
+type adamGobState struct {
+	LearningRate float64
+	Beta1        float64
+	Beta2        float64
+	Epsilon      float64
+	Momentum1    [][]float64
+	Momentum2    [][]float64
+	Timestep     int
+}
+
 // State returns Adam state.
 func (a *Adam) State() map[string]any {
 	return map[string]any{
@@ -226,7 +253,8 @@ func (a *Adam) State() map[string]any {
 	}
 }
 
-// SetState sets Adam state.
+// SetState sets Adam state from a map.
+// This is used for JSON encoding and other non-gob serialization.
 func (a *Adam) SetState(state map[string]any) {
 	if lr, ok := state["LearningRate"].(float64); ok {
 		a.LearningRate = lr
@@ -248,5 +276,31 @@ func (a *Adam) SetState(state map[string]any) {
 	}
 	if ts, ok := state["timestep"].(int); ok {
 		a.timestep = ts
+	}
+}
+
+// GobState returns Adam state in a gob-encodable format.
+func (a *Adam) GobState() any {
+	return adamGobState{
+		LearningRate: a.LearningRate,
+		Beta1:        a.Beta1,
+		Beta2:        a.Beta2,
+		Epsilon:      a.Epsilon,
+		Momentum1:    a.momentum1,
+		Momentum2:    a.momentum2,
+		Timestep:     a.timestep,
+	}
+}
+
+// SetGobState sets Adam state from a gob-decoded value.
+func (a *Adam) SetGobState(state any) {
+	if st, ok := state.(adamGobState); ok {
+		a.LearningRate = st.LearningRate
+		a.Beta1 = st.Beta1
+		a.Beta2 = st.Beta2
+		a.Epsilon = st.Epsilon
+		a.momentum1 = st.Momentum1
+		a.momentum2 = st.Momentum2
+		a.timestep = st.Timestep
 	}
 }

@@ -8,7 +8,7 @@ import (
 
 // TestSGDStep tests SGD step computation.
 func TestSGDStep(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := []float64{1.0, 2.0, 3.0}
 	gradients := []float64{0.1, 0.2, 0.3}
@@ -31,7 +31,7 @@ func TestSGDStep(t *testing.T) {
 
 // TestSGDStepInPlace tests in-place SGD update.
 func TestSGDStepInPlace(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := []float64{1.0, 2.0, 3.0}
 	gradients := []float64{0.1, 0.2, 0.3}
@@ -54,7 +54,7 @@ func TestSGDStepInPlace(t *testing.T) {
 
 // TestSGDStepInPlaceModifiesInput tests that StepInPlace modifies the input slice.
 func TestSGDStepInPlaceModifiesInput(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := []float64{1.0, 2.0}
 	gradients := []float64{0.1, 0.1}
@@ -75,11 +75,11 @@ func TestSGDLearningRateEffect(t *testing.T) {
 	gradients := []float64{1.0, 2.0}
 
 	// Small learning rate
-	sgd1 := SGD{LearningRate: 0.01}
+	sgd1 := &SGD{LearningRate: 0.01}
 	updated1 := sgd1.Step([]float64{0.0, 0.0}, gradients)
 
 	// Large learning rate
-	sgd2 := SGD{LearningRate: 0.5}
+	sgd2 := &SGD{LearningRate: 0.5}
 	updated2 := sgd2.Step([]float64{0.0, 0.0}, gradients)
 
 	// Check that larger LR causes larger update
@@ -92,7 +92,7 @@ func TestSGDLearningRateEffect(t *testing.T) {
 
 // TestSGDZeroLearningRate tests zero learning rate behavior.
 func TestSGDZeroLearningRate(t *testing.T) {
-	sgd := SGD{LearningRate: 0.0}
+	sgd := &SGD{LearningRate: 0.0}
 
 	params := []float64{1.0, 2.0, 3.0}
 	gradients := []float64{1.0, 1.0, 1.0}
@@ -109,7 +109,7 @@ func TestSGDZeroLearningRate(t *testing.T) {
 
 // TestSGDZeroGradients tests zero gradient behavior.
 func TestSGDZeroGradients(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := []float64{1.0, 2.0, 3.0}
 	gradients := []float64{0.0, 0.0, 0.0}
@@ -126,7 +126,7 @@ func TestSGDZeroGradients(t *testing.T) {
 
 // TestSGDNegativeGradients tests negative gradient behavior.
 func TestSGDNegativeGradients(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := []float64{0.0}
 	gradients := []float64{-0.5} // Negative gradient
@@ -283,7 +283,7 @@ func TestOptimizerInterface(t *testing.T) {
 	params := []float64{1.0, 2.0}
 	gradients := []float64{0.1, 0.2}
 
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 	adam := NewAdam(0.1)
 
 	updatedSGD := sgd.Step(params, gradients)
@@ -296,7 +296,7 @@ func TestOptimizerInterface(t *testing.T) {
 
 // TestSGDMultipleSteps tests multiple SGD steps.
 func TestSGDMultipleSteps(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	// Gradient descent on f(x) = x^2, gradient = 2x
 	x := 10.0
@@ -321,7 +321,7 @@ func TestSGDMultipleSteps(t *testing.T) {
 
 // TestSGDConvergence tests SGD convergence on simple quadratic.
 func TestSGDConvergence(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	// Minimize f(x, y) = x^2 + y^2 starting from (10, 10)
 	params := []float64{10.0, 10.0}
@@ -341,7 +341,7 @@ func TestSGDConvergence(t *testing.T) {
 
 // TestSGDStepInPlaceNoAllocation tests that StepInPlace doesn't allocate.
 func TestSGDStepInPlaceNoAllocation(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := make([]float64, 100)
 	gradients := make([]float64, 100)
@@ -365,7 +365,7 @@ func TestSGDStepInPlaceNoAllocation(t *testing.T) {
 
 // TestSGDLargeLearningRate tests behavior with large learning rate.
 func TestSGDLargeLearningRate(t *testing.T) {
-	sgd := SGD{LearningRate: 1.0}
+	sgd := &SGD{LearningRate: 1.0}
 
 	params := []float64{1.0}
 	gradients := []float64{1.0}
@@ -381,7 +381,7 @@ func TestSGDLargeLearningRate(t *testing.T) {
 
 // TestSGDDivergenceWithLargeLR tests potential divergence with large learning rate.
 func TestSGDDivergenceWithLargeLR(t *testing.T) {
-	sgd := SGD{LearningRate: 2.0} // Very large LR
+	sgd := &SGD{LearningRate: 2.0} // Very large LR
 
 	// Minimize f(x) = x^2 starting from x=1
 	x := 1.0
@@ -418,7 +418,7 @@ func TestOptimizerPrecision(t *testing.T) {
 
 // TestSGDSymmetric tests that SGD is symmetric around zero.
 func TestSGDSymmetric(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	// Positive gradient from positive params
 	params1 := []float64{1.0}
@@ -438,7 +438,7 @@ func TestSGDSymmetric(t *testing.T) {
 
 // TestSGDAdditive tests gradient addition property.
 func TestSGDAdditive(t *testing.T) {
-	sgd := SGD{LearningRate: 0.1}
+	sgd := &SGD{LearningRate: 0.1}
 
 	params := []float64{0.0}
 
@@ -479,7 +479,7 @@ func TestAdamZeroGradient(t *testing.T) {
 
 // TestSGDMultipleParameters tests with many parameters.
 func TestSGDMultipleParameters(t *testing.T) {
-	sgd := SGD{LearningRate: 0.01}
+	sgd := &SGD{LearningRate: 0.01}
 
 	// 1000 parameters
 	n := 1000

@@ -7,6 +7,9 @@ import (
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
 
+// Max gradient norm for clipping
+const maxGradientNorm = 1.0
+
 // LSTM is a Long Short-Term Memory layer optimized for performance.
 // Uses contiguous memory layout with pre-allocated buffers for minimal allocations.
 type LSTM struct {
@@ -71,8 +74,11 @@ type LSTM struct {
 // inSize: dimension of input vectors
 // outSize: dimension of hidden state/output
 func NewLSTM(inSize, outSize int) *LSTM {
-	// Xavier/Glorot initialization
-	scale := math.Sqrt(2.0 / float64(inSize+outSize))
+	// Xavier/Glorot initialization for LSTM with 4 gates
+	// Input weights connect inSize inputs to 4*outSize gate outputs
+	inputScale := math.Sqrt(2.0 / float64(inSize + 4*outSize))
+	// Recurrent weights connect outSize hidden states to 4*outSize gate outputs
+	recurrentScale := math.Sqrt(2.0 / float64(outSize + 4*outSize))
 
 	// Allocate weight matrices
 	inputWeights := make([]float64, outSize*4*inSize)
@@ -83,6 +89,7 @@ func NewLSTM(inSize, outSize int) *LSTM {
 	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 142))
 
 	// Initialize weights with simple loop for performance
+	// Use separate scales for input and recurrent weights
 	for i := 0; i < outSize*4; i++ {
 		// Initialize biases - forget gate gets bias = 1 (prevent forgetting)
 		if i >= outSize && i < outSize*2 {
@@ -90,10 +97,10 @@ func NewLSTM(inSize, outSize int) *LSTM {
 		}
 
 		for j := 0; j < inSize; j++ {
-			inputWeights[i*inSize+j] = rng.RandFloat()*2*scale - scale
+			inputWeights[i*inSize+j] = rng.RandFloat()*2*inputScale - inputScale
 		}
 		for j := 0; j < outSize; j++ {
-			recurrentWeights[i*outSize+j] = rng.RandFloat()*2*scale - scale
+			recurrentWeights[i*outSize+j] = rng.RandFloat()*2*recurrentScale - recurrentScale
 		}
 	}
 
@@ -434,8 +441,41 @@ func (l *LSTM) Backward(grad []float64) []float64 {
 		grad[i] += dhPrev[i]
 	}
 
+	// Clip gradients to prevent exploding gradients
+	l.clipGradients()
+
 	l.timeStep--
 	return dx
+}
+
+// clipGradients scales gradients if their norm exceeds maxGradientNorm.
+// Uses max norm clipping: if ||g||_2 > maxNorm, scale g by maxNorm/||g||_2
+func (l *LSTM) clipGradients() {
+	// Compute L2 norm of all gradients
+	normSq := 0.0
+	for i := range l.gradInputWeights {
+		normSq += l.gradInputWeights[i] * l.gradInputWeights[i]
+	}
+	for i := range l.gradRecurrentWeights {
+		normSq += l.gradRecurrentWeights[i] * l.gradRecurrentWeights[i]
+	}
+	for i := range l.gradBiases {
+		normSq += l.gradBiases[i] * l.gradBiases[i]
+	}
+
+	norm := math.Sqrt(normSq)
+	if norm > maxGradientNorm {
+		scale := maxGradientNorm / norm
+		for i := range l.gradInputWeights {
+			l.gradInputWeights[i] *= scale
+		}
+		for i := range l.gradRecurrentWeights {
+			l.gradRecurrentWeights[i] *= scale
+		}
+		for i := range l.gradBiases {
+			l.gradBiases[i] *= scale
+		}
+	}
 }
 
 // Params returns all LSTM parameters flattened (copy).

@@ -1,3 +1,4 @@
+// Package layer provides neural network layer implementations.
 package layer
 
 import (
@@ -5,298 +6,186 @@ import (
 	"math"
 )
 
-// Attention implements a scaled dot-product attention mechanism.
-// It computes Attention(Q, K, V) = Softmax(Q*K^T / sqrt(d_k)) * V
-type Attention struct {
-	inSize  int
-	outSize int
+// GlobalAttention implements a simple global dot-product attention mechanism.
+// It computes a weighted sum of all inputs in the sequence based on their relevance.
+// This is commonly used after an LSTM to focus on important parts of the sequence.
+type GlobalAttention struct {
+	inSize int
 
-	// Parameters (Query, Key, Value weights)
-	// We implement self-attention where Q, K, V are derived from the same input.
-	// Weights are [outSize * inSize]
-	queryWeights []float64
-	keyWeights   []float64
-	valueWeights []float64
+	// Parameters (context vector/query for attention)
+	// For simple global attention, we can learn a context vector.
+	contextVector []float64
 
-	// Buffers for forward pass
-	inputBuf   []float64
-	qBuf       []float64 // [outSize]
-	kBuf       []float64 // [outSize]
-	vBuf       []float64 // [outSize]
-	scoresBuf  []float64 // [current_sequence_length]
-	outputBuf  []float64 // [outSize]
-
-	// Sequence state
-	storedInputs [][]float64
-	storedQueries [][]float64
-	storedKeys    [][]float64
-	storedValues  [][]float64
-	storedScores  [][]float64 // Softmax weights
+	// Buffers
+	inputHistory [][]float64
+	scores       []float64
+	outputBuf    []float64
 
 	// Gradients
-	gradQueryW []float64
-	gradKeyW   []float64
-	gradValueW []float64
-	gradInBuf  []float64
+	gradContext []float64
+	timeStep    int
 }
 
-// NewAttention creates a new Attention layer.
-func NewAttention(inSize, outSize int) *Attention {
-	rng := NewRNG(uint64(inSize*100 + outSize + 42))
+// NewGlobalAttention creates a new global attention layer.
+func NewGlobalAttention(inSize int) *GlobalAttention {
+	rng := NewRNG(uint64(inSize + 42))
+	contextVector := make([]float64, inSize)
 	scale := math.Sqrt(1.0 / float64(inSize))
-
-	queryWeights := make([]float64, outSize*inSize)
-	keyWeights := make([]float64, outSize*inSize)
-	valueWeights := make([]float64, outSize*inSize)
-
-	for i := range queryWeights {
-		queryWeights[i] = rng.RandFloat()*2*scale - scale
-		keyWeights[i] = rng.RandFloat()*2*scale - scale
-		valueWeights[i] = rng.RandFloat()*2*scale - scale
+	for i := range contextVector {
+		contextVector[i] = rng.RandFloat()*2*scale - scale
 	}
 
-	return &Attention{
-		inSize:       inSize,
-		outSize:      outSize,
-		queryWeights: queryWeights,
-		keyWeights:   keyWeights,
-		valueWeights: valueWeights,
-		inputBuf:     make([]float64, inSize),
-		qBuf:         make([]float64, outSize),
-		kBuf:         make([]float64, outSize),
-		vBuf:         make([]float64, outSize),
-		outputBuf:    make([]float64, outSize),
-		gradQueryW:   make([]float64, outSize*inSize),
-		gradKeyW:     make([]float64, outSize*inSize),
-		gradValueW:   make([]float64, outSize*inSize),
-		gradInBuf:    make([]float64, inSize),
-		storedInputs: make([][]float64, 0),
-		storedQueries: make([][]float64, 0),
-		storedKeys:    make([][]float64, 0),
-		storedValues:  make([][]float64, 0),
-		storedScores:  make([][]float64, 0),
+	return &GlobalAttention{
+		inSize:        inSize,
+		contextVector: contextVector,
+		inputHistory:  make([][]float64, 0),
+		outputBuf:     make([]float64, inSize),
+		gradContext:   make([]float64, inSize),
 	}
 }
 
-// Forward performs a forward pass for one time step.
-func (a *Attention) Forward(x []float64) []float64 {
-	// 1. Transform input to Q, K, V
-	q := make([]float64, a.outSize)
-	k := make([]float64, a.outSize)
-	v := make([]float64, a.outSize)
-
-	for o := 0; o < a.outSize; o++ {
-		sumQ, sumK, sumV := 0.0, 0.0, 0.0
-		base := o * a.inSize
-		for i := 0; i < a.inSize; i++ {
-			val := x[i]
-			sumQ += a.queryWeights[base+i] * val
-			sumK += a.keyWeights[base+i] * val
-			sumV += a.valueWeights[base+i] * val
-		}
-		q[o] = sumQ
-		k[o] = sumK
-		v[o] = sumV
-	}
-
-	// 2. Store states
+// Forward accumulates inputs and returns zeros (or current input) until end of sequence.
+// In global attention, the "real" output is produced after the sequence ends.
+// But to fit the Layer interface, we accumulate.
+func (g *GlobalAttention) Forward(x []float64) []float64 {
 	xCopy := make([]float64, len(x))
 	copy(xCopy, x)
-	a.storedInputs = append(a.storedInputs, xCopy)
-	a.storedQueries = append(a.storedQueries, q)
-	a.storedKeys = append(a.storedKeys, k)
-	a.storedValues = append(a.storedValues, v)
+	g.inputHistory = append(g.inputHistory, xCopy)
+	g.timeStep++
 
-	// 3. Compute Attention Scores: Softmax(Q_t * K_prev^T / sqrt(d_k))
-	seqLen := len(a.storedKeys)
+	// For per-step forward, we return the current x or zeros.
+	// Global attention is usually the last step before classification.
+	return x
+}
+
+// ComputeContext processes the accumulated history and returns the context vector.
+func (g *GlobalAttention) ComputeContext() []float64 {
+	seqLen := len(g.inputHistory)
+	if seqLen == 0 {
+		return make([]float64, g.inSize)
+	}
+
+	// 1. Compute similarity scores: dot(input_t, contextVector)
 	scores := make([]float64, seqLen)
-	scale := 1.0 / math.Sqrt(float64(a.outSize))
-
-	for i := 0; i < seqLen; i++ {
+	for t := 0; t < seqLen; t++ {
 		dot := 0.0
-		ki := a.storedKeys[i]
-		for d := 0; d < a.outSize; d++ {
-			dot += q[d] * ki[d]
+		for i := 0; i < g.inSize; i++ {
+			dot += g.inputHistory[t][i] * g.contextVector[i]
 		}
-		scores[i] = dot * scale
+		scores[t] = dot
 	}
 
-	// Apply Softmax
+	// 2. Apply Softmax to get attention weights
 	softmax := activations.Softmax{}
-	scores = softmax.ActivateBatch(scores)
-	a.storedScores = append(a.storedScores, scores)
+	weights := softmax.ActivateBatch(scores)
+	g.scores = weights
 
-	// 4. Compute context vector: sum(scores * V)
-	context := make([]float64, a.outSize)
-	for i := 0; i < seqLen; i++ {
-		vi := a.storedValues[i]
-		s := scores[i]
-		for d := 0; d < a.outSize; d++ {
-			context[d] += s * vi[d]
+	// 3. Compute weighted sum
+	for i := 0; i < g.inSize; i++ {
+		g.outputBuf[i] = 0
+	}
+	for t := 0; t < seqLen; t++ {
+		w := weights[t]
+		for i := 0; i < g.inSize; i++ {
+			g.outputBuf[i] += w * g.inputHistory[t][i]
 		}
 	}
 
-	copy(a.outputBuf, context)
-	return a.outputBuf
+	return g.outputBuf
 }
 
-// Backward performs a backward pass.
-func (a *Attention) Backward(grad []float64) []float64 {
-	// Simplified backward pass for the most recent timestep
-	t := len(a.storedInputs) - 1
-	if t < 0 {
-		return nil
+// Backward performs backpropagation.
+func (g *GlobalAttention) Backward(grad []float64) []float64 {
+	// grad is dL/dOutputBuf
+	seqLen := len(g.inputHistory)
+	if seqLen == 0 {
+		return make([]float64, g.inSize)
 	}
 
-	q := a.storedQueries[t]
-	scores := a.storedScores[t]
-	gradIn := make([]float64, a.inSize)
-	scale := 1.0 / math.Sqrt(float64(a.outSize))
-
-	// Gradients w.r.t context vector components
-	// dL/dcontext is grad
-
-	// 1. Gradients w.r.t Values and Scores
-	gradV_t_all := make([][]float64, t+1)
-	gradScores := make([]float64, t+1)
-	for i := 0; i <= t; i++ {
-		gradV_t_all[i] = make([]float64, a.outSize)
-		s := scores[i]
-		vi := a.storedValues[i]
-		for d := 0; d < a.outSize; d++ {
-			// dL/dvi = dL/dcontext * dcontext/dvi = grad * s
-			gradV_t_all[i][d] = grad[d] * s
-			// dL/ds = sum(dL/dcontext * dcontext/ds) = sum(grad * vi)
-			gradScores[i] += grad[d] * vi[d]
-		}
+	// If scores haven't been computed (Sequence hasn't finished properly), compute them
+	if len(g.scores) != seqLen {
+		g.ComputeContext()
 	}
 
-	// 2. Gradients through Softmax
-	// Simplified: assuming Softmax derivative for one-hot like behavior
-	// In reality, we'd need full Jacobian.
-	gradPreSoftmax := make([]float64, t+1)
-	for i := 0; i <= t; i++ {
-		sum := 0.0
-		for j := 0; j <= t; j++ {
-			delta := 0.0
-			if i == j {
-				delta = 1.0
-			}
-			sum += gradScores[j] * scores[j] * (delta - scores[i])
-		}
-		gradPreSoftmax[i] = sum
+	ts := g.timeStep - 1
+	if ts < 0 {
+		return make([]float64, g.inSize)
 	}
 
-	// 3. Gradients w.r.t Q and K
-	gradQ := make([]float64, a.outSize)
-	gradK_all := make([][]float64, t+1)
-	for i := 0; i <= t; i++ {
-		gradK_all[i] = make([]float64, a.outSize)
-		ki := a.storedKeys[i]
-		gps := gradPreSoftmax[i] * scale
-		for d := 0; d < a.outSize; d++ {
-			// dL/dQ = sum_i(dL/dScore_i * dScore_i/dQ) = sum_i(gps * ki)
-			gradQ[d] += gps * ki[d]
-			// dL/dKi = dL/dScore_i * dScore_i/dKi = gps * Q
-			gradK_all[i][d] = gps * q[d]
-		}
+	// This is a complex backward pass because each timestep grad depends on all previous inputs.
+	// For simplicity in the first version, we focus on the current timestep's contribution.
+
+	// dL/dInput_t = weight_t * grad + dSoftmax contribution
+	// Here we return the gradient for the current timestep ts
+
+	w := g.scores[ts]
+	dx := make([]float64, g.inSize)
+	for i := 0; i < g.inSize; i++ {
+		dx[i] = w * grad[i]
+		// Accumulate gradient for context vector
+		g.gradContext[i] += grad[i] * w * g.inputHistory[ts][i] // Simplified
 	}
 
-	// 4. Gradients w.r.t Weights and Input
-	input := a.storedInputs[t]
-	for o := 0; o < a.outSize; o++ {
-		gq := gradQ[o]
-		gv := gradV_t_all[t][o] // Only current timestep V contributes to weights here for simplicity
-		gk := gradK_all[t][o]
-		base := o * a.inSize
-		for i := 0; i < a.inSize; i++ {
-			val := input[i]
-			a.gradQueryW[base+i] += gq * val
-			a.gradKeyW[base+i] += gk * val
-			a.gradValueW[base+i] += gv * val
-
-			gradIn[i] += a.queryWeights[base+i] * gq
-			gradIn[i] += a.keyWeights[base+i] * gk
-			gradIn[i] += a.valueWeights[base+i] * gv
-		}
-	}
-
-	copy(a.gradInBuf, gradIn)
-	return a.gradInBuf
+	g.timeStep--
+	return dx
 }
 
-// AccumulateBackward (stub)
-func (a *Attention) AccumulateBackward(grad []float64) []float64 {
-	return a.Backward(grad)
-}
-
-// Reset resets the attention state.
-func (a *Attention) Reset() {
-	a.storedInputs = a.storedInputs[:0]
-	a.storedQueries = a.storedQueries[:0]
-	a.storedKeys = a.storedKeys[:0]
-	a.storedValues = a.storedValues[:0]
-	a.storedScores = a.storedScores[:0]
-}
-
-// Params returns all parameters.
-func (a *Attention) Params() []float64 {
-	total := len(a.queryWeights) + len(a.keyWeights) + len(a.valueWeights)
-	params := make([]float64, total)
-	n := copy(params, a.queryWeights)
-	n += copy(params[n:], a.keyWeights)
-	copy(params[n:], a.valueWeights)
+// Params returns the learnable context vector.
+func (g *GlobalAttention) Params() []float64 {
+	params := make([]float64, g.inSize)
+	copy(params, g.contextVector)
 	return params
 }
 
-// SetParams sets parameters.
-func (a *Attention) SetParams(params []float64) {
-	n := copy(a.queryWeights, params)
-	n += copy(a.keyWeights, params[n:])
-	copy(a.valueWeights, params[n:])
+// SetParams sets the context vector.
+func (g *GlobalAttention) SetParams(params []float64) {
+	copy(g.contextVector, params)
 }
 
-// Gradients returns all gradients.
-func (a *Attention) Gradients() []float64 {
-	total := len(a.gradQueryW) + len(a.gradKeyW) + len(a.gradValueW)
-	grads := make([]float64, total)
-	n := copy(grads, a.gradQueryW)
-	n += copy(grads[n:], a.gradKeyW)
-	copy(grads[n:], a.gradValueW)
+// Gradients returns context vector gradients.
+func (g *GlobalAttention) Gradients() []float64 {
+	grads := make([]float64, g.inSize)
+	copy(grads, g.gradContext)
 	return grads
 }
 
-// SetGradients sets gradients.
-func (a *Attention) SetGradients(grads []float64) {
-	n := copy(a.gradQueryW, grads)
-	n += copy(a.gradKeyW, grads[n:])
-	copy(a.gradValueW, grads[n:])
+// SetGradients sets context vector gradients.
+func (g *GlobalAttention) SetGradients(grads []float64) {
+	copy(g.gradContext, grads)
+}
+
+// Reset clears state.
+func (g *GlobalAttention) Reset() {
+	g.inputHistory = g.inputHistory[:0]
+	g.scores = g.scores[:0]
+	g.timeStep = 0
 }
 
 // ClearGradients clears gradients.
-func (a *Attention) ClearGradients() {
-	for i := range a.gradQueryW {
-		a.gradQueryW[i] = 0
-		a.gradKeyW[i] = 0
-		a.gradValueW[i] = 0
+func (g *GlobalAttention) ClearGradients() {
+	for i := range g.gradContext {
+		g.gradContext[i] = 0
 	}
 }
 
-// InSize returns input size.
-func (a *Attention) InSize() int {
-	return a.inSize
-}
-
-// OutSize returns output size.
-func (a *Attention) OutSize() int {
-	return a.outSize
-}
-
 // Clone creates a deep copy.
-func (a *Attention) Clone() Layer {
-	newA := NewAttention(a.inSize, a.outSize)
-	copy(newA.queryWeights, a.queryWeights)
-	copy(newA.keyWeights, a.keyWeights)
-	copy(newA.valueWeights, a.valueWeights)
-	return newA
+func (g *GlobalAttention) Clone() Layer {
+	newG := NewGlobalAttention(g.inSize)
+	copy(newG.contextVector, g.contextVector)
+	return newG
+}
+
+// InSize returns input size.
+func (g *GlobalAttention) InSize() int {
+	return g.inSize
+}
+
+// OutSize returns output size (same as inSize).
+func (g *GlobalAttention) OutSize() int {
+	return g.inSize
+}
+
+// AccumulateBackward accumulates gradients.
+func (g *GlobalAttention) AccumulateBackward(grad []float64) []float64 {
+	return g.Backward(grad)
 }
