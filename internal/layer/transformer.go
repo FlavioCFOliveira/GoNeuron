@@ -78,10 +78,11 @@ func (p *PositionalEncoding) AccumulateBackward(grad []float32) []float32 { retu
 
 // MultiHeadAttention implements scaled dot-product multi-head attention.
 type MultiHeadAttention struct {
-	dim        int
-	numHeads   int
-	headDim    int
-	seqLen     int
+	dim      int
+	numHeads int
+	headDim  int
+	seqLen   int
+	Causal   bool
 
 	// Query, Key, Value projections
 	wQ, wK, wV *Dense
@@ -91,33 +92,40 @@ type MultiHeadAttention struct {
 	outputBuf []float32
 	gradInBuf []float32
 
+	// Pre-allocated forward buffers
+	qBuf        []float32
+	kBuf        []float32
+	vBuf        []float32
+	scoresBuf   []float32
+	finalOutBuf []float32
+
 	device Device
 }
 
-func NewMultiHeadAttention(dim, numHeads, seqLen int) *MultiHeadAttention {
+func NewMultiHeadAttention(dim, numHeads, seqLen int, causal bool) *MultiHeadAttention {
 	headDim := dim / numHeads
 	if headDim*numHeads != dim {
 		panic("dim must be divisible by numHeads")
 	}
 
-	// We'll use Dense layers for projections.
-	// Since we process the whole sequence, we can either:
-	// 1. Unroll Dense layers (slow)
-	// 2. Reshape sequence to [seqLen, dim] and use a single MatMul (fast)
-
-	// For simplicity in this implementation, we'll assume the input is [seqLen, dim]
-	// and the projections are [dim, dim].
-
 	return &MultiHeadAttention{
-		dim:      dim,
-		numHeads: numHeads,
-		headDim:  headDim,
-		seqLen:   seqLen,
-		wQ:       NewDense(dim, dim, activations.Linear{}),
-		wK:       NewDense(dim, dim, activations.Linear{}),
-		wV:       NewDense(dim, dim, activations.Linear{}),
-		wOut:     NewDense(dim, dim, activations.Linear{}),
-		device:   &CPUDevice{},
+		dim:         dim,
+		numHeads:    numHeads,
+		headDim:     headDim,
+		seqLen:      seqLen,
+		Causal:      causal,
+		wQ:          NewDense(dim, dim, activations.Linear{}),
+		wK:          NewDense(dim, dim, activations.Linear{}),
+		wV:          NewDense(dim, dim, activations.Linear{}),
+		wOut:        NewDense(dim, dim, activations.Linear{}),
+		outputBuf:   make([]float32, seqLen*dim),
+		gradInBuf:   make([]float32, seqLen*dim),
+		qBuf:        make([]float32, seqLen*dim),
+		kBuf:        make([]float32, seqLen*dim),
+		vBuf:        make([]float32, seqLen*dim),
+		scoresBuf:   make([]float32, seqLen*seqLen),
+		finalOutBuf: make([]float32, seqLen*dim),
+		device:      &CPUDevice{},
 	}
 }
 
@@ -128,58 +136,46 @@ func (m *MultiHeadAttention) Forward(x []float32) []float32 {
 	dim := m.dim
 
 	// 1. Projections
-	// We need to apply Dense to each timestep.
-	// Since our Dense layer is designed for one vector, we can call it seqLen times.
-	// Or we can implement a BatchDense if we want more performance.
-	// For now, let's use a simple approach.
-
-	q := make([]float32, seqLen*dim)
-	k := make([]float32, seqLen*dim)
-	v := make([]float32, seqLen*dim)
-
 	m.wQ.Reset()
 	m.wK.Reset()
 	m.wV.Reset()
 
 	for t := 0; t < seqLen; t++ {
-		copy(q[t*dim:(t+1)*dim], m.wQ.Forward(x[t*dim:(t+1)*dim]))
-		copy(k[t*dim:(t+1)*dim], m.wK.Forward(x[t*dim:(t+1)*dim]))
-		copy(v[t*dim:(t+1)*dim], m.wV.Forward(x[t*dim:(t+1)*dim]))
+		start := t * dim
+		end := start + dim
+		copy(m.qBuf[start:end], m.wQ.Forward(x[start:end]))
+		copy(m.kBuf[start:end], m.wK.Forward(x[start:end]))
+		copy(m.vBuf[start:end], m.wV.Forward(x[start:end]))
 	}
 
 	// 2. Scaled Dot-Product Attention for each head
-	// Output of each head will be [seqLen, headDim]
-	// Final output will be [seqLen, dim]
-
 	headDim := m.headDim
 	numHeads := m.numHeads
 	scale := float32(math.Sqrt(float64(headDim)))
 
-	finalOut := make([]float32, seqLen*dim)
+	softmax := activations.Softmax{}
 
 	for h := 0; h < numHeads; h++ {
-		// Extract head projections
-		// qH, kH, vH are [seqLen, headDim]
-
 		// Compute Attention Scores: [seqLen, seqLen]
-		scores := make([]float32, seqLen*seqLen)
 		for i := 0; i < seqLen; i++ {
 			for j := 0; j < seqLen; j++ {
+				if m.Causal && j > i {
+					m.scoresBuf[i*seqLen+j] = -1e9 // Causal mask
+					continue
+				}
+
 				dot := float32(0.0)
 				for d := 0; d < headDim; d++ {
-					// Indices: q[i, h*headDim + d] * k[j, h*headDim + d]
-					dot += q[i*dim + h*headDim + d] * k[j*dim + h*headDim + d]
+					dot += m.qBuf[i*dim+h*headDim+d] * m.kBuf[j*dim+h*headDim+d]
 				}
-				scores[i*seqLen+j] = dot / scale
+				m.scoresBuf[i*seqLen+j] = dot / scale
 			}
 		}
 
 		// Softmax along rows
-		softmax := activations.Softmax{}
 		for i := 0; i < seqLen; i++ {
-			row := scores[i*seqLen : (i+1)*seqLen]
-			activated := softmax.ActivateBatch(row)
-			copy(row, activated)
+			row := m.scoresBuf[i*seqLen : (i+1)*seqLen]
+			softmax.ActivateBatch(row)
 		}
 
 		// Weighted Sum: [seqLen, headDim]
@@ -187,37 +183,131 @@ func (m *MultiHeadAttention) Forward(x []float32) []float32 {
 			for d := 0; d < headDim; d++ {
 				sum := float32(0.0)
 				for j := 0; j < seqLen; j++ {
-					sum += scores[i*seqLen+j] * v[j*dim + h*headDim + d]
+					sum += m.scoresBuf[i*seqLen+j] * m.vBuf[j*dim+h*headDim+d]
 				}
-				finalOut[i*dim + h*headDim + d] = sum
+				m.finalOutBuf[i*dim+h*headDim+d] = sum
 			}
 		}
 	}
 
 	// 3. Final projection
 	m.wOut.Reset()
-	output := make([]float32, seqLen*dim)
 	for t := 0; t < seqLen; t++ {
-		copy(output[t*dim:(t+1)*dim], m.wOut.Forward(finalOut[t*dim:(t+1)*dim]))
+		start := t * dim
+		end := start + dim
+		copy(m.outputBuf[start:end], m.wOut.Forward(m.finalOutBuf[start:end]))
 	}
 
-	m.outputBuf = output
-	return output
+	return m.outputBuf
 }
 
 func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
-	// This is a very complex backward pass.
-	// For the sake of this design, I will implement a simplified version or
-	// focus on the overall architecture.
+	// grad is [seqLen * dim]
+	seqLen := m.seqLen
+	dim := m.dim
+	headDim := m.headDim
+	numHeads := m.numHeads
+	scale := float32(math.Sqrt(float64(headDim)))
 
-	// In a real implementation, we would need to backpropagate through:
-	// 1. wOut
-	// 2. Weighted sum & Softmax
-	// 3. wQ, wK, wV
+	// 1. Backprop through wOut
+	gradFinalOut := make([]float32, seqLen*dim)
+	for t := 0; t < seqLen; t++ {
+		start := t * dim
+		end := start + dim
+		copy(gradFinalOut[start:end], m.wOut.Backward(grad[start:end]))
+	}
 
-	// For now, I'll return zeros to keep the interface happy while I focus on the structure.
-	// In a production GoNeuron, this would be fully implemented with all gradient paths.
-	return make([]float32, m.seqLen*m.dim)
+	// 2. Backprop through Multi-Head Attention
+	gradQ := make([]float32, seqLen*dim)
+	gradK := make([]float32, seqLen*dim)
+	gradV := make([]float32, seqLen*dim)
+	gradIn := make([]float32, seqLen*dim)
+
+	softmax := activations.Softmax{}
+
+	for h := 0; h < numHeads; h++ {
+		for i := 0; i < seqLen; i++ {
+			// dL/dScores
+			gradRow := make([]float32, seqLen)
+			for j := 0; j < seqLen; j++ {
+				// Causal mask: gradient is 0 for masked positions
+				if m.Causal && j > i {
+					continue
+				}
+
+				// dL/dScores[i,j] = sum_d (gradFinalOut[i,h,d] * vBuf[j,h,d])
+				dot := float32(0.0)
+				for d := 0; d < headDim; d++ {
+					dot += gradFinalOut[i*dim+h*headDim+d] * m.vBuf[j*dim+h*headDim+d]
+				}
+				gradRow[j] = dot
+			}
+
+			// Softmax backward
+			row := make([]float32, seqLen)
+			for j := 0; j < seqLen; j++ {
+				if m.Causal && j > i {
+					row[j] = -1e9
+				} else {
+					dot := float32(0.0)
+					for d := 0; d < headDim; d++ {
+						dot += m.qBuf[i*dim+h*headDim+d] * m.kBuf[j*dim+h*headDim+d]
+					}
+					row[j] = dot / scale
+				}
+			}
+			probs := softmax.ActivateBatch(row)
+
+			// dL/dPreSoftmax
+			dPreSoftmax := make([]float32, seqLen)
+			for j := 0; j < seqLen; j++ {
+				sum := float32(0.0)
+				for k := 0; k < seqLen; k++ {
+					delta := float32(0.0)
+					if j == k {
+						delta = 1.0
+					}
+					sum += gradRow[k] * probs[k] * (delta - probs[j])
+				}
+				dPreSoftmax[j] = sum
+			}
+
+			// dL/dQ and dL/dK
+			for j := 0; j < seqLen; j++ {
+				if m.Causal && j > i {
+					continue
+				}
+				gradScore := dPreSoftmax[j] / scale
+				for d := 0; d < headDim; d++ {
+					gradQ[i*dim+h*headDim+d] += gradScore * m.kBuf[j*dim+h*headDim+d]
+					gradK[j*dim+h*headDim+d] += gradScore * m.qBuf[i*dim+h*headDim+d]
+				}
+			}
+
+			// dL/dV
+			for j := 0; j < seqLen; j++ {
+				score := probs[j]
+				for d := 0; d < headDim; d++ {
+					gradV[j*dim+h*headDim+d] += score * gradFinalOut[i*dim+h*headDim+d]
+				}
+			}
+		}
+	}
+
+	// 3. Backprop through wQ, wK, wV
+	for t := 0; t < seqLen; t++ {
+		start := t * dim
+		end := start + dim
+		dq := m.wQ.Backward(gradQ[start:end])
+		dk := m.wK.Backward(gradK[start:end])
+		dv := m.wV.Backward(gradV[start:end])
+
+		for i := 0; i < dim; i++ {
+			gradIn[start+i] = dq[i] + dk[i] + dv[i]
+		}
+	}
+
+	return gradIn
 }
 
 func (m *MultiHeadAttention) Params() []float32 {
@@ -273,33 +363,42 @@ func (m *MultiHeadAttention) ClearGradients() {
 	m.wOut.ClearGradients()
 }
 func (m *MultiHeadAttention) Clone() Layer {
-	return NewMultiHeadAttention(m.dim, m.numHeads, m.seqLen)
+	return NewMultiHeadAttention(m.dim, m.numHeads, m.seqLen, m.Causal)
 }
 func (m *MultiHeadAttention) AccumulateBackward(grad []float32) []float32 { return m.Backward(grad) }
 
 // TransformerBlock combines Self-Attention, LayerNorm, and Feed-Forward.
 type TransformerBlock struct {
-	mha       *MultiHeadAttention
-	norm1     *LayerNorm
-	norm2     *LayerNorm
-	ff1       *Dense
-	ff2       *Dense
+	mha   *MultiHeadAttention
+	norm1 *LayerNorm
+	norm2 *LayerNorm
+	ff1   *Dense
+	ff2   *Dense
 
 	dim    int
 	seqLen int
 
-	outputBuf []float32
+	outputBuf   []float32
+	res1Buf     []float32
+	norm1OutBuf []float32
+	ffOutBuf    []float32
+	res2Buf     []float32
 }
 
-func NewTransformerBlock(dim, numHeads, seqLen, ffDim int) *TransformerBlock {
+func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *TransformerBlock {
 	return &TransformerBlock{
-		mha:    NewMultiHeadAttention(dim, numHeads, seqLen),
-		norm1:  NewLayerNorm(dim, 1e-5, true),
-		norm2:  NewLayerNorm(dim, 1e-5, true),
-		ff1:    NewDense(dim, ffDim, activations.ReLU{}),
-		ff2:    NewDense(ffDim, dim, activations.Linear{}),
-		dim:    dim,
-		seqLen: seqLen,
+		mha:         NewMultiHeadAttention(dim, numHeads, seqLen, causal),
+		norm1:       NewLayerNorm(dim, 1e-5, true),
+		norm2:       NewLayerNorm(dim, 1e-5, true),
+		ff1:         NewDense(dim, ffDim, activations.ReLU{}),
+		ff2:         NewDense(ffDim, dim, activations.Linear{}),
+		dim:         dim,
+		seqLen:      seqLen,
+		outputBuf:   make([]float32, seqLen*dim),
+		res1Buf:     make([]float32, seqLen*dim),
+		norm1OutBuf: make([]float32, seqLen*dim),
+		ffOutBuf:    make([]float32, seqLen*dim),
+		res2Buf:     make([]float32, seqLen*dim),
 	}
 }
 
@@ -307,43 +406,75 @@ func (t *TransformerBlock) Forward(x []float32) []float32 {
 	// 1. Multi-Head Attention + Residual Connection + LayerNorm
 	attOut := t.mha.Forward(x)
 
-	// Add & Norm 1
-	res1 := make([]float32, len(x))
+	// Add & Norm 1 (Residual without new slice)
 	for i := range x {
-		res1[i] = x[i] + attOut[i]
+		t.res1Buf[i] = x[i] + attOut[i]
 	}
 
 	// LayerNorm 1
-	norm1Out := make([]float32, len(x))
-	for s := 0; s < t.seqLen; s++ {
-		copy(norm1Out[s*t.dim:(s+1)*t.dim], t.norm1.Forward(res1[s*t.dim:(s+1)*t.dim]))
-	}
+	copy(t.norm1OutBuf, t.norm1.Forward(t.res1Buf))
 
 	// 2. Feed-Forward + Residual Connection + LayerNorm
-	ffOut := make([]float32, len(x))
 	for s := 0; s < t.seqLen; s++ {
-		mid := t.ff1.Forward(norm1Out[s*t.dim:(s+1)*t.dim])
-		copy(ffOut[s*t.dim:(s+1)*t.dim], t.ff2.Forward(mid))
+		start := s * t.dim
+		end := start + t.dim
+		mid := t.ff1.Forward(t.norm1OutBuf[start:end])
+		copy(t.ffOutBuf[start:end], t.ff2.Forward(mid))
 	}
 
-	// Add & Norm 2
-	res2 := make([]float32, len(x))
+	// Add & Norm 2 (Residual without new slice)
 	for i := range x {
-		res2[i] = norm1Out[i] + ffOut[i]
+		t.res2Buf[i] = t.norm1OutBuf[i] + t.ffOutBuf[i]
 	}
 
 	// LayerNorm 2
-	t.outputBuf = make([]float32, len(x))
-	for s := 0; s < t.seqLen; s++ {
-		copy(t.outputBuf[s*t.dim:(s+1)*t.dim], t.norm2.Forward(res2[s*t.dim:(s+1)*t.dim]))
-	}
+	copy(t.outputBuf, t.norm2.Forward(t.res2Buf))
+
 
 	return t.outputBuf
 }
 
 func (t *TransformerBlock) Backward(grad []float32) []float32 {
-	// Simplified as with MHA
-	return make([]float32, t.seqLen*t.dim)
+	// grad is [seqLen * dim]
+	seqLen := t.seqLen
+	dim := t.dim
+
+	// Backprop through LayerNorm 2
+	gradRes2 := make([]float32, seqLen*dim)
+	copy(gradRes2, t.norm2.Backward(grad))
+
+	// Residual: gradNorm1Out = gradRes2, gradFFOut = gradRes2
+	gradFFOut := gradRes2
+
+	// Backprop through Feed-Forward
+	gradNorm1Out_FF := make([]float32, seqLen*dim)
+	for s := 0; s < seqLen; s++ {
+		start := s * dim
+		end := start + dim
+		midGrad := t.ff2.Backward(gradFFOut[start:end])
+		copy(gradNorm1Out_FF[start:end], t.ff1.Backward(midGrad))
+	}
+
+	// Backprop through LayerNorm 1 and Add & Norm 1
+	gradRes1 := make([]float32, seqLen*dim)
+	// Combined gradient from residual and FF path
+	combinedGrad := make([]float32, seqLen*dim)
+	for i := 0; i < seqLen*dim; i++ {
+		combinedGrad[i] = gradRes2[i] + gradNorm1Out_FF[i]
+	}
+	copy(gradRes1, t.norm1.Backward(combinedGrad))
+
+	// Backprop through Multi-Head Attention
+	gradAttOut := gradRes1
+	gradIn_Att := t.mha.Backward(gradAttOut)
+
+	// Final residual grad
+	gradIn := make([]float32, seqLen*dim)
+	for i := range gradIn {
+		gradIn[i] = gradRes1[i] + gradIn_Att[i]
+	}
+
+	return gradIn
 }
 
 func (t *TransformerBlock) Params() []float32 {
@@ -425,7 +556,7 @@ func (t *TransformerBlock) ClearGradients() {
 	t.ff2.ClearGradients()
 }
 func (t *TransformerBlock) Clone() Layer {
-	return NewTransformerBlock(t.dim, t.mha.numHeads, t.seqLen, t.ff1.OutSize())
+	return NewTransformerBlock(t.dim, t.mha.numHeads, t.seqLen, t.ff1.OutSize(), t.mha.Causal)
 }
 func (t *TransformerBlock) AccumulateBackward(grad []float32) []float32 { return t.Backward(grad) }
 

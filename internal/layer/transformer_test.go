@@ -37,7 +37,7 @@ func TestMultiHeadAttention(t *testing.T) {
 	dim := 16
 	numHeads := 4
 	seqLen := 5
-	mha := NewMultiHeadAttention(dim, numHeads, seqLen)
+	mha := NewMultiHeadAttention(dim, numHeads, seqLen, false)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {
@@ -50,12 +50,43 @@ func TestMultiHeadAttention(t *testing.T) {
 	}
 }
 
+func TestMultiHeadAttentionCausal(t *testing.T) {
+	dim := 8
+	numHeads := 2
+	seqLen := 4
+	mha := NewMultiHeadAttention(dim, numHeads, seqLen, true)
+
+	input := make([]float32, seqLen*dim)
+	for i := range input {
+		input[i] = 1.0
+	}
+
+	mha.Forward(input)
+
+	// Verify that scoresBuf has 0.0 for j > i (after softmax)
+	// scoresBuf stores the scores for the LAST head processed
+	for i := 0; i < seqLen; i++ {
+		for j := 0; j < seqLen; j++ {
+			score := mha.scoresBuf[i*seqLen+j]
+			if j > i {
+				if score != 0.0 {
+					t.Errorf("Causal mask failed at [%d, %d]: expected 0.0, got %f", i, j, score)
+				}
+			} else {
+				if score == 0.0 {
+					t.Errorf("Causal mask applied incorrectly at [%d, %d]: got 0.0", i, j)
+				}
+			}
+		}
+	}
+}
+
 func TestTransformerBlock(t *testing.T) {
 	dim := 16
 	numHeads := 4
 	seqLen := 5
 	ffDim := 32
-	tb := NewTransformerBlock(dim, numHeads, seqLen, ffDim)
+	tb := NewTransformerBlock(dim, numHeads, seqLen, ffDim, false)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {

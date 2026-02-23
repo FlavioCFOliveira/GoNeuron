@@ -24,8 +24,8 @@ type LayerNorm struct {
 	gradBetaBuf    []float32
 	gradBuf        []float32 // Temporary gradient buffer
 	savedInput     []float32 // Input saved for backward pass
-	inputMean      float32   // Stored mean for backward
-	inputStd       float32   // Stored std for backward
+	inputMeans     []float32 // Stored means for backward
+	inputStds      []float32 // Stored stds for backward
 
 	device Device
 }
@@ -70,23 +70,17 @@ func (l *LayerNorm) SetDevice(device Device) {
 // x: input tensor of shape [..., normalizedShape]
 // Returns: normalized output with same shape as input
 func (l *LayerNorm) Forward(x []float32) []float32 {
-	// Assume input is [..., normalizedShape]
-	// We normalize across the last dimension
-
-	// Compute mean and std for each sample in the batch
 	numSamples := len(x) / l.normalizedShape
 
-	// Ensure output buffer is sized correctly
 	if len(l.outputBuf) != len(x) {
 		l.outputBuf = make([]float32, len(x))
 	}
-	if len(l.gradInBuf) != len(x) {
-		l.gradInBuf = make([]float32, len(x))
+	if len(l.inputMeans) != numSamples {
+		l.inputMeans = make([]float32, numSamples)
+		l.inputStds = make([]float32, numSamples)
 	}
 
 	output := l.outputBuf
-
-	// Save input for backward pass
 	if cap(l.savedInput) < len(x) {
 		l.savedInput = make([]float32, len(x))
 	}
@@ -96,15 +90,13 @@ func (l *LayerNorm) Forward(x []float32) []float32 {
 		start := s * l.normalizedShape
 		end := start + l.normalizedShape
 
-		// Compute mean
 		sum := float32(0.0)
 		for i := start; i < end; i++ {
 			sum += x[i]
 		}
 		mean := sum / float32(l.normalizedShape)
-		l.inputMean = mean
+		l.inputMeans[s] = mean
 
-		// Compute std
 		sumSquares := float32(0.0)
 		for i := start; i < end; i++ {
 			diff := x[i] - mean
@@ -112,9 +104,8 @@ func (l *LayerNorm) Forward(x []float32) []float32 {
 		}
 		variance := sumSquares / float32(l.normalizedShape)
 		std := float32(math.Sqrt(float64(variance + l.eps)))
-		l.inputStd = std
+		l.inputStds[s] = std
 
-		// Normalize and apply affine transformation
 		for i := start; i < end; i++ {
 			normalized := (x[i] - mean) / std
 			if l.elementwiseAffine {
@@ -128,27 +119,20 @@ func (l *LayerNorm) Forward(x []float32) []float32 {
 	return output
 }
 
-// Backward performs backpropagation through the layer normalization layer.
 func (l *LayerNorm) Backward(grad []float32) []float32 {
 	numSamples := len(grad) / l.normalizedShape
 
-	// Ensure gradInBuf is sized correctly
 	if len(l.gradInBuf) != len(grad) {
 		l.gradInBuf = make([]float32, len(grad))
 	}
-
-	mean := l.inputMean
-	std := l.inputStd
 
 	for s := 0; s < numSamples; s++ {
 		start := s * l.normalizedShape
 		end := start + l.normalizedShape
 
-		// Compute gradient w.r.t. input
-		// dL/dx = (dL/dy * gamma) / std - mean(dL/dy * gamma) / std
-		//       - (x - mean) * mean((dL/dy * gamma) * (x - mean)) / std^3
+		mean := l.inputMeans[s]
+		std := l.inputStds[s]
 
-		// First compute dL/dy * gamma
 		gammaProd := l.gradBuf
 		for i := start; i < end; i++ {
 			if l.elementwiseAffine {
@@ -158,7 +142,6 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 			}
 		}
 
-		// Compute sum of gamma*grad and sum of gamma*grad*(x-mean)
 		sumGrad := float32(0.0)
 		sumGradXMean := float32(0.0)
 		for i := start; i < end; i++ {
@@ -167,7 +150,6 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 			sumGradXMean += gammaProd[i-start] * diff
 		}
 
-		// Compute gradient for each input
 		for i := start; i < end; i++ {
 			diff := (l.savedInput[i] - mean)
 			gradInput := (gammaProd[i-start] - sumGrad/float32(l.normalizedShape)) / std
@@ -175,7 +157,6 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 			l.gradInBuf[i] = gradInput
 		}
 
-		// Accumulate parameter gradients
 		if l.elementwiseAffine {
 			for i := start; i < end; i++ {
 				normalized := (l.savedInput[i] - mean) / std
