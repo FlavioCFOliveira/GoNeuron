@@ -34,6 +34,9 @@ type MoE struct {
 	weightsBuf    []expertWeight
 
 	rng *RNG
+
+	params []float32
+	grads  []float32
 }
 
 func NewMoE(inSize, outSize, numExperts, k int) *MoE {
@@ -46,6 +49,24 @@ func NewMoE(inSize, outSize, numExperts, k int) *MoE {
 
 	// Gating uses Linear activation so we can add noise before Softmax
 	gating := NewDense(inSize, numExperts, activations.Linear{})
+
+	// Aggregate parameters
+	gLen := len(gating.Params())
+	eLen := len(experts[0].Params())
+	totalParams := gLen + numExperts*eLen
+	params := make([]float32, totalParams)
+	grads := make([]float32, totalParams)
+
+	offset := 0
+	gating.SetParams(params[offset : offset+gLen])
+	gating.SetGradients(grads[offset : offset+gLen])
+	offset += gLen
+
+	for i := 0; i < numExperts; i++ {
+		experts[i].SetParams(params[offset : offset+eLen])
+		experts[i].SetGradients(grads[offset : offset+eLen])
+		offset += eLen
+	}
 
 	return &MoE{
 		gating:        gating,
@@ -65,6 +86,8 @@ func NewMoE(inSize, outSize, numExperts, k int) *MoE {
 		expertGradBuf: make([]float32, outSize),
 		weightsBuf:    make([]expertWeight, numExperts),
 		rng:           NewRNG(42),
+		params:        params,
+		grads:         grads,
 	}
 }
 
@@ -198,39 +221,65 @@ func (m *MoE) Backward(grad []float32) []float32 {
 }
 
 func (m *MoE) Params() []float32 {
-	params := m.gating.Params()
-	for _, e := range m.experts {
-		params = append(params, e.Params()...)
-	}
-	return params
+	return m.params
 }
 
 func (m *MoE) SetParams(p []float32) {
+	if len(p) == 0 {
+		return
+	}
+	if &m.params[0] != &p[0] {
+		if len(p) == len(m.params) {
+			m.params = p
+			m.updateViews()
+		} else {
+			copy(m.params, p)
+		}
+	}
+}
+
+func (m *MoE) updateViews() {
 	gLen := len(m.gating.Params())
-	m.gating.SetParams(p[:gLen])
-	offset := gLen
-	for _, e := range m.experts {
-		eLen := len(e.Params())
-		e.SetParams(p[offset : offset+eLen])
+	eLen := len(m.experts[0].Params())
+
+	offset := 0
+	m.gating.SetParams(m.params[offset : offset+gLen])
+	offset += gLen
+
+	for i := 0; i < m.numExperts; i++ {
+		m.experts[i].SetParams(m.params[offset : offset+eLen])
 		offset += eLen
 	}
 }
 
 func (m *MoE) Gradients() []float32 {
-	grads := m.gating.Gradients()
-	for _, e := range m.experts {
-		grads = append(grads, e.Gradients()...)
-	}
-	return grads
+	return m.grads
 }
 
 func (m *MoE) SetGradients(g []float32) {
+	if len(g) == 0 {
+		return
+	}
+	if &m.grads[0] != &g[0] {
+		if len(g) == len(m.grads) {
+			m.grads = g
+			m.updateGradViews()
+		} else {
+			copy(m.grads, g)
+		}
+	}
+}
+
+func (m *MoE) updateGradViews() {
 	gLen := len(m.gating.Gradients())
-	m.gating.SetGradients(g[:gLen])
-	offset := gLen
-	for _, e := range m.experts {
-		eLen := len(e.Gradients())
-		e.SetGradients(g[offset : offset+eLen])
+	eLen := len(m.experts[0].Gradients())
+
+	offset := 0
+	m.gating.SetGradients(m.grads[offset : offset+gLen])
+	offset += gLen
+
+	for i := 0; i < m.numExperts; i++ {
+		m.experts[i].SetGradients(m.grads[offset : offset+eLen])
 		offset += eLen
 	}
 }

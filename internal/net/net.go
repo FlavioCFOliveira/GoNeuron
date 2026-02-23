@@ -37,6 +37,10 @@ type Network struct {
 	loss   loss.Loss
 	opt    opt.Optimizer
 
+	// Contiguous global buffers for all parameters and gradients
+	params []float32
+	grads  []float32
+
 	// Pre-allocated gradient buffer for training
 	// This avoids allocations in the training loop
 	lossGradBuf []float32
@@ -44,10 +48,40 @@ type Network struct {
 
 // New creates a new neural network with the given layers.
 func New(layers []layer.Layer, loss loss.Loss, optimizer opt.Optimizer) *Network {
-	return &Network{
+	n := &Network{
 		layers: layers,
 		loss:   loss,
 		opt:    optimizer,
+	}
+	n.initBuffers()
+	return n
+}
+
+// initBuffers initializes the global contiguous buffers and re-binds layers.
+func (n *Network) initBuffers() {
+	totalSize := 0
+	for _, l := range n.layers {
+		totalSize += len(l.Params())
+	}
+
+	if totalSize == 0 {
+		return
+	}
+
+	n.params = make([]float32, totalSize)
+	n.grads = make([]float32, totalSize)
+
+	offset := 0
+	for _, l := range n.layers {
+		lLen := len(l.Params())
+		if lLen > 0 {
+			// Copy existing params to the new global buffer
+			copy(n.params[offset:offset+lLen], l.Params())
+			// Re-bind layer to use a view of the global buffers
+			l.SetParams(n.params[offset : offset+lLen])
+			l.SetGradients(n.grads[offset : offset+lLen])
+			offset += lLen
+		}
 	}
 }
 
@@ -74,11 +108,13 @@ func (n *Network) Clone() *Network {
 		newLayers[i] = l.Clone()
 	}
 
-	return &Network{
+	net := &Network{
 		layers: newLayers,
 		loss:   n.loss, // Loss functions are usually stateless
 		opt:    n.opt,  // Note: Optimizer is shared, but we only use it in Step() which is sequential
 	}
+	net.initBuffers()
+	return net
 }
 
 // Forward performs a forward pass through all layers.
@@ -88,6 +124,12 @@ func (n *Network) Forward(x []float32) []float32 {
 		curr = n.layers[i].Forward(curr)
 	}
 	return curr
+}
+
+// Predict performs a forward pass through all layers in inference mode.
+func (n *Network) Predict(x []float32) []float32 {
+	n.SetTraining(false)
+	return n.Forward(x)
 }
 
 // Backward performs a backward pass through all layers.
@@ -105,26 +147,34 @@ func (n *Network) Step() {
 	// Signal a new optimization step (increment timestep for Adam)
 	n.opt.NewStep()
 
-	for _, l := range n.layers {
-		params := l.Params()
-		gradients := l.Gradients()
-		// Use StepInPlace for efficiency
+	params := n.Params()
+	gradients := n.Gradients()
+
+	if len(n.params) > 0 && len(n.grads) > 0 {
+		// Optimization step on global buffer
 		n.opt.StepInPlace(params, gradients)
-		// No need for SetParams as StepInPlace modified params in-place
-		// unless the layer doesn't return a reference to its internal params slice.
-		// Most layers currently return a copy in Params().
-		// Let's ensure consistency by calling SetParams with the modified slice.
-		l.SetParams(params)
+
+		// Sync layers if they use Metal (params might be updated in-place)
+		for _, l := range n.layers {
+			l.SetParams(l.Params())
+		}
+	} else {
+		// Fallback for non-contiguous networks
+		for _, l := range n.layers {
+			p := l.Params()
+			g := l.Gradients()
+			n.opt.StepInPlace(p, g)
+			l.SetParams(p)
+		}
 	}
 }
 
 // Train performs a training step on a single sample.
 // This is optimized for performance with minimal allocations.
 func (n *Network) Train(x []float32, y []float32) float32 {
+	n.SetTraining(true)
 	// Clear gradients before starting
-	for _, l := range n.layers {
-		l.ClearGradients()
-	}
+	n.ClearGradients()
 
 	// Reset internal state for layers that support it (e.g., LSTM, GRU)
 	// This is critical to prevent state from one sample affecting another
@@ -166,6 +216,7 @@ func (n *Network) Train(x []float32, y []float32) float32 {
 
 // Fit trains the network on the given dataset for a specified number of epochs.
 func (n *Network) Fit(trainX, trainY [][]float32, epochs int, batchSize int, callbacks ...Callback) {
+	n.SetTraining(true)
 	for _, cb := range callbacks {
 		cb.OnTrainBegin(n)
 	}
@@ -244,6 +295,7 @@ func (n *Network) TrainBatch(batchX [][]float32, batchY [][]float32) float32 {
 
 // ForwardBatch performs forward pass on a batch of samples.
 func (n *Network) ForwardBatch(batchX [][]float32) [][]float32 {
+	n.SetTraining(false)
 	results := make([][]float32, len(batchX))
 	for i, x := range batchX {
 		// Reset internal state for layers that support it (e.g., LSTM, GRU)
@@ -262,6 +314,7 @@ func (n *Network) ForwardBatch(batchX [][]float32) [][]float32 {
 // TrainTriplet performs a training step using Triplet Margin Loss.
 // It performs three forward passes (anchor, positive, negative) and accumulates gradients.
 func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin float32) float32 {
+	n.SetTraining(true)
 	// Clear gradients at the start
 	n.ClearGradients()
 
@@ -321,11 +374,26 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin floa
 
 // SetParams sets all network parameters from a flattened slice.
 func (n *Network) SetParams(params []float32) {
-	offset := 0
-	for _, l := range n.layers {
-		lLen := len(l.Params())
-		l.SetParams(params[offset : offset+lLen])
-		offset += lLen
+	if len(params) == 0 {
+		return
+	}
+	if len(n.params) > 0 && &n.params[0] == &params[0] {
+		// Already using this buffer, just sync layers if needed
+		return
+	}
+	if len(params) == len(n.params) {
+		copy(n.params, params)
+		// Layers are already views into n.params, but they might need to sync to GPU
+		for _, l := range n.layers {
+			l.SetParams(l.Params())
+		}
+	} else {
+		offset := 0
+		for _, l := range n.layers {
+			lLen := len(l.Params())
+			l.SetParams(params[offset : offset+lLen])
+			offset += lLen
+		}
 	}
 }
 
@@ -473,13 +541,20 @@ func (n *Network) trainBatchSequential(batchX [][]float32, batchY [][]float32) f
 	}
 
 	// Average gradients by dividing each by batch size
-	// Apply directly to layer gradient buffers (which were accumulated during backward)
-	for _, l := range n.layers {
-		grads := l.Gradients() // Get current accumulated gradients
-		for j := range grads {
-			grads[j] /= batchSize
+	// Apply directly to global gradient buffer
+	if len(n.grads) > 0 {
+		invBatchSize := 1.0 / batchSize
+		for i := range n.grads {
+			n.grads[i] *= invBatchSize
 		}
-		l.SetGradients(grads) // Set averaged gradients back
+	} else {
+		for _, l := range n.layers {
+			grads := l.Gradients() // Get current accumulated gradients
+			for j := range grads {
+				grads[j] /= batchSize
+			}
+			l.SetGradients(grads) // Set averaged gradients back
+		}
 	}
 
 	// Single optimization step (averaged over batch)
@@ -487,8 +562,12 @@ func (n *Network) trainBatchSequential(batchX [][]float32, batchY [][]float32) f
 	return totalLoss / batchSize
 }
 
-// Params returns all network parameters flattened (copy).
+// Params returns all network parameters flattened as a direct view.
 func (n *Network) Params() []float32 {
+	if len(n.params) > 0 {
+		return n.params
+	}
+	// Fallback for empty networks or if not initialized
 	var params []float32
 	for _, l := range n.layers {
 		params = append(params, l.Params()...)
@@ -496,8 +575,12 @@ func (n *Network) Params() []float32 {
 	return params
 }
 
-// Gradients returns all network gradients flattened (copy).
+// Gradients returns all network gradients flattened as a direct view.
 func (n *Network) Gradients() []float32 {
+	if len(n.grads) > 0 {
+		return n.grads
+	}
+	// Fallback for empty networks or if not initialized
 	var gradients []float32
 	for _, l := range n.layers {
 		gradients = append(gradients, l.Gradients()...)
@@ -507,19 +590,35 @@ func (n *Network) Gradients() []float32 {
 
 // ClearGradients zeroes out all layer gradients.
 func (n *Network) ClearGradients() {
-	for _, l := range n.layers {
-		l.ClearGradients()
+	if len(n.grads) > 0 {
+		for i := range n.grads {
+			n.grads[i] = 0
+		}
+	} else {
+		for _, l := range n.layers {
+			l.ClearGradients()
+		}
 	}
 }
 
 // SetGradients sets network gradients from a flattened slice.
 func (n *Network) SetGradients(gradients []float32) {
-	offset := 0
-	for _, l := range n.layers {
-		lGrads := l.Gradients()
-		gradLen := len(lGrads)
-		l.SetGradients(gradients[offset : offset+gradLen])
-		offset += gradLen
+	if len(gradients) == 0 {
+		return
+	}
+	if len(n.grads) > 0 && &n.grads[0] == &gradients[0] {
+		return
+	}
+	if len(gradients) == len(n.grads) {
+		copy(n.grads, gradients)
+	} else {
+		offset := 0
+		for _, l := range n.layers {
+			lGrads := l.Gradients()
+			gradLen := len(lGrads)
+			l.SetGradients(gradients[offset : offset+gradLen])
+			offset += gradLen
+		}
 	}
 }
 

@@ -132,25 +132,33 @@ func (g *GlobalAttention) Backward(grad []float32) []float32 {
 
 // Params returns the learnable context vector.
 func (g *GlobalAttention) Params() []float32 {
-	params := make([]float32, g.inSize)
-	copy(params, g.contextVector)
-	return params
+	return g.contextVector
 }
 
 // SetParams sets the context vector.
 func (g *GlobalAttention) SetParams(params []float32) {
+	if len(params) == 0 {
+		return
+	}
+	if &g.contextVector[0] == &params[0] {
+		return
+	}
 	copy(g.contextVector, params)
 }
 
 // Gradients returns context vector gradients.
 func (g *GlobalAttention) Gradients() []float32 {
-	grads := make([]float32, g.inSize)
-	copy(grads, g.gradContext)
-	return grads
+	return g.gradContext
 }
 
 // SetGradients sets context vector gradients.
 func (g *GlobalAttention) SetGradients(grads []float32) {
+	if len(grads) == 0 {
+		return
+	}
+	if &g.gradContext[0] == &grads[0] {
+		return
+	}
 	copy(g.gradContext, grads)
 }
 

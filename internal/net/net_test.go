@@ -164,8 +164,9 @@ func TestNetworkStep(t *testing.T) {
 	input := []float32{1.0, 1.0}
 	target := []float32{1.0, 1.0}
 
-	// Get initial params
-	initialParams := network.Params()
+	// Get initial params (copy)
+	initialParams := make([]float32, len(network.Params()))
+	copy(initialParams, network.Params())
 
 	// Train
 	network.Train(input, target)

@@ -14,14 +14,19 @@ type GRU struct {
 	inSize  int
 	outSize int
 
-	// Weight matrices stored contiguously for cache efficiency
-	// Layout:
-	// - inputWeights: [update_gate, reset_gate, cell_candidate] (3 gates)
-	// - recurrentWeights: [update_gate, reset_gate] (2 gates, reset used by cell)
-	// - biases: [update_gate, reset_gate, cell_candidate] (3 gates)
-	inputWeights      []float32 // outSize * 3 * inSize
-	recurrentWeights  []float32 // outSize * outSize * 2
-	biases            []float32 // outSize * 3
+	// Parameters stored contiguously
+	params []float32 // Contiguous inputWeights + recurrentWeights + biases
+	grads  []float32 // Contiguous gradInputWeights + gradRecurrentWeights + gradBiases
+
+	// Views into params
+	inputWeights     []float32 // outSize * 3 * inSize
+	recurrentWeights []float32 // outSize * outSize * 2
+	biases           []float32 // outSize * 3
+
+	// Views into grads
+	gradInputWeights     []float32
+	gradRecurrentWeights []float32
+	gradBiases           []float32
 
 	// Activation functions
 	updateAct activations.Activation
@@ -33,11 +38,6 @@ type GRU struct {
 	outputBuf    []float32
 	preActBuf    []float32 // pre-activations for 2 gates + cell candidate (outSize * 3)
 	cellBuf      []float32 // current hidden state
-
-	// Gradient buffers
-	gradInputWeights    []float32
-	gradRecurrentWeights []float32
-	gradBiases          []float32
 
 	// Delta buffers for backprop
 	dUpdateBuf []float32
@@ -73,13 +73,16 @@ func NewGRU(inSize, outSize int) *GRU {
 	// Xavier/Glorot initialization
 	scale := float32(math.Sqrt(2.0 / (float64(inSize) + float64(outSize))))
 
-	// Allocate weight matrices
-	// inputWeights: 3 gates (update, reset, cell candidate)
-	// recurrentWeights: 2 gates (update, reset)
-	// biases: 3 gates
-	inputWeights := make([]float32, outSize*3*inSize)
-	recurrentWeights := make([]float32, outSize*outSize*2)
-	biases := make([]float32, outSize*3)
+	// Allocate weight matrices contiguously
+	weightInSize := outSize * 3 * inSize
+	weightRecSize := outSize * outSize * 2
+	biasSize := outSize * 3
+	totalParams := weightInSize + weightRecSize + biasSize
+	params := make([]float32, totalParams)
+
+	inputWeights := params[:weightInSize]
+	recurrentWeights := params[weightInSize : weightInSize+weightRecSize]
+	biases := params[weightInSize+weightRecSize:]
 
 	// Create deterministic RNG with layer-specific seed
 	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 242))
@@ -97,10 +100,14 @@ func NewGRU(inSize, outSize int) *GRU {
 		}
 	}
 
+	// Allocate gradients contiguously
+	grads := make([]float32, totalParams)
+
 	return &GRU{
 		inSize:  inSize,
 		outSize: outSize,
 
+		params:           params,
 		inputWeights:     inputWeights,
 		recurrentWeights: recurrentWeights,
 		biases:           biases,
@@ -110,14 +117,15 @@ func NewGRU(inSize, outSize int) *GRU {
 		cellAct:   activations.Tanh{},
 
 		// Pre-allocate all working buffers
-		inputBuf:     make([]float32, inSize),
-		outputBuf:    make([]float32, outSize),
-		preActBuf:    make([]float32, outSize*3),
-		cellBuf:      make([]float32, outSize),
+		inputBuf:  make([]float32, inSize),
+		outputBuf: make([]float32, outSize),
+		preActBuf: make([]float32, outSize*3),
+		cellBuf:   make([]float32, outSize),
 
-		gradInputWeights:    make([]float32, outSize*3*inSize),
-		gradRecurrentWeights: make([]float32, outSize*outSize*2),
-		gradBiases:          make([]float32, outSize*3),
+		grads:                grads,
+		gradInputWeights:     grads[:weightInSize],
+		gradRecurrentWeights: grads[weightInSize : weightInSize+weightRecSize],
+		gradBiases:           grads[weightInSize+weightRecSize:],
 
 		dUpdateBuf: make([]float32, outSize),
 		dResetBuf:  make([]float32, outSize),
@@ -408,41 +416,60 @@ func (g *GRU) Backward(grad []float32) []float32 {
 	return dx
 }
 
-// Params returns all GRU parameters flattened (copy).
+// Params returns all GRU parameters flattened.
 func (g *GRU) Params() []float32 {
-	total := len(g.inputWeights) + len(g.recurrentWeights) + len(g.biases)
-	params := make([]float32, total)
-	copy(params, g.inputWeights)
-	copy(params[len(g.inputWeights):], g.recurrentWeights)
-	copy(params[len(g.inputWeights)+len(g.recurrentWeights):], g.biases)
-	return params
+	return g.params
 }
 
 // SetParams updates weights and biases from a flattened slice.
 func (g *GRU) SetParams(params []float32) {
-	totalInput := len(g.inputWeights)
-	totalRecurrent := len(g.recurrentWeights)
-
-	copy(g.inputWeights, params[:totalInput])
-	copy(g.recurrentWeights, params[totalInput:totalInput+totalRecurrent])
-	copy(g.biases, params[totalInput+totalRecurrent:])
+	if len(params) == 0 {
+		return
+	}
+	if &g.params[0] != &params[0] {
+		if len(params) == len(g.params) {
+			g.params = params
+			g.updateViews()
+		} else {
+			copy(g.params, params)
+		}
+	}
 }
 
-// Gradients returns all GRU gradients flattened (copy).
+func (g *GRU) updateViews() {
+	weightInSize := g.outSize * 3 * g.inSize
+	weightRecSize := g.outSize * g.outSize * 2
+	g.inputWeights = g.params[:weightInSize]
+	g.recurrentWeights = g.params[weightInSize : weightInSize+weightRecSize]
+	g.biases = g.params[weightInSize+weightRecSize:]
+}
+
+// Gradients returns all GRU gradients flattened.
 func (g *GRU) Gradients() []float32 {
-	total := len(g.gradInputWeights) + len(g.gradRecurrentWeights) + len(g.gradBiases)
-	gradients := make([]float32, total)
-	copy(gradients, g.gradInputWeights)
-	copy(gradients[len(g.gradInputWeights):], g.gradRecurrentWeights)
-	copy(gradients[len(g.gradInputWeights)+len(g.gradRecurrentWeights):], g.gradBiases)
-	return gradients
+	return g.grads
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
 func (g *GRU) SetGradients(gradients []float32) {
-	copy(g.gradInputWeights, gradients[:len(g.gradInputWeights)])
-	copy(g.gradRecurrentWeights, gradients[len(g.gradInputWeights):len(g.gradInputWeights)+len(g.gradRecurrentWeights)])
-	copy(g.gradBiases, gradients[len(g.gradInputWeights)+len(g.gradRecurrentWeights):])
+	if len(gradients) == 0 {
+		return
+	}
+	if &g.grads[0] != &gradients[0] {
+		if len(gradients) == len(g.grads) {
+			g.grads = gradients
+			g.updateGradViews()
+		} else {
+			copy(g.grads, gradients)
+		}
+	}
+}
+
+func (g *GRU) updateGradViews() {
+	weightInSize := g.outSize * 3 * g.inSize
+	weightRecSize := g.outSize * g.outSize * 2
+	g.gradInputWeights = g.grads[:weightInSize]
+	g.gradRecurrentWeights = g.grads[weightInSize : weightInSize+weightRecSize]
+	g.gradBiases = g.grads[weightInSize+weightRecSize:]
 }
 
 // InSize returns the input size of the GRU.

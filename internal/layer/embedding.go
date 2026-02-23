@@ -132,28 +132,32 @@ func (e *Embedding) Backward(grad []float32) []float32 {
 
 // Params returns layer parameters (weights).
 func (e *Embedding) Params() []float32 {
-	total := len(e.weights)
-	params := make([]float32, total)
-	copy(params, e.weights)
-	return params
+	return e.weights
 }
 
 // SetParams updates weights from a flattened slice.
 func (e *Embedding) SetParams(params []float32) {
-	copy(e.weights, params)
+	if len(params) == 0 {
+		return
+	}
+	if &e.weights[0] != &params[0] {
+		e.weights = params
+	}
 }
 
 // Gradients returns layer gradients (weight gradients).
 func (e *Embedding) Gradients() []float32 {
-	total := len(e.gradWeights)
-	gradients := make([]float32, total)
-	copy(gradients, e.gradWeights)
-	return gradients
+	return e.gradWeights
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
 func (e *Embedding) SetGradients(gradients []float32) {
-	copy(e.gradWeights, gradients)
+	if len(gradients) == 0 {
+		return
+	}
+	if &e.gradWeights[0] != &gradients[0] {
+		e.gradWeights = gradients
+	}
 }
 
 // InSize returns the number of embeddings (vocab size).

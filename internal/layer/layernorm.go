@@ -6,59 +6,68 @@ import (
 )
 
 // LayerNorm implements layer normalization.
-// Normalizes across feature dimensions (not batch dimension).
 type LayerNorm struct {
 	// Normalization parameters
-	normalizedShape int
-	eps             float32
+	normalizedShape   int
+	eps               float32
 	elementwiseAffine bool
 
-	// Learnable parameters (when affine is enabled)
-	gamma []float32
-	beta  []float32
+	// Learnable parameters
+	params []float32 // Contiguous gamma + beta
+	gamma  []float32 // View of params
+	beta   []float32 // View of params
 
-	// Pre-allocated buffers
-	outputBuf      []float32
-	gradInBuf      []float32
-	gradGammaBuf   []float32
-	gradBetaBuf    []float32
-	gradBuf        []float32 // Temporary gradient buffer
-	savedInput     []float32 // Input saved for backward pass
-	inputMeans     []float32 // Stored means for backward
-	inputStds      []float32 // Stored stds for backward
+	// Gradient buffers
+	grads        []float32 // Contiguous gradGamma + gradBeta
+	gradGammaBuf []float32 // View of grads
+	gradBetaBuf  []float32 // View of grads
+	gradInBuf    []float32
+	gradBuf      []float32 // Temporary gradient buffer
+
+	// Buffers
+	outputBuf  []float32
+	savedInput []float32
+	inputMeans []float32
+	inputStds  []float32
 
 	device Device
 }
 
 // NewLayerNorm creates a new layer normalization layer.
-// normalizedShape: the shape of the input from the expected input dimension
-// eps: small value for numerical stability (default 1e-5)
-// elementwiseAffine: whether to learn scale (gamma) and shift (beta) parameters
 func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *LayerNorm {
-	l := &LayerNorm{
+	params := make([]float32, 0)
+	var gamma, beta []float32
+	grads := make([]float32, 0)
+	var gradGamma, gradBeta []float32
+
+	if elementwiseAffine {
+		params = make([]float32, normalizedShape*2)
+		gamma = params[:normalizedShape]
+		beta = params[normalizedShape:]
+		for i := 0; i < normalizedShape; i++ {
+			gamma[i] = 1.0
+			beta[i] = 0.0
+		}
+		grads = make([]float32, normalizedShape*2)
+		gradGamma = grads[:normalizedShape]
+		gradBeta = grads[normalizedShape:]
+	}
+
+	return &LayerNorm{
 		normalizedShape:   normalizedShape,
 		eps:               eps,
 		elementwiseAffine: elementwiseAffine,
+		params:            params,
+		gamma:             gamma,
+		beta:              beta,
+		grads:             grads,
+		gradGammaBuf:      gradGamma,
+		gradBetaBuf:       gradBeta,
 		outputBuf:         make([]float32, normalizedShape),
 		gradInBuf:         make([]float32, normalizedShape),
 		gradBuf:           make([]float32, normalizedShape),
 		device:            &CPUDevice{},
 	}
-
-	if elementwiseAffine {
-		l.gamma = make([]float32, normalizedShape)
-		l.beta = make([]float32, normalizedShape)
-		l.gradGammaBuf = make([]float32, normalizedShape)
-		l.gradBetaBuf = make([]float32, normalizedShape)
-
-		// Initialize gamma to 1 and beta to 0
-		for i := 0; i < normalizedShape; i++ {
-			l.gamma[i] = 1.0
-			l.beta[i] = 0.0
-		}
-	}
-
-	return l
 }
 
 // SetDevice sets the computation device.
@@ -169,52 +178,54 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 	return l.gradInBuf
 }
 
-// Params returns layer parameters (gamma and beta when affine is enabled).
 func (l *LayerNorm) Params() []float32 {
-	if !l.elementwiseAffine {
-		return make([]float32, 0)
-	}
-
-	total := len(l.gamma) + len(l.beta)
-	params := make([]float32, total)
-	copy(params, l.gamma)
-	copy(params[len(l.gamma):], l.beta)
-	return params
+	return l.params
 }
 
-// SetParams updates gamma and beta from a flattened slice.
 func (l *LayerNorm) SetParams(params []float32) {
-	if !l.elementwiseAffine {
+	if len(params) == 0 {
 		return
 	}
-
-	totalGamma := len(l.gamma)
-	copy(l.gamma, params[:totalGamma])
-	copy(l.beta, params[totalGamma:])
+	if &l.params[0] != &params[0] {
+		if len(params) == len(l.params) {
+			l.params = params
+			l.updateViews()
+		} else {
+			copy(l.params, params)
+		}
+	}
 }
 
-// Gradients returns layer gradients (gamma and beta gradients when affine is enabled).
+func (l *LayerNorm) updateViews() {
+	if l.elementwiseAffine {
+		l.gamma = l.params[:l.normalizedShape]
+		l.beta = l.params[l.normalizedShape:]
+	}
+}
+
 func (l *LayerNorm) Gradients() []float32 {
-	if !l.elementwiseAffine {
-		return make([]float32, 0)
-	}
-
-	total := len(l.gradGammaBuf) + len(l.gradBetaBuf)
-	gradients := make([]float32, total)
-	copy(gradients, l.gradGammaBuf)
-	copy(gradients[len(l.gradGammaBuf):], l.gradBetaBuf)
-	return gradients
+	return l.grads
 }
 
-// SetGradients sets gradients from a flattened slice.
 func (l *LayerNorm) SetGradients(gradients []float32) {
-	if !l.elementwiseAffine {
+	if len(gradients) == 0 {
 		return
 	}
+	if &l.grads[0] != &gradients[0] {
+		if len(gradients) == len(l.grads) {
+			l.grads = gradients
+			l.updateGradViews()
+		} else {
+			copy(l.grads, gradients)
+		}
+	}
+}
 
-	totalGamma := len(l.gradGammaBuf)
-	copy(l.gradGammaBuf, gradients[:totalGamma])
-	copy(l.gradBetaBuf, gradients[totalGamma:])
+func (l *LayerNorm) updateGradViews() {
+	if l.elementwiseAffine {
+		l.gradGammaBuf = l.grads[:l.normalizedShape]
+		l.gradBetaBuf = l.grads[l.normalizedShape:]
+	}
 }
 
 // InSize returns the input size.
@@ -253,13 +264,8 @@ func (l *LayerNorm) Reset() {
 
 // ClearGradients zeroes out the accumulated gradients.
 func (l *LayerNorm) ClearGradients() {
-	if l.elementwiseAffine {
-		for i := range l.gradGammaBuf {
-			l.gradGammaBuf[i] = 0
-		}
-		for i := range l.gradBetaBuf {
-			l.gradBetaBuf[i] = 0
-		}
+	for i := range l.grads {
+		l.grads[i] = 0
 	}
 }
 
@@ -267,8 +273,7 @@ func (l *LayerNorm) ClearGradients() {
 func (l *LayerNorm) Clone() Layer {
 	newL := NewLayerNorm(l.normalizedShape, l.eps, l.elementwiseAffine)
 	if l.elementwiseAffine {
-		copy(newL.gamma, l.gamma)
-		copy(newL.beta, l.beta)
+		copy(newL.params, l.params)
 	}
 	newL.device = l.device
 	return newL

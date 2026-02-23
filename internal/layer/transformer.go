@@ -60,10 +60,31 @@ func (p *PositionalEncoding) Backward(grad []float32) []float32 {
 	return grad
 }
 
-func (p *PositionalEncoding) Params() []float32         { return p.weights }
-func (p *PositionalEncoding) SetParams(params []float32) { copy(p.weights, params) }
-func (p *PositionalEncoding) Gradients() []float32      { return p.gradBuf }
-func (p *PositionalEncoding) SetGradients(g []float32)   { copy(p.gradBuf, g) }
+func (p *PositionalEncoding) Params() []float32 {
+	return p.weights
+}
+
+func (p *PositionalEncoding) SetParams(params []float32) {
+	if len(params) == 0 {
+		return
+	}
+	if &p.weights[0] != &params[0] {
+		p.weights = params
+	}
+}
+
+func (p *PositionalEncoding) Gradients() []float32 {
+	return p.gradBuf
+}
+
+func (p *PositionalEncoding) SetGradients(g []float32) {
+	if len(g) == 0 {
+		return
+	}
+	if &p.gradBuf[0] != &g[0] {
+		p.gradBuf = g
+	}
+}
 func (p *PositionalEncoding) SetDevice(d Device)         { p.device = d }
 func (p *PositionalEncoding) InSize() int                { return p.seqLen * p.dim }
 func (p *PositionalEncoding) OutSize() int               { return p.seqLen * p.dim }
@@ -110,6 +131,10 @@ type MultiHeadAttention struct {
 	scoresBuf   []float32
 	finalOutBuf []float32
 
+	// Contiguous parameter and gradient buffers
+	params []float32
+	grads  []float32
+
 	device Device
 }
 
@@ -119,16 +144,40 @@ func NewMultiHeadAttention(dim, numHeads, seqLen int, causal bool) *MultiHeadAtt
 		panic("dim must be divisible by numHeads")
 	}
 
+	wQ := NewDense(dim, dim, activations.Linear{})
+	wK := NewDense(dim, dim, activations.Linear{})
+	wV := NewDense(dim, dim, activations.Linear{})
+	wOut := NewDense(dim, dim, activations.Linear{})
+
+	// Calculate total parameters
+	paramSize := len(wQ.Params())
+	totalSize := paramSize * 4
+	params := make([]float32, totalSize)
+	grads := make([]float32, totalSize)
+
+	// Link sub-layers to these contiguous buffers
+	wQ.SetParams(params[0:paramSize])
+	wK.SetParams(params[paramSize : 2*paramSize])
+	wV.SetParams(params[2*paramSize : 3*paramSize])
+	wOut.SetParams(params[3*paramSize : 4*paramSize])
+
+	wQ.SetGradients(grads[0:paramSize])
+	wK.SetGradients(grads[paramSize : 2*paramSize])
+	wV.SetGradients(grads[2*paramSize : 3*paramSize])
+	wOut.SetGradients(grads[3*paramSize : 4*paramSize])
+
 	return &MultiHeadAttention{
 		dim:         dim,
 		numHeads:    numHeads,
 		headDim:     headDim,
 		seqLen:      seqLen,
 		Causal:      causal,
-		wQ:          NewDense(dim, dim, activations.Linear{}),
-		wK:          NewDense(dim, dim, activations.Linear{}),
-		wV:          NewDense(dim, dim, activations.Linear{}),
-		wOut:        NewDense(dim, dim, activations.Linear{}),
+		wQ:          wQ,
+		wK:          wK,
+		wV:          wV,
+		wOut:        wOut,
+		params:      params,
+		grads:       grads,
 		outputBuf:   make([]float32, seqLen*dim),
 		gradInBuf:   make([]float32, seqLen*dim),
 		qBuf:        make([]float32, seqLen*dim),
@@ -322,33 +371,55 @@ func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
 }
 
 func (m *MultiHeadAttention) Params() []float32 {
-	res := append(m.wQ.Params(), m.wK.Params()...)
-	res = append(res, m.wV.Params()...)
-	res = append(res, m.wOut.Params()...)
-	return res
+	return m.params
 }
 
 func (m *MultiHeadAttention) SetParams(p []float32) {
-	size := len(m.wQ.Params())
-	m.wQ.SetParams(p[0:size])
-	m.wK.SetParams(p[size : 2*size])
-	m.wV.SetParams(p[2*size : 3*size])
-	m.wOut.SetParams(p[3*size : 4*size])
+	if len(p) == 0 {
+		return
+	}
+	if &m.params[0] != &p[0] {
+		if len(p) == len(m.params) {
+			m.params = p
+			m.updateViews()
+		} else {
+			copy(m.params, p)
+		}
+	}
+}
+
+func (m *MultiHeadAttention) updateViews() {
+	paramSize := len(m.wQ.Params())
+	m.wQ.SetParams(m.params[0:paramSize])
+	m.wK.SetParams(m.params[paramSize : 2*paramSize])
+	m.wV.SetParams(m.params[2*paramSize : 3*paramSize])
+	m.wOut.SetParams(m.params[3*paramSize : 4*paramSize])
 }
 
 func (m *MultiHeadAttention) Gradients() []float32 {
-	res := append(m.wQ.Gradients(), m.wK.Gradients()...)
-	res = append(res, m.wV.Gradients()...)
-	res = append(res, m.wOut.Gradients()...)
-	return res
+	return m.grads
 }
 
 func (m *MultiHeadAttention) SetGradients(g []float32) {
-	size := len(m.wQ.Gradients())
-	m.wQ.SetGradients(g[0:size])
-	m.wK.SetGradients(g[size : 2*size])
-	m.wV.SetGradients(g[2*size : 3*size])
-	m.wOut.SetGradients(g[3*size : 4*size])
+	if len(g) == 0 {
+		return
+	}
+	if &m.grads[0] != &g[0] {
+		if len(g) == len(m.grads) {
+			m.grads = g
+			m.updateGradViews()
+		} else {
+			copy(m.grads, g)
+		}
+	}
+}
+
+func (m *MultiHeadAttention) updateGradViews() {
+	paramSize := len(m.wQ.Gradients())
+	m.wQ.SetGradients(m.grads[0:paramSize])
+	m.wK.SetGradients(m.grads[paramSize : 2*paramSize])
+	m.wV.SetGradients(m.grads[2*paramSize : 3*paramSize])
+	m.wOut.SetGradients(m.grads[3*paramSize : 4*paramSize])
 }
 
 func (m *MultiHeadAttention) SetDevice(d Device) {
@@ -412,22 +483,77 @@ type TransformerBlock struct {
 	norm1OutBuf []float32
 	ffOutBuf    []float32
 	res2Buf     []float32
+
+	// Pre-allocated backward buffers
+	gradRes2Buf       []float32
+	gradNorm1OutFFBuf []float32
+	combinedGradBuf   []float32
+	gradRes1Buf       []float32
+	gradInBuf         []float32
+
+	// Contiguous parameter and gradient buffers
+	params []float32
+	grads  []float32
 }
 
 func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *TransformerBlock {
+	mha := NewMultiHeadAttention(dim, numHeads, seqLen, causal)
+	norm1 := NewLayerNorm(dim, 1e-5, true)
+	norm2 := NewLayerNorm(dim, 1e-5, true)
+	ff1 := NewDense(dim, ffDim, activations.ReLU{})
+	ff2 := NewDense(ffDim, dim, activations.Linear{})
+
+	// Aggregate parameters
+	sizeMHA := len(mha.Params())
+	sizeNorm1 := len(norm1.Params())
+	sizeNorm2 := len(norm2.Params())
+	sizeFF1 := len(ff1.Params())
+	sizeFF2 := len(ff2.Params())
+
+	totalParams := sizeMHA + sizeNorm1 + sizeNorm2 + sizeFF1 + sizeFF2
+	params := make([]float32, totalParams)
+	grads := make([]float32, totalParams)
+
+	offset := 0
+	mha.SetParams(params[offset : offset+sizeMHA])
+	mha.SetGradients(grads[offset : offset+sizeMHA])
+	offset += sizeMHA
+
+	norm1.SetParams(params[offset : offset+sizeNorm1])
+	norm1.SetGradients(grads[offset : offset+sizeNorm1])
+	offset += sizeNorm1
+
+	norm2.SetParams(params[offset : offset+sizeNorm2])
+	norm2.SetGradients(grads[offset : offset+sizeNorm2])
+	offset += sizeNorm2
+
+	ff1.SetParams(params[offset : offset+sizeFF1])
+	ff1.SetGradients(grads[offset : offset+sizeFF1])
+	offset += sizeFF1
+
+	ff2.SetParams(params[offset : offset+sizeFF2])
+	ff2.SetGradients(grads[offset : offset+sizeFF2])
+
 	return &TransformerBlock{
-		mha:         NewMultiHeadAttention(dim, numHeads, seqLen, causal),
-		norm1:       NewLayerNorm(dim, 1e-5, true),
-		norm2:       NewLayerNorm(dim, 1e-5, true),
-		ff1:         NewDense(dim, ffDim, activations.ReLU{}),
-		ff2:         NewDense(ffDim, dim, activations.Linear{}),
-		dim:         dim,
-		seqLen:      seqLen,
-		outputBuf:   make([]float32, seqLen*dim),
-		res1Buf:     make([]float32, seqLen*dim),
-		norm1OutBuf: make([]float32, seqLen*dim),
-		ffOutBuf:    make([]float32, seqLen*dim),
-		res2Buf:     make([]float32, seqLen*dim),
+		mha:               mha,
+		norm1:             norm1,
+		norm2:             norm2,
+		ff1:               ff1,
+		ff2:               ff2,
+		dim:               dim,
+		seqLen:            seqLen,
+		outputBuf:         make([]float32, seqLen*dim),
+		res1Buf:           make([]float32, seqLen*dim),
+		norm1OutBuf:       make([]float32, seqLen*dim),
+		ffOutBuf:          make([]float32, seqLen*dim),
+		res2Buf:           make([]float32, seqLen*dim),
+		gradRes2Buf:       make([]float32, seqLen*dim),
+		gradNorm1OutFFBuf: make([]float32, seqLen*dim),
+		combinedGradBuf:   make([]float32, seqLen*dim),
+		gradRes1Buf:       make([]float32, seqLen*dim),
+		gradInBuf:         make([]float32, seqLen*dim),
+		params:            params,
+		grads:             grads,
 	}
 }
 
@@ -507,65 +633,85 @@ func (t *TransformerBlock) Backward(grad []float32) []float32 {
 }
 
 func (t *TransformerBlock) Params() []float32 {
-	res := t.mha.Params()
-	res = append(res, t.norm1.Params()...)
-	res = append(res, t.norm2.Params()...)
-	res = append(res, t.ff1.Params()...)
-	res = append(res, t.ff2.Params()...)
-	return res
+	return t.params
 }
 
 func (t *TransformerBlock) SetParams(p []float32) {
+	if len(p) == 0 {
+		return
+	}
+	if &t.params[0] != &p[0] {
+		if len(p) == len(t.params) {
+			t.params = p
+			t.updateViews()
+		} else {
+			copy(t.params, p)
+		}
+	}
+}
+
+func (t *TransformerBlock) updateViews() {
+	sizeMHA := len(t.mha.Params())
+	sizeNorm1 := len(t.norm1.Params())
+	sizeNorm2 := len(t.norm2.Params())
+	sizeFF1 := len(t.ff1.Params())
+	sizeFF2 := len(t.ff2.Params())
+
 	offset := 0
-	size := len(t.mha.Params())
-	t.mha.SetParams(p[offset : offset+size])
-	offset += size
+	t.mha.SetParams(t.params[offset : offset+sizeMHA])
+	offset += sizeMHA
 
-	size = len(t.norm1.Params())
-	t.norm1.SetParams(p[offset : offset+size])
-	offset += size
+	t.norm1.SetParams(t.params[offset : offset+sizeNorm1])
+	offset += sizeNorm1
 
-	size = len(t.norm2.Params())
-	t.norm2.SetParams(p[offset : offset+size])
-	offset += size
+	t.norm2.SetParams(t.params[offset : offset+sizeNorm2])
+	offset += sizeNorm2
 
-	size = len(t.ff1.Params())
-	t.ff1.SetParams(p[offset : offset+size])
-	offset += size
+	t.ff1.SetParams(t.params[offset : offset+sizeFF1])
+	offset += sizeFF1
 
-	size = len(t.ff2.Params())
-	t.ff2.SetParams(p[offset : offset+size])
+	t.ff2.SetParams(t.params[offset : offset+sizeFF2])
 }
 
 func (t *TransformerBlock) Gradients() []float32 {
-	res := t.mha.Gradients()
-	res = append(res, t.norm1.Gradients()...)
-	res = append(res, t.norm2.Gradients()...)
-	res = append(res, t.ff1.Gradients()...)
-	res = append(res, t.ff2.Gradients()...)
-	return res
+	return t.grads
 }
 
 func (t *TransformerBlock) SetGradients(g []float32) {
+	if len(g) == 0 {
+		return
+	}
+	if &t.grads[0] != &g[0] {
+		if len(g) == len(t.grads) {
+			t.grads = g
+			t.updateGradViews()
+		} else {
+			copy(t.grads, g)
+		}
+	}
+}
+
+func (t *TransformerBlock) updateGradViews() {
+	sizeMHA := len(t.mha.Gradients())
+	sizeNorm1 := len(t.norm1.Gradients())
+	sizeNorm2 := len(t.norm2.Gradients())
+	sizeFF1 := len(t.ff1.Gradients())
+	sizeFF2 := len(t.ff2.Gradients())
+
 	offset := 0
-	size := len(t.mha.Gradients())
-	t.mha.SetGradients(g[offset : offset+size])
-	offset += size
+	t.mha.SetGradients(t.grads[offset : offset+sizeMHA])
+	offset += sizeMHA
 
-	size = len(t.norm1.Gradients())
-	t.norm1.SetGradients(g[offset : offset+size])
-	offset += size
+	t.norm1.SetGradients(t.grads[offset : offset+sizeNorm1])
+	offset += sizeNorm1
 
-	size = len(t.norm2.Gradients())
-	t.norm2.SetGradients(g[offset : offset+size])
-	offset += size
+	t.norm2.SetGradients(t.grads[offset : offset+sizeNorm2])
+	offset += sizeNorm2
 
-	size = len(t.ff1.Gradients())
-	t.ff1.SetGradients(g[offset : offset+size])
-	offset += size
+	t.ff1.SetGradients(t.grads[offset : offset+sizeFF1])
+	offset += sizeFF1
 
-	size = len(t.ff2.Gradients())
-	t.ff2.SetGradients(g[offset : offset+size])
+	t.ff2.SetGradients(t.grads[offset : offset+sizeFF2])
 }
 func (t *TransformerBlock) SetDevice(d Device)         { t.mha.SetDevice(d) }
 func (t *TransformerBlock) InSize() int                { return t.seqLen * t.dim }

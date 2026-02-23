@@ -7,10 +7,21 @@ import (
 // RBF is a Radial Basis Function layer.
 // It uses Gaussian RBF activation: phi(x) = exp(-gamma * ||x - center||^2)
 type RBF struct {
-	centers  []float32 // Shape: [numCenters * inSize]
-	weights  []float32 // Shape: [outSize * numCenters]
-	biases   []float32 // Shape: [outSize]
-	gamma    float32   // Shape parameter for RBF kernel
+	// Parameters stored contiguously
+	params []float32 // Contiguous weights + biases + centers
+	grads  []float32 // Contiguous gradWeights + gradBiases + gradCenters
+
+	// Views into params
+	centers []float32 // Shape: [numCenters * inSize]
+	weights []float32 // Shape: [outSize * numCenters]
+	biases  []float32 // Shape: [outSize]
+
+	// Views into grads
+	gradWBuf []float32 // [outSize * numCenters]
+	gradBBuf []float32 // [outSize]
+	gradCBuf []float32 // [numCenters * inSize]
+
+	gamma float32 // Shape parameter for RBF kernel
 
 	inSize     int
 	numCenters int
@@ -22,9 +33,6 @@ type RBF struct {
 	phiBuf       []float32 // [numCenters] - RBF activations
 	outputBuf    []float32 // [outSize]
 
-	gradWBuf     []float32 // [outSize * numCenters]
-	gradBBuf     []float32 // [outSize]
-	gradCBuf     []float32 // [numCenters * inSize] - Optional: gradients for centers
 	gradInBuf    []float32 // [inSize]
 	dzBuf        []float32 // [outSize]
 
@@ -33,9 +41,15 @@ type RBF struct {
 
 // NewRBF creates a new RBF layer.
 func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
-	centers := make([]float32, numCenters*inSize)
-	weights := make([]float32, outSize*numCenters)
-	biases := make([]float32, outSize)
+	weightSize := outSize * numCenters
+	biasSize := outSize
+	centerSize := numCenters * inSize
+	totalParams := weightSize + biasSize + centerSize
+
+	params := make([]float32, totalParams)
+	weights := params[:weightSize]
+	biases := params[weightSize : weightSize+biasSize]
+	centers := params[weightSize+biasSize:]
 
 	// Simple initialization
 	rng := NewRNG(uint64(inSize*1000 + numCenters*100 + outSize + 7))
@@ -53,10 +67,17 @@ func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
 		biases[i] = rng.RandFloat()*0.2 - 0.1
 	}
 
+	grads := make([]float32, totalParams)
+
 	return &RBF{
+		params:     params,
+		grads:      grads,
 		centers:    centers,
 		weights:    weights,
 		biases:     biases,
+		gradWBuf:   grads[:weightSize],
+		gradBBuf:   grads[weightSize : weightSize+biasSize],
+		gradCBuf:   grads[weightSize+biasSize:],
 		gamma:      gamma,
 		inSize:     inSize,
 		numCenters: numCenters,
@@ -65,9 +86,6 @@ func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
 		distBuf:    make([]float32, numCenters),
 		phiBuf:     make([]float32, numCenters),
 		outputBuf:  make([]float32, outSize),
-		gradWBuf:   make([]float32, outSize*numCenters),
-		gradBBuf:   make([]float32, outSize),
-		gradCBuf:   make([]float32, numCenters*inSize),
 		gradInBuf:  make([]float32, inSize),
 		dzBuf:      make([]float32, outSize),
 		device:     &CPUDevice{},
@@ -152,38 +170,60 @@ func (r *RBF) AccumulateBackward(grad []float32) []float32 {
 	return r.Backward(grad)
 }
 
-// Params returns all parameters flattened: weights, biases, centers.
+// Params returns all parameters flattened.
 func (r *RBF) Params() []float32 {
-	total := len(r.weights) + len(r.biases) + len(r.centers)
-	p := make([]float32, total)
-	n := copy(p, r.weights)
-	n += copy(p[n:], r.biases)
-	copy(p[n:], r.centers)
-	return p
+	return r.params
 }
 
 // SetParams updates parameters from flattened slice.
 func (r *RBF) SetParams(p []float32) {
-	n := copy(r.weights, p)
-	n += copy(r.biases, p[n:])
-	copy(r.centers, p[n:])
+	if len(p) == 0 {
+		return
+	}
+	if &r.params[0] != &p[0] {
+		if len(p) == len(r.params) {
+			r.params = p
+			r.updateViews()
+		} else {
+			copy(r.params, p)
+		}
+	}
+}
+
+func (r *RBF) updateViews() {
+	weightSize := r.outSize * r.numCenters
+	biasSize := r.outSize
+	r.weights = r.params[:weightSize]
+	r.biases = r.params[weightSize : weightSize+biasSize]
+	r.centers = r.params[weightSize+biasSize:]
 }
 
 // Gradients returns all gradients flattened.
 func (r *RBF) Gradients() []float32 {
-	total := len(r.gradWBuf) + len(r.gradBBuf) + len(r.gradCBuf)
-	g := make([]float32, total)
-	n := copy(g, r.gradWBuf)
-	n += copy(g[n:], r.gradBBuf)
-	copy(g[n:], r.gradCBuf)
-	return g
+	return r.grads
 }
 
 // SetGradients sets gradients from flattened slice.
 func (r *RBF) SetGradients(g []float32) {
-	n := copy(r.gradWBuf, g)
-	n += copy(r.gradBBuf, g[n:])
-	copy(r.gradCBuf, g[n:])
+	if len(g) == 0 {
+		return
+	}
+	if &r.grads[0] != &g[0] {
+		if len(g) == len(r.grads) {
+			r.grads = g
+			r.updateGradViews()
+		} else {
+			copy(r.grads, g)
+		}
+	}
+}
+
+func (r *RBF) updateGradViews() {
+	weightSize := r.outSize * r.numCenters
+	biasSize := r.outSize
+	r.gradWBuf = r.grads[:weightSize]
+	r.gradBBuf = r.grads[weightSize : weightSize+biasSize]
+	r.gradCBuf = r.grads[weightSize+biasSize:]
 }
 
 // Reset is a no-op for RBF.

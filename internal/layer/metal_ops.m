@@ -204,7 +204,7 @@ void lstmStepFusedPersistent(void* ptr, void* bufPreAct, void* bufCPrev, void* b
         [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSizeMTL];
         [encoder endEncoding];
         [commandBuffer commit];
-        [commandBuffer waitUntilCompleted];
+        // [commandBuffer waitUntilCompleted]; // Removed for async performance
     }
 }
 

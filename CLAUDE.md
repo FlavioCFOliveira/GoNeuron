@@ -45,6 +45,20 @@ for o := 0; o < outSize; o++ {
 }
 ```
 
+## Specialized Agents
+
+Use these agents for specific tasks within the GoNeuron ecosystem:
+
+- **`neural-net-architect`**: Design new layers, activation functions, or core network improvements.
+- **`golang-performance-architect`**: Refactor/optimize Go code ensuring zero-allocation patterns and cache efficiency.
+- **`metal-performance-expert`**: Implement and optimize Metal kernels for Apple Silicon acceleration.
+- **`cuda-performance-optimizer`**: Implement and optimize CUDA kernels for NVIDIA GPU support.
+- **`ml-training-validator`**: Verify model convergence and ensure mathematical consistency across different backends (CPU, Metal, CUDA).
+- **`ml-dataset-fetcher`**: Source and download datasets (MNIST, CIFAR, etc.) into example directories.
+- **`ml-architecture-expert`**: Design and implement complex neural network examples (e.g., Transformers, MoE) in the `examples/` folder.
+- **`technical-researcher`**: Research mathematical derivations, SOTA architectures, or GPU programming manuals.
+- **`security-architect`**: Audit low-level code (memory management, GPU kernels) for stability and safety.
+
 ### Important Implementation Details
 1. **Dense layer**: Uses nested loops or Metal MatMul for performance. Accumulates gradients (`gradB += ...`) instead of overwriting.
 2. **BatchNorm2D**: Uses NCHW (Channel-major) layout for consistency with Conv2D.

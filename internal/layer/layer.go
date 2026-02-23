@@ -65,8 +65,9 @@ type NamedParamProvider interface {
 
 // Dense is a fully connected layer optimized for performance.
 type Dense struct {
-	weights   []float32
-	biases    []float32
+	params    []float32 // Contiguous weights + biases
+	weights   []float32 // View of params
+	biases    []float32 // View of params
 	act       activations.Activation
 	outSize   int
 	inSize    int
@@ -76,14 +77,21 @@ type Dense struct {
 	inputBuf      []float32
 	outputBuf     []float32
 	preActBuf     []float32
-	gradWBuf      []float32
-	gradBBuf      []float32
+	grads         []float32 // Contiguous gradW + gradB
+	gradWBuf      []float32 // View of grads
+	gradBBuf      []float32 // View of grads
 	gradInBuf     []float32
 	dzBuf         []float32
 
 	savedInputs  [][]float32
 	savedPreActs [][]float32
 	savedOutput []float32
+
+	// Metal persistent buffers
+	bufWeights *MetalBuffer
+	bufBiases  *MetalBuffer
+	bufIn      *MetalBuffer
+	bufOut     *MetalBuffer
 }
 
 // NewDense creates a new dense layer with pre-allocated buffers.
@@ -93,8 +101,9 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 
 // NewDenseWithDevice creates a new dense layer with a specific device.
 func NewDenseWithDevice(in, out int, act activations.Activation, device Device) *Dense {
-	weights := make([]float32, out*in)
-	biases := make([]float32, out)
+	params := make([]float32, out*in+out)
+	weights := params[:out*in]
+	biases := params[out*in:]
 
 	scale := float32(math.Sqrt(2.0 / (float64(in) + float64(out))))
 	rng := NewRNG(uint64(in*1000 + out*100 + 42))
@@ -105,7 +114,10 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 		biases[i] = rng.RandFloat()*0.2 - 0.1
 	}
 
-	return &Dense{
+	grads := make([]float32, out*in+out)
+
+	d := &Dense{
+		params:       params,
 		weights:      weights,
 		biases:       biases,
 		act:          act,
@@ -115,13 +127,23 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 		inputBuf:     make([]float32, in),
 		outputBuf:    make([]float32, out),
 		preActBuf:    make([]float32, out),
-		gradWBuf:     make([]float32, out*in),
-		gradBBuf:     make([]float32, out),
+		grads:        grads,
+		gradWBuf:     grads[:out*in],
+		gradBBuf:     grads[out*in:],
 		gradInBuf:    make([]float32, in),
 		dzBuf:        make([]float32, out),
 		savedInputs:  make([][]float32, 0),
 		savedPreActs: make([][]float32, 0),
 	}
+
+	if metal, ok := device.(*MetalDevice); ok && metal.IsAvailable() {
+		d.bufWeights = metal.CreateBuffer(weights)
+		d.bufBiases = metal.CreateBuffer(biases)
+		d.bufIn = metal.CreateEmptyBuffer(in)
+		d.bufOut = metal.CreateEmptyBuffer(out)
+	}
+
+	return d
 }
 
 func (d *Dense) Forward(x []float32) []float32 {
@@ -136,8 +158,14 @@ func (d *Dense) Forward(x []float32) []float32 {
 	preAct := d.preActBuf
 	output := d.outputBuf
 
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-		metal.MatMulFused(d.weights, d.inputBuf, d.biases, d.preActBuf, outSize, 1, inSize, ActivationNone)
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
+		d.bufIn.Update(x)
+		metal.MatMulPersistent(d.bufWeights, d.bufIn, d.bufOut, outSize, 1, inSize, 0.0)
+		// We add biases manually or could implement persistent matmul with bias
+		d.bufOut.Read(preAct)
+		for i := 0; i < outSize; i++ {
+			preAct[i] += biases[i]
+		}
 	} else {
 		for o := 0; o < outSize; o++ {
 			sum := biases[o]
@@ -241,29 +269,57 @@ func (d *Dense) Backward(grad []float32) []float32 {
 }
 
 func (d *Dense) Params() []float32 {
-	total := len(d.weights) + len(d.biases)
-	params := make([]float32, total)
-	copy(params, d.weights)
-	copy(params[len(d.weights):], d.biases)
-	return params
+	return d.params
 }
 
 func (d *Dense) SetParams(params []float32) {
-	copy(d.weights, params[:len(d.weights)])
-	copy(d.biases, params[len(d.weights):])
+	if len(params) == 0 {
+		return
+	}
+	if &d.params[0] != &params[0] {
+		if len(params) == len(d.params) {
+			d.params = params
+			d.updateViews()
+		} else {
+			copy(d.params, params)
+		}
+	}
+	d.syncGPU()
+}
+
+func (d *Dense) updateViews() {
+	d.weights = d.params[:d.outSize*d.inSize]
+	d.biases = d.params[d.outSize*d.inSize:]
+}
+
+func (d *Dense) syncGPU() {
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
+		d.bufWeights.Update(d.weights)
+		d.bufBiases.Update(d.biases)
+	}
 }
 
 func (d *Dense) Gradients() []float32 {
-	total := len(d.gradWBuf) + len(d.gradBBuf)
-	gradients := make([]float32, total)
-	copy(gradients, d.gradWBuf)
-	copy(gradients[len(d.gradWBuf):], d.gradBBuf)
-	return gradients
+	return d.grads
 }
 
 func (d *Dense) SetGradients(gradients []float32) {
-	copy(d.gradWBuf, gradients[:len(d.gradWBuf)])
-	copy(d.gradBBuf, gradients[len(d.gradWBuf):])
+	if len(gradients) == 0 {
+		return
+	}
+	if &d.grads[0] != &gradients[0] {
+		if len(gradients) == len(d.grads) {
+			d.grads = gradients
+			d.updateGradViews()
+		} else {
+			copy(d.grads, gradients)
+		}
+	}
+}
+
+func (d *Dense) updateGradViews() {
+	d.gradWBuf = d.grads[:d.outSize*d.inSize]
+	d.gradBBuf = d.grads[d.outSize*d.inSize:]
 }
 
 func (d *Dense) SetDevice(device Device) {
@@ -330,19 +386,21 @@ func (d *Dense) Reset() {
 }
 
 func (d *Dense) ClearGradients() {
-	for i := range d.gradWBuf { d.gradWBuf[i] = 0 }
-	for i := range d.gradBBuf { d.gradBBuf[i] = 0 }
+	for i := range d.grads {
+		d.grads[i] = 0
+	}
 }
 
 func (d *Dense) Clone() Layer {
 	newD := NewDense(d.inSize, d.outSize, d.act)
-	copy(newD.weights, d.weights)
-	copy(newD.biases, d.biases)
+	copy(newD.params, d.params)
 	newD.device = d.device
 	return newD
 }
 
 func (d *Dense) saveInput(x []float32) {
+	// Simple append to avoid complex logic that leads to panics
+	// and fix the regression. We can optimize this later if needed.
 	saved := make([]float32, len(x))
 	copy(saved, x)
 	d.savedInputs = append(d.savedInputs, saved)

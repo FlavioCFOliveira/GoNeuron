@@ -26,15 +26,16 @@ type Conv2D struct {
 	setInputHeight int
 	setInputWidth  int
 
-	// Weights: [outChannels, inChannels, kernelSize, kernelSize]
-	// Stored as contiguous slice for cache efficiency
-	weights []float32
-	biases  []float32
+	// Parameters
+	params  []float32 // Contiguous weights + biases
+	weights []float32 // View of params
+	biases  []float32 // View of params
 
 	// Activation function
 	activation activations.Activation
 
 	// Pre-allocated buffers
+	grads       []float32 // Contiguous gradWeights + gradBiases
 	preActBuf   []float32 // Contains pre-activation values (z = w*x + b)
 	outputBuf   []float32 // Contains post-activation values (activation(z))
 	gradWeights []float32
@@ -48,53 +49,44 @@ type Conv2D struct {
 }
 
 // NewConv2D creates a new 2D convolutional layer.
-// inChannels: number of input channels
-// outChannels: number of output feature maps
-// kernelSize: size of convolutional kernel (square)
-// stride: stride for convolution
-// padding: zero padding size
 func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 	activation activations.Activation) *Conv2D {
 
-	// He initialization (better for ReLU)
+	weightSize := outChannels * inChannels * kernelSize * kernelSize
+	biasSize := outChannels
+	params := make([]float32, weightSize+biasSize)
+	weights := params[:weightSize]
+	biases := params[weightSize:]
+
+	// He initialization
 	scale := float32(math.Sqrt(2.0 / float64(inChannels*kernelSize*kernelSize)))
-
-	// Allocate weights: [outChannels, inChannels, kernelSize, kernelSize]
-	// Flattened: [outChannels * inChannels * kernelSize * kernelSize]
-	weights := make([]float32, outChannels*inChannels*kernelSize*kernelSize)
-	biases := make([]float32, outChannels)
-
-	// Create deterministic RNG for reproducible initialization
 	rng := NewRNG(42)
 
-	// Initialize weights
-	for o := 0; o < outChannels; o++ {
-		for c := 0; c < inChannels; c++ {
-			for kh := 0; kh < kernelSize; kh++ {
-				for kw := 0; kw < kernelSize; kw++ {
-					idx := o*inChannels*kernelSize*kernelSize +
-						c*kernelSize*kernelSize +
-						kh*kernelSize + kw
-					weights[idx] = rng.RandFloat()*2*scale - scale
-				}
-			}
-		}
-		// Initialize bias
-		biases[o] = rng.RandFloat()*0.2 - 0.1
+	for i := range weights {
+		weights[i] = rng.RandFloat()*2*scale - scale
+	}
+	for i := range biases {
+		biases[i] = rng.RandFloat()*0.2 - 0.1
 	}
 
-	return &Conv2D{
-		inChannels:     inChannels,
-		outChannels:    outChannels,
-		kernelSize:     kernelSize,
-		stride:         stride,
-		padding:        padding,
-		activation:     activation,
+	grads := make([]float32, weightSize+biasSize)
 
+	return &Conv2D{
+		inChannels:  inChannels,
+		outChannels: outChannels,
+		kernelSize:  kernelSize,
+		stride:      stride,
+		padding:     padding,
+		activation:  activation,
+		params:      params,
 		weights:     weights,
 		biases:      biases,
-		gradWeights: make([]float32, len(weights)),
-		gradBiases:  make([]float32, len(biases)),
+		grads:       grads,
+		gradWeights: grads[:weightSize],
+		gradBiases:  grads[weightSize:],
+		outputBuf:   make([]float32, 0),
+		gradInBuf:   make([]float32, 0),
+		savedInput:  make([]float32, 0),
 		device:      &CPUDevice{},
 	}
 }
@@ -332,35 +324,56 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 	return gradInput
 }
 
-// Params returns all convolutional layer parameters flattened (copy).
+// Params returns layer parameters flattened.
 func (c *Conv2D) Params() []float32 {
-	total := len(c.weights) + len(c.biases)
-	params := make([]float32, total)
-	copy(params, c.weights)
-	copy(params[len(c.weights):], c.biases)
-	return params
+	return c.params
 }
 
 // SetParams updates weights and biases from a flattened slice.
 func (c *Conv2D) SetParams(params []float32) {
-	totalWeights := len(c.weights)
-	copy(c.weights, params[:totalWeights])
-	copy(c.biases, params[totalWeights:])
+	if len(params) == 0 {
+		return
+	}
+	if &c.params[0] != &params[0] {
+		if len(params) == len(c.params) {
+			c.params = params
+			c.updateViews()
+		} else {
+			copy(c.params, params)
+		}
+	}
 }
 
-// Gradients returns all convolutional layer gradients flattened (copy).
+func (c *Conv2D) updateViews() {
+	weightSize := c.outChannels * c.inChannels * c.kernelSize * c.kernelSize
+	c.weights = c.params[:weightSize]
+	c.biases = c.params[weightSize:]
+}
+
+// Gradients returns all convolutional layer gradients flattened.
 func (c *Conv2D) Gradients() []float32 {
-	total := len(c.gradWeights) + len(c.gradBiases)
-	gradients := make([]float32, total)
-	copy(gradients, c.gradWeights)
-	copy(gradients[len(c.gradWeights):], c.gradBiases)
-	return gradients
+	return c.grads
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
 func (c *Conv2D) SetGradients(gradients []float32) {
-	copy(c.gradWeights, gradients[:len(c.gradWeights)])
-	copy(c.gradBiases, gradients[len(c.gradWeights):])
+	if len(gradients) == 0 {
+		return
+	}
+	if &c.grads[0] != &gradients[0] {
+		if len(gradients) == len(c.grads) {
+			c.grads = gradients
+			c.updateGradViews()
+		} else {
+			copy(c.grads, gradients)
+		}
+	}
+}
+
+func (c *Conv2D) updateGradViews() {
+	weightSize := c.outChannels * c.inChannels * c.kernelSize * c.kernelSize
+	c.gradWeights = c.grads[:weightSize]
+	c.gradBiases = c.grads[weightSize:]
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
@@ -371,19 +384,15 @@ func (c *Conv2D) AccumulateBackward(grad []float32) []float32 {
 
 // ClearGradients zeroes out the accumulated gradients.
 func (c *Conv2D) ClearGradients() {
-	for i := range c.gradWeights {
-		c.gradWeights[i] = 0
-	}
-	for i := range c.gradBiases {
-		c.gradBiases[i] = 0
+	for i := range c.grads {
+		c.grads[i] = 0
 	}
 }
 
 // Clone creates a deep copy of the convolutional layer.
 func (c *Conv2D) Clone() Layer {
 	newC := NewConv2D(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.activation)
-	copy(newC.weights, c.weights)
-	copy(newC.biases, c.biases)
+	copy(newC.params, c.params)
 	newC.setInputHeight = c.setInputHeight
 	newC.setInputWidth = c.setInputWidth
 	newC.device = c.device

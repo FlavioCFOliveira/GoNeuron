@@ -21,9 +21,10 @@ type LSTM struct {
 	// Layout: [input_gate, forget_gate, cell_gate, output_gate]
 	// Each gate has [input_weights, recurrent_weights]
 	// Total: 8 weight blocks
-	inputWeights      []float32 // inSize * outSize * 4
-	recurrentWeights  []float32 // outSize * outSize * 4
-	biases            []float32 // outSize * 4
+	params           []float32 // Contiguous weights + biases
+	inputWeights     []float32 // inSize * outSize * 4
+	recurrentWeights []float32 // outSize * outSize * 4
+	biases           []float32 // outSize * 4
 
 	// Activation functions for each gate
 	inputAct  activations.Activation
@@ -32,16 +33,17 @@ type LSTM struct {
 	outputAct activations.Activation
 
 	// Reusable buffers - pre-allocated to avoid garbage collection
-	inputBuf      []float32 // input vector
-	outputBuf     []float32 // output vector (hidden state)
-	preActBuf     []float32 // pre-activations for all 4 gates (outSize * 4)
-	cellBuf       []float32 // current cell state
-	hiddenBuf     []float32 // current hidden state
+	inputBuf  []float32 // input vector
+	outputBuf []float32 // output vector (hidden state)
+	preActBuf []float32 // pre-activations for all 4 gates (outSize * 4)
+	cellBuf   []float32 // current cell state
+	hiddenBuf []float32 // current hidden state
 
 	// Gradient buffers
-	gradInputWeights    []float32
+	grads                []float32 // Contiguous grads
+	gradInputWeights     []float32
 	gradRecurrentWeights []float32
-	gradBiases          []float32
+	gradBiases           []float32
 
 	// Delta buffers for backprop (one per gate)
 	dInputBuf  []float32
@@ -99,22 +101,25 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 	// Recurrent weights connect outSize hidden states to 4*outSize gate outputs
 	recurrentScale := float32(math.Sqrt(2.0 / float64(outSize + 4*outSize)))
 
-	// Allocate weight matrices
-	inputWeights := make([]float32, outSize*4*inSize)
-	recurrentWeights := make([]float32, outSize*4*outSize)
-	biases := make([]float32, outSize*4)
+	// Allocate contiguous parameter buffer
+	weightInSize := outSize * 4 * inSize
+	weightRecSize := outSize * 4 * outSize
+	biasSize := outSize * 4
+	totalParams := weightInSize + weightRecSize + biasSize
+	params := make([]float32, totalParams)
+
+	inputWeights := params[:weightInSize]
+	recurrentWeights := params[weightInSize : weightInSize+weightRecSize]
+	biases := params[weightInSize+weightRecSize:]
 
 	// Create deterministic RNG with layer-specific seed for different initial weights
 	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 142))
 
-	// Initialize weights with simple loop for performance
-	// Use separate scales for input and recurrent weights
+	// Initialize weights
 	for i := 0; i < outSize*4; i++ {
-		// Initialize biases - forget gate gets bias = 1 (prevent forgetting)
 		if i >= outSize && i < outSize*2 {
 			biases[i] = 1.0
 		}
-
 		for j := 0; j < inSize; j++ {
 			inputWeights[i*inSize+j] = rng.RandFloat()*2*inputScale - inputScale
 		}
@@ -123,14 +128,22 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		}
 	}
 
+	grads := make([]float32, totalParams)
+
 	l := &LSTM{
 		inSize:  inSize,
 		outSize: outSize,
 		device:  device,
 
-		inputWeights:   inputWeights,
+		params:           params,
+		inputWeights:     inputWeights,
 		recurrentWeights: recurrentWeights,
-		biases:         biases,
+		biases:           biases,
+
+		grads:                grads,
+		gradInputWeights:     grads[:weightInSize],
+		gradRecurrentWeights: grads[weightInSize : weightInSize+weightRecSize],
+		gradBiases:           grads[weightInSize+weightRecSize:],
 
 		inputAct:  activations.Sigmoid{},
 		forgetAct: activations.Sigmoid{},
@@ -138,15 +151,11 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		outputAct: activations.Sigmoid{},
 
 		// Pre-allocate all working buffers
-		inputBuf:      make([]float32, inSize),
-		outputBuf:     make([]float32, outSize),
-		preActBuf:     make([]float32, outSize*4),
-		cellBuf:       make([]float32, outSize),
-		hiddenBuf:     make([]float32, outSize),
-
-		gradInputWeights:    make([]float32, outSize*4*inSize),
-		gradRecurrentWeights: make([]float32, outSize*4*outSize),
-		gradBiases:          make([]float32, outSize*4),
+		inputBuf:  make([]float32, inSize),
+		outputBuf: make([]float32, outSize),
+		preActBuf: make([]float32, outSize*4),
+		cellBuf:   make([]float32, outSize),
+		hiddenBuf: make([]float32, outSize),
 
 		dInputBuf:  make([]float32, outSize),
 		dForgetBuf: make([]float32, outSize),
@@ -549,41 +558,69 @@ func (l *LSTM) clipGradients() {
 	}
 }
 
-// Params returns all LSTM parameters flattened (copy).
+// Params returns all LSTM parameters flattened.
 func (l *LSTM) Params() []float32 {
-	total := len(l.inputWeights) + len(l.recurrentWeights) + len(l.biases)
-	params := make([]float32, total)
-	copy(params, l.inputWeights)
-	copy(params[len(l.inputWeights):], l.recurrentWeights)
-	copy(params[len(l.inputWeights)+len(l.recurrentWeights):], l.biases)
-	return params
+	return l.params
 }
 
 // SetParams updates weights and biases from a flattened slice.
 func (l *LSTM) SetParams(params []float32) {
-	totalInput := len(l.inputWeights)
-	totalRecurrent := len(l.recurrentWeights)
-
-	copy(l.inputWeights, params[:totalInput])
-	copy(l.recurrentWeights, params[totalInput:totalInput+totalRecurrent])
-	copy(l.biases, params[totalInput+totalRecurrent:])
+	if len(params) == 0 {
+		return
+	}
+	if &l.params[0] != &params[0] {
+		if len(params) == len(l.params) {
+			l.params = params
+			l.updateViews()
+		} else {
+			copy(l.params, params)
+		}
+	}
+	l.syncGPU()
 }
 
-// Gradients returns all LSTM gradients flattened (copy).
+func (l *LSTM) updateViews() {
+	weightInSize := l.outSize * 4 * l.inSize
+	weightRecSize := l.outSize * 4 * l.outSize
+	l.inputWeights = l.params[:weightInSize]
+	l.recurrentWeights = l.params[weightInSize : weightInSize+weightRecSize]
+	l.biases = l.params[weightInSize+weightRecSize:]
+}
+
+func (l *LSTM) syncGPU() {
+	if metal, ok := l.device.(*MetalDevice); ok && metal.IsAvailable() && l.bufWeightsIn != nil {
+		l.bufWeightsIn.Update(l.inputWeights)
+		l.bufWeightsRec.Update(l.recurrentWeights)
+		l.bufBiases.Update(l.biases)
+	}
+}
+
+// Gradients returns all LSTM gradients flattened.
 func (l *LSTM) Gradients() []float32 {
-	total := len(l.gradInputWeights) + len(l.gradRecurrentWeights) + len(l.gradBiases)
-	gradients := make([]float32, total)
-	copy(gradients, l.gradInputWeights)
-	copy(gradients[len(l.gradInputWeights):], l.gradRecurrentWeights)
-	copy(gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):], l.gradBiases)
-	return gradients
+	return l.grads
 }
 
 // SetGradients sets gradients from a flattened slice (in-place).
 func (l *LSTM) SetGradients(gradients []float32) {
-	copy(l.gradInputWeights, gradients[:len(l.gradInputWeights)])
-	copy(l.gradRecurrentWeights, gradients[len(l.gradInputWeights):len(l.gradInputWeights)+len(l.gradRecurrentWeights)])
-	copy(l.gradBiases, gradients[len(l.gradInputWeights)+len(l.gradRecurrentWeights):])
+	if len(gradients) == 0 {
+		return
+	}
+	if &l.grads[0] != &gradients[0] {
+		if len(gradients) == len(l.grads) {
+			l.grads = gradients
+			l.updateGradViews()
+		} else {
+			copy(l.grads, gradients)
+		}
+	}
+}
+
+func (l *LSTM) updateGradViews() {
+	weightInSize := l.outSize * 4 * l.inSize
+	weightRecSize := l.outSize * 4 * l.outSize
+	l.gradInputWeights = l.grads[:weightInSize]
+	l.gradRecurrentWeights = l.grads[weightInSize : weightInSize+weightRecSize]
+	l.gradBiases = l.grads[weightInSize+weightRecSize:]
 }
 
 // SetDevice sets the computation device for the LSTM layer.

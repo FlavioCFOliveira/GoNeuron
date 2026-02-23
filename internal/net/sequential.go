@@ -25,15 +25,18 @@ func NewSequential(layers ...layer.Layer) *Sequential {
 func (s *Sequential) Compile(optimizer opt.Optimizer, lossFn loss.Loss) {
 	s.opt = optimizer
 	s.loss = lossFn
+	s.initBuffers()
 }
 
 // Predict performs a forward pass and returns the output.
 func (s *Sequential) Predict(x []float32) []float32 {
+	s.SetTraining(false)
 	return s.Forward(x)
 }
 
 // PredictBatch performs forward pass on a batch of samples.
 func (s *Sequential) PredictBatch(x [][]float32) [][]float32 {
+	s.SetTraining(false)
 	return s.ForwardBatch(x)
 }
 
@@ -44,6 +47,7 @@ func (s *Sequential) SetTraining(training bool) {
 
 // Evaluate calculates the average loss on a dataset.
 func (s *Sequential) Evaluate(x, y [][]float32) float32 {
+	s.SetTraining(false)
 	totalLoss := float32(0)
 	for i := range x {
 		pred := s.Forward(x[i])

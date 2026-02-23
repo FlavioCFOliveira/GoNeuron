@@ -14,60 +14,78 @@ type BatchNorm2D struct {
 	momentum    float32
 	affine      bool
 
+	// Training mode
+	training bool
+
 	// Learnable parameters (when affine is enabled)
-	gamma []float32
-	beta  []float32
+	params []float32 // Contiguous gamma + beta
+	gamma  []float32 // View of params
+	beta   []float32 // View of params
 
 	// Running statistics (for inference)
 	runningMean []float32
 	runningVar  []float32
 
-	// Pre-allocated buffers
-	outputBuf         []float32
-	gradInBuf         []float32
-	gradGammaBuf      []float32
-	gradBetaBuf       []float32
-	savedInput        []float32
-	savedMean         []float32
-	savedVar          []float32
-	savedStd          []float32
-	numelPerChannel   int
+	// Gradient buffers
+	grads        []float32 // Contiguous gradGamma + gradBeta
+	gradGammaBuf []float32 // View of grads
+	gradBetaBuf  []float32 // View of grads
+	gradInBuf    []float32
+	outputBuf    []float32
+	savedInput   []float32
+	savedMean    []float32
+	savedVar     []float32
+	savedStd     []float32
 
-	device Device
+	numelPerChannel int
+	device          Device
 }
 
 // NewBatchNorm2D creates a new 2D batch normalization layer.
-// numFeatures: number of feature channels
-// eps: small value for numerical stability (default 1e-5)
-// momentum: for running average of mean/var (default 0.1)
-// affine: whether to learn scale (gamma) and shift (beta) parameters
 func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool) *BatchNorm2D {
-	l := &BatchNorm2D{
-		numFeatures: numFeatures,
-		eps:         eps,
-		momentum:    momentum,
-		affine:      affine,
-		outputBuf:   make([]float32, 0),
-		gradInBuf:   make([]float32, 0),
-		runningMean: make([]float32, numFeatures),
-		runningVar:  make([]float32, numFeatures),
-		savedMean:   make([]float32, numFeatures),
-		savedVar:    make([]float32, numFeatures),
-		savedStd:    make([]float32, numFeatures),
-		device:      &CPUDevice{},
-	}
+	params := make([]float32, 0)
+	var gamma, beta []float32
+	grads := make([]float32, 0)
+	var gradGamma, gradBeta []float32
 
 	if affine {
-		l.gamma = make([]float32, numFeatures)
-		l.beta = make([]float32, numFeatures)
-		l.gradGammaBuf = make([]float32, numFeatures)
-		l.gradBetaBuf = make([]float32, numFeatures)
-
-		// Initialize gamma to 1 and beta to 0
+		params = make([]float32, numFeatures*2)
+		gamma = params[:numFeatures]
+		beta = params[numFeatures:]
 		for i := 0; i < numFeatures; i++ {
-			l.gamma[i] = 1.0
-			l.beta[i] = 0.0
+			gamma[i] = 1.0
+			beta[i] = 0.0
 		}
+		grads = make([]float32, numFeatures*2)
+		gradGamma = grads[:numFeatures]
+		gradBeta = grads[numFeatures:]
+	}
+
+	l := &BatchNorm2D{
+		numFeatures:  numFeatures,
+		eps:          eps,
+		momentum:     momentum,
+		affine:       affine,
+		training:     true,
+		params:       params,
+		gamma:        gamma,
+		beta:         beta,
+		runningMean:  make([]float32, numFeatures),
+		runningVar:   make([]float32, numFeatures),
+		grads:        grads,
+		gradGammaBuf: gradGamma,
+		gradBetaBuf:  gradBeta,
+		outputBuf:    make([]float32, 0),
+		gradInBuf:    make([]float32, 0),
+		savedMean:    make([]float32, numFeatures),
+		savedVar:     make([]float32, numFeatures),
+		savedStd:     make([]float32, numFeatures),
+		device:       &CPUDevice{},
+	}
+
+	// Initialize running variance to 1
+	for i := range l.runningVar {
+		l.runningVar[i] = 1.0
 	}
 
 	return l
@@ -110,38 +128,57 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 	numel := b.numelPerChannel
 	numFeatures := b.numFeatures
 
-	for f := 0; f < numFeatures; f++ {
-		// Compute batch mean
-		sum := float32(0.0)
-		for s := 0; s < numel; s++ {
-			idx := f*numel + s
-			sum += x[idx]
-		}
-		mean := sum / float32(numel)
-		b.savedMean[f] = mean
-		b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
+	if b.training {
+		for f := 0; f < numFeatures; f++ {
+			// Compute batch mean
+			sum := float32(0.0)
+			for s := 0; s < numel; s++ {
+				idx := f*numel + s
+				sum += x[idx]
+			}
+			mean := sum / float32(numel)
+			b.savedMean[f] = mean
+			b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
 
-		// Compute batch variance
-		sumSquares := float32(0.0)
-		for s := 0; s < numel; s++ {
-			idx := f*numel + s
-			diff := x[idx] - mean
-			sumSquares += diff * diff
-		}
-		variance := sumSquares / float32(numel)
-		std := float32(math.Sqrt(float64(variance + b.eps)))
-		b.savedVar[f] = variance
-		b.savedStd[f] = std
-		b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
+			// Compute batch variance
+			sumSquares := float32(0.0)
+			for s := 0; s < numel; s++ {
+				idx := f*numel + s
+				diff := x[idx] - mean
+				sumSquares += diff * diff
+			}
+			variance := sumSquares / float32(numel)
+			std := float32(math.Sqrt(float64(variance + b.eps)))
+			b.savedVar[f] = variance
+			b.savedStd[f] = std
+			b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
 
-		// Normalize and apply affine transformation
-		for s := 0; s < numel; s++ {
-			idx := f*numel + s
-			normalized := (x[idx] - mean) / std
-			if b.affine {
-				output[idx] = b.gamma[f]*normalized + b.beta[f]
-			} else {
-				output[idx] = normalized
+			// Normalize and apply affine transformation
+			for s := 0; s < numel; s++ {
+				idx := f*numel + s
+				normalized := (x[idx] - mean) / std
+				if b.affine {
+					output[idx] = b.gamma[f]*normalized + b.beta[f]
+				} else {
+					output[idx] = normalized
+				}
+			}
+		}
+	} else {
+		// Inference mode: use running statistics
+		for f := 0; f < numFeatures; f++ {
+			mean := b.runningMean[f]
+			variance := b.runningVar[f]
+			std := float32(math.Sqrt(float64(variance + b.eps)))
+
+			for s := 0; s < numel; s++ {
+				idx := f*numel + s
+				normalized := (x[idx] - mean) / std
+				if b.affine {
+					output[idx] = b.gamma[f]*normalized + b.beta[f]
+				} else {
+					output[idx] = normalized
+				}
 			}
 		}
 	}
@@ -151,6 +188,28 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 
 // Backward performs backpropagation through the batch normalization layer.
 func (b *BatchNorm2D) Backward(grad []float32) []float32 {
+	if !b.training {
+		// Gradient in inference mode: simple scaling
+		numel := b.numelPerChannel
+		numFeatures := b.numFeatures
+		if len(b.gradInBuf) != len(grad) {
+			b.gradInBuf = make([]float32, len(grad))
+		}
+		for f := 0; f < numFeatures; f++ {
+			variance := b.runningVar[f]
+			std := float32(math.Sqrt(float64(variance + b.eps)))
+			for s := 0; s < numel; s++ {
+				idx := f*numel + s
+				g := grad[idx]
+				if b.affine {
+					g *= b.gamma[f]
+				}
+				b.gradInBuf[idx] = g / std
+			}
+		}
+		return b.gradInBuf
+	}
+
 	numel := b.numelPerChannel
 	numFeatures := b.numFeatures
 
@@ -201,52 +260,54 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 	return b.gradInBuf
 }
 
-// Params returns layer parameters (gamma and beta when affine is enabled).
 func (b *BatchNorm2D) Params() []float32 {
-	if !b.affine {
-		return make([]float32, 0)
-	}
-
-	total := len(b.gamma) + len(b.beta)
-	params := make([]float32, total)
-	copy(params, b.gamma)
-	copy(params[len(b.gamma):], b.beta)
-	return params
+	return b.params
 }
 
-// SetParams updates gamma and beta from a flattened slice.
 func (b *BatchNorm2D) SetParams(params []float32) {
-	if !b.affine {
+	if len(params) == 0 {
 		return
 	}
-
-	totalGamma := len(b.gamma)
-	copy(b.gamma, params[:totalGamma])
-	copy(b.beta, params[totalGamma:])
+	if &b.params[0] != &params[0] {
+		if len(params) == len(b.params) {
+			b.params = params
+			b.updateViews()
+		} else {
+			copy(b.params, params)
+		}
+	}
 }
 
-// Gradients returns layer gradients (gamma and beta gradients when affine is enabled).
+func (b *BatchNorm2D) updateViews() {
+	if b.affine {
+		b.gamma = b.params[:b.numFeatures]
+		b.beta = b.params[b.numFeatures:]
+	}
+}
+
 func (b *BatchNorm2D) Gradients() []float32 {
-	if !b.affine {
-		return make([]float32, 0)
-	}
-
-	total := len(b.gradGammaBuf) + len(b.gradBetaBuf)
-	gradients := make([]float32, total)
-	copy(gradients, b.gradGammaBuf)
-	copy(gradients[len(b.gradGammaBuf):], b.gradBetaBuf)
-	return gradients
+	return b.grads
 }
 
-// SetGradients sets gradients from a flattened slice.
 func (b *BatchNorm2D) SetGradients(gradients []float32) {
-	if !b.affine {
+	if len(gradients) == 0 {
 		return
 	}
+	if &b.grads[0] != &gradients[0] {
+		if len(gradients) == len(b.grads) {
+			b.grads = gradients
+			b.updateGradViews()
+		} else {
+			copy(b.grads, gradients)
+		}
+	}
+}
 
-	totalGamma := len(b.gradGammaBuf)
-	copy(b.gradGammaBuf, gradients[:totalGamma])
-	copy(b.gradBetaBuf, gradients[totalGamma:])
+func (b *BatchNorm2D) updateGradViews() {
+	if b.affine {
+		b.gradGammaBuf = b.grads[:b.numFeatures]
+		b.gradBetaBuf = b.grads[b.numFeatures:]
+	}
 }
 
 // InSize returns the input size.
@@ -298,22 +359,17 @@ func (b *BatchNorm2D) Reset() {
 
 // ClearGradients zeroes out the accumulated gradients.
 func (b *BatchNorm2D) ClearGradients() {
-	if b.affine {
-		for i := range b.gradGammaBuf {
-			b.gradGammaBuf[i] = 0
-		}
-		for i := range b.gradBetaBuf {
-			b.gradBetaBuf[i] = 0
-		}
+	for i := range b.grads {
+		b.grads[i] = 0
 	}
 }
 
 // Clone creates a deep copy of the batch normalization layer.
 func (b *BatchNorm2D) Clone() Layer {
 	newB := NewBatchNorm2D(b.numFeatures, b.eps, b.momentum, b.affine)
+	newB.training = b.training
 	if b.affine {
-		copy(newB.gamma, b.gamma)
-		copy(newB.beta, b.beta)
+		copy(newB.params, b.params)
 	}
 	copy(newB.runningMean, b.runningMean)
 	copy(newB.runningVar, b.runningVar)
@@ -361,4 +417,14 @@ func (b *BatchNorm2D) GetEps() float32 {
 // GetMomentum returns the momentum value.
 func (b *BatchNorm2D) GetMomentum() float32 {
 	return b.momentum
+}
+
+// SetTraining sets whether the layer should be in training or inference mode.
+func (b *BatchNorm2D) SetTraining(training bool) {
+	b.training = training
+}
+
+// IsTraining returns whether the layer is in training mode.
+func (b *BatchNorm2D) IsTraining() bool {
+	return b.training
 }
