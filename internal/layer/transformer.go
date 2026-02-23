@@ -472,3 +472,48 @@ func (g *GlobalAveragePooling1D) Reset()                   {}
 func (g *GlobalAveragePooling1D) ClearGradients()          {}
 func (g *GlobalAveragePooling1D) Clone() Layer              { return &GlobalAveragePooling1D{g.seqLen, g.dim} }
 func (g *GlobalAveragePooling1D) AccumulateBackward(grad []float32) []float32 { return g.Backward(grad) }
+
+// CLSPooling extracts the first vector (CLS token) from a sequence.
+type CLSPooling struct {
+	seqLen int
+	dim    int
+
+	outputBuf []float32
+	gradBuf   []float32
+}
+
+func NewCLSPooling(seqLen, dim int) *CLSPooling {
+	return &CLSPooling{
+		seqLen:    seqLen,
+		dim:       dim,
+		outputBuf: make([]float32, dim),
+		gradBuf:   make([]float32, seqLen*dim),
+	}
+}
+
+func (c *CLSPooling) Forward(x []float32) []float32 {
+	// x is [seqLen * dim]
+	copy(c.outputBuf, x[0:c.dim])
+	return c.outputBuf
+}
+
+func (c *CLSPooling) Backward(grad []float32) []float32 {
+	// grad is [dim]
+	for i := range c.gradBuf {
+		c.gradBuf[i] = 0
+	}
+	copy(c.gradBuf[0:c.dim], grad)
+	return c.gradBuf
+}
+
+func (c *CLSPooling) Params() []float32         { return nil }
+func (c *CLSPooling) SetParams(p []float32)     {}
+func (c *CLSPooling) Gradients() []float32      { return nil }
+func (c *CLSPooling) SetGradients(g []float32) {}
+func (c *CLSPooling) SetDevice(d Device)        {}
+func (c *CLSPooling) InSize() int               { return c.seqLen * c.dim }
+func (c *CLSPooling) OutSize() int              { return c.dim }
+func (c *CLSPooling) Reset()                   {}
+func (c *CLSPooling) ClearGradients()          {}
+func (c *CLSPooling) Clone() Layer              { return &CLSPooling{c.seqLen, c.dim, make([]float32, c.dim), make([]float32, c.seqLen*c.dim)} }
+func (c *CLSPooling) AccumulateBackward(grad []float32) []float32 { return c.Backward(grad) }
