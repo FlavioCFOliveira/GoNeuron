@@ -58,6 +58,13 @@ type Layer interface {
 	LightweightClone(params []float32, grads []float32) Layer
 }
 
+// DeferredLayer is a layer that can defer its initialization until the input size is known.
+type DeferredLayer interface {
+	Layer
+	// Build initializes the layer with the given input size.
+	Build(inSize int)
+}
+
 // ArenaLayer is an optional interface for layers that support zero-allocation activation saving.
 type ArenaLayer interface {
 	Layer
@@ -117,49 +124,56 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 
 // NewDenseWithDevice creates a new dense layer with a specific device.
 func NewDenseWithDevice(in, out int, act activations.Activation, device Device) *Dense {
-	params := make([]float32, out*in+out)
-	weights := params[:out*in]
-	biases := params[out*in:]
-
-	scale := float32(math.Sqrt(2.0 / (float64(in) + float64(out))))
-	rng := NewRNG(uint64(in*1000 + out*100 + 42))
-	for i := range weights {
-		weights[i] = rng.RandFloat()*2*scale - scale
-	}
-	for i := range biases {
-		biases[i] = rng.RandFloat()*0.2 - 0.1
-	}
-
-	grads := make([]float32, out*in+out)
-
 	d := &Dense{
-		params:       params,
-		weights:      weights,
-		biases:       biases,
-		act:          act,
-		outSize:      out,
-		inSize:       in,
-		device:       device,
-		inputBuf:     make([]float32, in),
-		outputBuf:    make([]float32, out),
-		preActBuf:    make([]float32, out),
-		grads:        grads,
-		gradWBuf:     grads[:out*in],
-		gradBBuf:     grads[out*in:],
-		gradInBuf:    make([]float32, in),
-		dzBuf:              make([]float32, out),
+		act:                act,
+		outSize:            out,
+		inSize:             in,
+		device:             device,
 		savedInputOffsets:  make([]int, 0, 1),
 		savedPreActOffsets: make([]int, 0, 1),
 	}
 
-	if metal, ok := device.(*MetalDevice); ok && metal.IsAvailable() {
-		d.bufWeights = metal.CreateBuffer(weights)
-		d.bufBiases = metal.CreateBuffer(biases)
-		d.bufIn = metal.CreateEmptyBuffer(in)
-		d.bufOut = metal.CreateEmptyBuffer(out)
+	if in != -1 {
+		d.Build(in)
 	}
 
 	return d
+}
+
+// Build initializes the layer with the given input size.
+func (d *Dense) Build(in int) {
+	d.inSize = in
+	out := d.outSize
+
+	d.params = make([]float32, out*in+out)
+	d.weights = d.params[:out*in]
+	d.biases = d.params[out*in:]
+
+	scale := float32(math.Sqrt(2.0 / (float64(in) + float64(out))))
+	rng := NewRNG(uint64(in*1000 + out*100 + 42))
+	for i := range d.weights {
+		d.weights[i] = rng.RandFloat()*2*scale - scale
+	}
+	for i := range d.biases {
+		d.biases[i] = rng.RandFloat()*0.2 - 0.1
+	}
+
+	d.grads = make([]float32, out*in+out)
+	d.gradWBuf = d.grads[:out*in]
+	d.gradBBuf = d.grads[out*in:]
+
+	d.inputBuf = make([]float32, in)
+	d.outputBuf = make([]float32, out)
+	d.preActBuf = make([]float32, out)
+	d.gradInBuf = make([]float32, in)
+	d.dzBuf = make([]float32, out)
+
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+		d.bufWeights = metal.CreateBuffer(d.weights)
+		d.bufBiases = metal.CreateBuffer(d.biases)
+		d.bufIn = metal.CreateEmptyBuffer(in)
+		d.bufOut = metal.CreateEmptyBuffer(out)
+	}
 }
 
 func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {

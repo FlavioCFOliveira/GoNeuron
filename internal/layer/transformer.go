@@ -25,21 +25,35 @@ type PositionalEncoding struct {
 }
 
 func NewPositionalEncoding(seqLen, dim int) *PositionalEncoding {
-	weights := make([]float32, seqLen*dim)
-	rng := NewRNG(uint64(seqLen + dim + 42))
-	scale := float32(math.Sqrt(1.0 / float64(dim)))
-	for i := range weights {
-		weights[i] = rng.RandFloat()*2*scale - scale
+	p := &PositionalEncoding{
+		seqLen: seqLen,
+		dim:    dim,
+		device: &CPUDevice{},
 	}
 
-	return &PositionalEncoding{
-		seqLen:    seqLen,
-		dim:       dim,
-		weights:   weights,
-		outputBuf: make([]float32, seqLen*dim),
-		gradBuf:   make([]float32, seqLen*dim),
-		device:    &CPUDevice{},
+	if dim != -1 {
+		p.Build(seqLen * dim)
 	}
+
+	return p
+}
+
+func (p *PositionalEncoding) Build(inSize int) {
+	if p.dim == -1 {
+		p.dim = inSize / p.seqLen
+	}
+	dim := p.dim
+	seqLen := p.seqLen
+
+	p.weights = make([]float32, seqLen*dim)
+	rng := NewRNG(uint64(seqLen + dim + 42))
+	scale := float32(math.Sqrt(1.0 / float64(dim)))
+	for i := range p.weights {
+		p.weights[i] = rng.RandFloat()*2*scale - scale
+	}
+
+	p.outputBuf = make([]float32, seqLen*dim)
+	p.gradBuf = make([]float32, seqLen*dim)
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -166,54 +180,71 @@ type MultiHeadAttention struct {
 }
 
 func NewMultiHeadAttention(dim, numHeads, seqLen int, causal bool) *MultiHeadAttention {
-	headDim := dim / numHeads
-	if headDim*numHeads != dim {
-		panic("dim must be divisible by numHeads")
+	headDim := -1
+	if dim != -1 {
+		headDim = dim / numHeads
+		if headDim*numHeads != dim {
+			panic("dim must be divisible by numHeads")
+		}
 	}
 
-	wQ := NewDense(dim, dim, activations.Linear{})
-	wK := NewDense(dim, dim, activations.Linear{})
-	wV := NewDense(dim, dim, activations.Linear{})
-	wOut := NewDense(dim, dim, activations.Linear{})
+	m := &MultiHeadAttention{
+		dim:      dim,
+		numHeads: numHeads,
+		headDim:  headDim,
+		seqLen:   seqLen,
+		Causal:   causal,
+		device:   &CPUDevice{},
+	}
+
+	if dim != -1 {
+		m.Build(seqLen * dim)
+	}
+
+	return m
+}
+
+func (m *MultiHeadAttention) Build(inSize int) {
+	if m.dim == -1 {
+		m.dim = inSize / m.seqLen
+		m.headDim = m.dim / m.numHeads
+		if m.headDim*m.numHeads != m.dim {
+			panic("inferred dim must be divisible by numHeads")
+		}
+	}
+
+	dim := m.dim
+	seqLen := m.seqLen
+
+	m.wQ = NewDense(dim, dim, activations.Linear{})
+	m.wK = NewDense(dim, dim, activations.Linear{})
+	m.wV = NewDense(dim, dim, activations.Linear{})
+	m.wOut = NewDense(dim, dim, activations.Linear{})
 
 	// Calculate total parameters
-	paramSize := len(wQ.Params())
+	paramSize := len(m.wQ.Params())
 	totalSize := paramSize * 4
-	params := make([]float32, totalSize)
-	grads := make([]float32, totalSize)
+	m.params = make([]float32, totalSize)
+	m.grads = make([]float32, totalSize)
 
 	// Link sub-layers to these contiguous buffers
-	wQ.SetParams(params[0:paramSize])
-	wK.SetParams(params[paramSize : 2*paramSize])
-	wV.SetParams(params[2*paramSize : 3*paramSize])
-	wOut.SetParams(params[3*paramSize : 4*paramSize])
+	m.wQ.SetParams(m.params[0:paramSize])
+	m.wK.SetParams(m.params[paramSize : 2*paramSize])
+	m.wV.SetParams(m.params[2*paramSize : 3*paramSize])
+	m.wOut.SetParams(m.params[3*paramSize : 4*paramSize])
 
-	wQ.SetGradients(grads[0:paramSize])
-	wK.SetGradients(grads[paramSize : 2*paramSize])
-	wV.SetGradients(grads[2*paramSize : 3*paramSize])
-	wOut.SetGradients(grads[3*paramSize : 4*paramSize])
+	m.wQ.SetGradients(m.grads[0:paramSize])
+	m.wK.SetGradients(m.grads[paramSize : 2*paramSize])
+	m.wV.SetGradients(m.grads[2*paramSize : 3*paramSize])
+	m.wOut.SetGradients(m.grads[3*paramSize : 4*paramSize])
 
-	return &MultiHeadAttention{
-		dim:         dim,
-		numHeads:    numHeads,
-		headDim:     headDim,
-		seqLen:      seqLen,
-		Causal:      causal,
-		wQ:          wQ,
-		wK:          wK,
-		wV:          wV,
-		wOut:        wOut,
-		params:      params,
-		grads:       grads,
-		outputBuf:   make([]float32, seqLen*dim),
-		gradInBuf:   make([]float32, seqLen*dim),
-		qBuf:        make([]float32, seqLen*dim),
-		kBuf:        make([]float32, seqLen*dim),
-		vBuf:        make([]float32, seqLen*dim),
-		scoresBuf:   make([]float32, seqLen*seqLen),
-		finalOutBuf: make([]float32, seqLen*dim),
-		device:      &CPUDevice{},
-	}
+	m.outputBuf = make([]float32, seqLen*dim)
+	m.gradInBuf = make([]float32, seqLen*dim)
+	m.qBuf = make([]float32, seqLen*dim)
+	m.kBuf = make([]float32, seqLen*dim)
+	m.vBuf = make([]float32, seqLen*dim)
+	m.scoresBuf = make([]float32, seqLen*seqLen)
+	m.finalOutBuf = make([]float32, seqLen*dim)
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -555,7 +586,6 @@ func (m *MultiHeadAttention) LightweightClone(params []float32, grads []float32)
 }
 func (m *MultiHeadAttention) AccumulateBackward(grad []float32) []float32 { return m.Backward(grad) }
 
-// TransformerBlock combines Self-Attention, LayerNorm, and Feed-Forward.
 type TransformerBlock struct {
 	mha   *MultiHeadAttention
 	norm1 *LayerNorm
@@ -565,6 +595,7 @@ type TransformerBlock struct {
 
 	dim    int
 	seqLen int
+	ffDim  int
 
 	outputBuf   []float32
 	res1Buf     []float32
@@ -593,58 +624,89 @@ func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *Transfo
 	ff1 := NewDense(dim, ffDim, activations.ReLU{})
 	ff2 := NewDense(ffDim, dim, activations.Linear{})
 
+	t := &TransformerBlock{
+		mha:    mha,
+		norm1:  norm1,
+		norm2:  norm2,
+		ff1:    ff1,
+		ff2:    ff2,
+		dim:    dim,
+		seqLen: seqLen,
+		ffDim:  ffDim,
+	}
+
+	if dim != -1 {
+		t.Build(seqLen * dim)
+	}
+
+	return t
+}
+
+func (t *TransformerBlock) Build(inSize int) {
+	if t.dim == -1 {
+		t.dim = inSize / t.seqLen
+	}
+	dim := t.dim
+	seqLen := t.seqLen
+
+	// Build sub-layers if they are deferred
+	if t.mha.InSize() <= 0 {
+		t.mha.Build(inSize)
+	}
+	if t.norm1.InSize() <= 0 {
+		t.norm1.Build(dim)
+	}
+	if t.norm2.InSize() <= 0 {
+		t.norm2.Build(dim)
+	}
+	if t.ff1.InSize() <= 0 {
+		t.ff1.Build(dim)
+	}
+	if t.ff2.InSize() <= 0 {
+		t.ff2.Build(t.ffDim)
+	}
+
 	// Aggregate parameters
-	sizeMHA := len(mha.Params())
-	sizeNorm1 := len(norm1.Params())
-	sizeNorm2 := len(norm2.Params())
-	sizeFF1 := len(ff1.Params())
-	sizeFF2 := len(ff2.Params())
+	sizeMHA := len(t.mha.Params())
+	sizeNorm1 := len(t.norm1.Params())
+	sizeNorm2 := len(t.norm2.Params())
+	sizeFF1 := len(t.ff1.Params())
+	sizeFF2 := len(t.ff2.Params())
 
 	totalParams := sizeMHA + sizeNorm1 + sizeNorm2 + sizeFF1 + sizeFF2
-	params := make([]float32, totalParams)
-	grads := make([]float32, totalParams)
+	t.params = make([]float32, totalParams)
+	t.grads = make([]float32, totalParams)
 
 	offset := 0
-	mha.SetParams(params[offset : offset+sizeMHA])
-	mha.SetGradients(grads[offset : offset+sizeMHA])
+	t.mha.SetParams(t.params[offset : offset+sizeMHA])
+	t.mha.SetGradients(t.grads[offset : offset+sizeMHA])
 	offset += sizeMHA
 
-	norm1.SetParams(params[offset : offset+sizeNorm1])
-	norm1.SetGradients(grads[offset : offset+sizeNorm1])
+	t.norm1.SetParams(t.params[offset : offset+sizeNorm1])
+	t.norm1.SetGradients(t.grads[offset : offset+sizeNorm1])
 	offset += sizeNorm1
 
-	norm2.SetParams(params[offset : offset+sizeNorm2])
-	norm2.SetGradients(grads[offset : offset+sizeNorm2])
+	t.norm2.SetParams(t.params[offset : offset+sizeNorm2])
+	t.norm2.SetGradients(t.grads[offset : offset+sizeNorm2])
 	offset += sizeNorm2
 
-	ff1.SetParams(params[offset : offset+sizeFF1])
-	ff1.SetGradients(grads[offset : offset+sizeFF1])
+	t.ff1.SetParams(t.params[offset : offset+sizeFF1])
+	t.ff1.SetGradients(t.grads[offset : offset+sizeFF1])
 	offset += sizeFF1
 
-	ff2.SetParams(params[offset : offset+sizeFF2])
-	ff2.SetGradients(grads[offset : offset+sizeFF2])
+	t.ff2.SetParams(t.params[offset : offset+sizeFF2])
+	t.ff2.SetGradients(t.grads[offset : offset+sizeFF2])
 
-	return &TransformerBlock{
-		mha:               mha,
-		norm1:             norm1,
-		norm2:             norm2,
-		ff1:               ff1,
-		ff2:               ff2,
-		dim:               dim,
-		seqLen:            seqLen,
-		outputBuf:         make([]float32, seqLen*dim),
-		res1Buf:           make([]float32, seqLen*dim),
-		norm1OutBuf:       make([]float32, seqLen*dim),
-		ffOutBuf:          make([]float32, seqLen*dim),
-		res2Buf:           make([]float32, seqLen*dim),
-		gradRes2Buf:       make([]float32, seqLen*dim),
-		gradNorm1OutFFBuf: make([]float32, seqLen*dim),
-		combinedGradBuf:   make([]float32, seqLen*dim),
-		gradRes1Buf:       make([]float32, seqLen*dim),
-		gradInBuf:         make([]float32, seqLen*dim),
-		params:            params,
-		grads:             grads,
-	}
+	t.outputBuf = make([]float32, seqLen*dim)
+	t.res1Buf = make([]float32, seqLen*dim)
+	t.norm1OutBuf = make([]float32, seqLen*dim)
+	t.ffOutBuf = make([]float32, seqLen*dim)
+	t.res2Buf = make([]float32, seqLen*dim)
+	t.gradRes2Buf = make([]float32, seqLen*dim)
+	t.gradNorm1OutFFBuf = make([]float32, seqLen*dim)
+	t.combinedGradBuf = make([]float32, seqLen*dim)
+	t.gradRes1Buf = make([]float32, seqLen*dim)
+	t.gradInBuf = make([]float32, seqLen*dim)
 }
 
 // SetTraining sets whether the layer is in training mode.

@@ -98,93 +98,91 @@ func NewLSTM(inSize, outSize int) *LSTM {
 
 // NewLSTMWithDevice creates a new LSTM layer with a specific device.
 func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
-	// Xavier/Glorot initialization for LSTM with 4 gates
-	// Input weights connect inSize inputs to 4*outSize gate outputs
-	inputScale := float32(math.Sqrt(2.0 / float64(inSize + 4*outSize)))
-	// Recurrent weights connect outSize hidden states to 4*outSize gate outputs
-	recurrentScale := float32(math.Sqrt(2.0 / float64(outSize + 4*outSize)))
-
-	// Allocate contiguous parameter buffer
-	weightInSize := outSize * 4 * inSize
-	weightRecSize := outSize * 4 * outSize
-	biasSize := outSize * 4
-	totalParams := weightInSize + weightRecSize + biasSize
-	params := make([]float32, totalParams)
-
-	inputWeights := params[:weightInSize]
-	recurrentWeights := params[weightInSize : weightInSize+weightRecSize]
-	biases := params[weightInSize+weightRecSize:]
-
-	// Create deterministic RNG with layer-specific seed for different initial weights
-	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 142))
-
-	// Initialize weights
-	for i := 0; i < outSize*4; i++ {
-		if i >= outSize && i < outSize*2 {
-			biases[i] = 1.0
-		}
-		for j := 0; j < inSize; j++ {
-			inputWeights[i*inSize+j] = rng.RandFloat()*2*inputScale - inputScale
-		}
-		for j := 0; j < outSize; j++ {
-			recurrentWeights[i*outSize+j] = rng.RandFloat()*2*recurrentScale - recurrentScale
-		}
-	}
-
-	grads := make([]float32, totalParams)
-
 	l := &LSTM{
 		inSize:  inSize,
 		outSize: outSize,
 		device:  device,
-
-		params:           params,
-		inputWeights:     inputWeights,
-		recurrentWeights: recurrentWeights,
-		biases:           biases,
-
-		grads:                grads,
-		gradInputWeights:     grads[:weightInSize],
-		gradRecurrentWeights: grads[weightInSize : weightInSize+weightRecSize],
-		gradBiases:           grads[weightInSize+weightRecSize:],
 
 		inputAct:  activations.Sigmoid{},
 		forgetAct: activations.Sigmoid{},
 		cellAct:   activations.Tanh{},
 		outputAct: activations.Sigmoid{},
 
-		// Pre-allocate all working buffers
-		inputBuf:  make([]float32, inSize),
-		outputBuf: make([]float32, outSize),
-		preActBuf: make([]float32, outSize*4),
-		cellBuf:   make([]float32, outSize),
-		hiddenBuf: make([]float32, outSize),
-
-		dInputBuf:  make([]float32, outSize),
-		dForgetBuf: make([]float32, outSize),
-		dCellBuf:   make([]float32, outSize),
-		dOutputBuf: make([]float32, outSize),
-
-		dcBuf:     make([]float32, outSize),
-		dxBuf:     make([]float32, inSize),
-		dhPrevBuf: make([]float32, outSize),
-		cPrevBuf:  make([]float32, outSize),
-		hPrevBuf:  make([]float32, outSize),
-
-		inputGateOut:  make([]float32, outSize),
-		forgetGateOut: make([]float32, outSize),
-		cellGateOut:   make([]float32, outSize),
-		outputGateOut: make([]float32, outSize),
-
 		savedCellOffsets:   make([]int, 0, 16),
 		savedHiddenOffsets: make([]int, 0, 16),
 		timeStep:           0,
 	}
 
-	if metal, ok := device.(*MetalDevice); ok && metal.IsAvailable() {
-		l.bufWeightsIn = metal.CreateBuffer(inputWeights)
-		l.bufWeightsRec = metal.CreateBuffer(recurrentWeights)
-		l.bufBiases = metal.CreateBuffer(biases)
+	if inSize != -1 {
+		l.Build(inSize)
+	}
+
+	return l
+}
+
+// Build initializes the layer with the given input size.
+func (l *LSTM) Build(inSize int) {
+	l.inSize = inSize
+	outSize := l.outSize
+
+	// Xavier/Glorot initialization for LSTM with 4 gates
+	inputScale := float32(math.Sqrt(2.0 / float64(inSize+4*outSize)))
+	recurrentScale := float32(math.Sqrt(2.0 / float64(outSize+4*outSize)))
+
+	weightInSize := outSize * 4 * inSize
+	weightRecSize := outSize * 4 * outSize
+	biasSize := outSize * 4
+	totalParams := weightInSize + weightRecSize + biasSize
+	l.params = make([]float32, totalParams)
+
+	l.inputWeights = l.params[:weightInSize]
+	l.recurrentWeights = l.params[weightInSize : weightInSize+weightRecSize]
+	l.biases = l.params[weightInSize+weightRecSize:]
+
+	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 142))
+	for i := 0; i < outSize*4; i++ {
+		if i >= outSize && i < outSize*2 {
+			l.biases[i] = 1.0
+		}
+		for j := 0; j < inSize; j++ {
+			l.inputWeights[i*inSize+j] = rng.RandFloat()*2*inputScale - inputScale
+		}
+		for j := 0; j < outSize; j++ {
+			l.recurrentWeights[i*outSize+j] = rng.RandFloat()*2*recurrentScale - recurrentScale
+		}
+	}
+
+	l.grads = make([]float32, totalParams)
+	l.gradInputWeights = l.grads[:weightInSize]
+	l.gradRecurrentWeights = l.grads[weightInSize : weightInSize+weightRecSize]
+	l.gradBiases = l.grads[weightInSize+weightRecSize:]
+
+	l.inputBuf = make([]float32, inSize)
+	l.outputBuf = make([]float32, outSize)
+	l.preActBuf = make([]float32, outSize*4)
+	l.cellBuf = make([]float32, outSize)
+	l.hiddenBuf = make([]float32, outSize)
+
+	l.dInputBuf = make([]float32, outSize)
+	l.dForgetBuf = make([]float32, outSize)
+	l.dCellBuf = make([]float32, outSize)
+	l.dOutputBuf = make([]float32, outSize)
+
+	l.dcBuf = make([]float32, outSize)
+	l.dxBuf = make([]float32, inSize)
+	l.dhPrevBuf = make([]float32, outSize)
+	l.cPrevBuf = make([]float32, outSize)
+	l.hPrevBuf = make([]float32, outSize)
+
+	l.inputGateOut = make([]float32, outSize)
+	l.forgetGateOut = make([]float32, outSize)
+	l.cellGateOut = make([]float32, outSize)
+	l.outputGateOut = make([]float32, outSize)
+
+	if metal, ok := l.device.(*MetalDevice); ok && metal.IsAvailable() {
+		l.bufWeightsIn = metal.CreateBuffer(l.inputWeights)
+		l.bufWeightsRec = metal.CreateBuffer(l.recurrentWeights)
+		l.bufBiases = metal.CreateBuffer(l.biases)
 		l.bufPreAct = metal.CreateEmptyBuffer(outSize * 4)
 		l.bufC = metal.CreateEmptyBuffer(outSize)
 		l.bufH = metal.CreateEmptyBuffer(outSize)
@@ -194,8 +192,6 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		l.bufO = metal.CreateEmptyBuffer(outSize)
 		l.bufX = metal.CreateEmptyBuffer(inSize)
 	}
-
-	return l
 }
 
 // Reset resets the LSTM state for a new sequence.

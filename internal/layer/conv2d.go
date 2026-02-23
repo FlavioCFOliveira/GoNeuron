@@ -54,43 +54,49 @@ type Conv2D struct {
 func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 	activation activations.Activation) *Conv2D {
 
-	weightSize := outChannels * inChannels * kernelSize * kernelSize
-	biasSize := outChannels
-	params := make([]float32, weightSize+biasSize)
-	weights := params[:weightSize]
-	biases := params[weightSize:]
-
-	// He initialization
-	scale := float32(math.Sqrt(2.0 / float64(inChannels*kernelSize*kernelSize)))
-	rng := NewRNG(42)
-
-	for i := range weights {
-		weights[i] = rng.RandFloat()*2*scale - scale
-	}
-	for i := range biases {
-		biases[i] = rng.RandFloat()*0.2 - 0.1
-	}
-
-	grads := make([]float32, weightSize+biasSize)
-
-	return &Conv2D{
+	c := &Conv2D{
 		inChannels:  inChannels,
 		outChannels: outChannels,
 		kernelSize:  kernelSize,
 		stride:      stride,
 		padding:     padding,
 		activation:  activation,
-		params:      params,
-		weights:     weights,
-		biases:      biases,
-		grads:       grads,
-		gradWeights: grads[:weightSize],
-		gradBiases:  grads[weightSize:],
-		outputBuf:   make([]float32, 0),
-		gradInBuf:   make([]float32, 0),
-		savedInput:  make([]float32, 0),
 		device:      &CPUDevice{},
 	}
+
+	if inChannels != -1 {
+		c.Build(inChannels)
+	}
+
+	return c
+}
+
+// Build initializes the layer with the given input size (channels).
+func (c *Conv2D) Build(inChannels int) {
+	c.inChannels = inChannels
+	weightSize := c.outChannels * inChannels * c.kernelSize * c.kernelSize
+	biasSize := c.outChannels
+	c.params = make([]float32, weightSize+biasSize)
+	c.weights = c.params[:weightSize]
+	c.biases = c.params[weightSize:]
+
+	// He initialization
+	scale := float32(math.Sqrt(2.0 / float64(inChannels*c.kernelSize*c.kernelSize)))
+	rng := NewRNG(42)
+
+	for i := range c.weights {
+		c.weights[i] = rng.RandFloat()*2*scale - scale
+	}
+	for i := range c.biases {
+		c.biases[i] = rng.RandFloat()*0.2 - 0.1
+	}
+
+	c.grads = make([]float32, weightSize+biasSize)
+	c.gradWeights = c.grads[:weightSize]
+	c.gradBiases = c.grads[weightSize:]
+	c.outputBuf = make([]float32, 0)
+	c.gradInBuf = make([]float32, 0)
+	c.savedInput = make([]float32, 0)
 }
 
 // SetDevice sets the computation device for the convolutional layer.
@@ -111,6 +117,8 @@ func (c *Conv2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 func (c *Conv2D) SetInputDimensions(height, width int) {
 	c.setInputHeight = height
 	c.setInputWidth = width
+	c.inputHeight = height
+	c.inputWidth = width
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -451,6 +459,11 @@ func (c *Conv2D) InSize() int {
 
 // OutSize returns the number of output channels.
 func (c *Conv2D) OutSize() int {
+	if c.inputHeight > 0 && c.inputWidth > 0 {
+		h, w := c.computeOutputSize(c.inputHeight, c.inputWidth)
+		return c.outChannels * h * w
+	}
+	// Fallback for summary before first forward
 	return c.outChannels
 }
 
@@ -504,4 +517,12 @@ func (c *Conv2D) GetPadding() int {
 // GetActivation returns the activation function.
 func (c *Conv2D) GetActivation() activations.Activation {
 	return c.activation
+}
+
+// GetOutputDimensions returns the spatial dimensions of the output.
+func (c *Conv2D) GetOutputDimensions() (int, int) {
+	if c.inputHeight == 0 || c.inputWidth == 0 {
+		return 0, 0
+	}
+	return c.computeOutputSize(c.inputHeight, c.inputWidth)
 }

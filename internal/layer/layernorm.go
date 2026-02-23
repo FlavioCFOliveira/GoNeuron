@@ -37,39 +37,42 @@ type LayerNorm struct {
 
 // NewLayerNorm creates a new layer normalization layer.
 func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *LayerNorm {
-	params := make([]float32, 0)
-	var gamma, beta []float32
-	grads := make([]float32, 0)
-	var gradGamma, gradBeta []float32
-
-	if elementwiseAffine {
-		params = make([]float32, normalizedShape*2)
-		gamma = params[:normalizedShape]
-		beta = params[normalizedShape:]
-		for i := 0; i < normalizedShape; i++ {
-			gamma[i] = 1.0
-			beta[i] = 0.0
-		}
-		grads = make([]float32, normalizedShape*2)
-		gradGamma = grads[:normalizedShape]
-		gradBeta = grads[normalizedShape:]
-	}
-
-	return &LayerNorm{
+	l := &LayerNorm{
 		normalizedShape:   normalizedShape,
 		eps:               eps,
 		elementwiseAffine: elementwiseAffine,
-		params:            params,
-		gamma:             gamma,
-		beta:              beta,
-		grads:             grads,
-		gradGammaBuf:      gradGamma,
-		gradBetaBuf:       gradBeta,
-		outputBuf:         make([]float32, normalizedShape),
-		gradInBuf:         make([]float32, normalizedShape),
-		gradBuf:           make([]float32, normalizedShape),
 		device:            &CPUDevice{},
 	}
+
+	if normalizedShape != -1 {
+		l.Build(normalizedShape)
+	}
+
+	return l
+}
+
+// Build initializes the layer with the given input size.
+func (l *LayerNorm) Build(normalizedShape int) {
+	l.normalizedShape = normalizedShape
+	if l.elementwiseAffine {
+		l.params = make([]float32, normalizedShape*2)
+		l.gamma = l.params[:normalizedShape]
+		l.beta = l.params[normalizedShape:]
+		for i := 0; i < normalizedShape; i++ {
+			l.gamma[i] = 1.0
+			l.beta[i] = 0.0
+		}
+		l.grads = make([]float32, normalizedShape*2)
+		l.gradGammaBuf = l.grads[:normalizedShape]
+		l.gradBetaBuf = l.grads[normalizedShape:]
+	} else {
+		l.params = make([]float32, 0)
+		l.grads = make([]float32, 0)
+	}
+
+	l.outputBuf = make([]float32, normalizedShape)
+	l.gradInBuf = make([]float32, normalizedShape)
+	l.gradBuf = make([]float32, normalizedShape)
 }
 
 // SetDevice sets the computation device.

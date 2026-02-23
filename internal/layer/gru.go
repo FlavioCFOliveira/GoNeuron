@@ -73,6 +73,31 @@ type GRU struct {
 // inSize: dimension of input vectors
 // outSize: dimension of hidden state/output
 func NewGRU(inSize, outSize int) *GRU {
+	g := &GRU{
+		inSize:  inSize,
+		outSize: outSize,
+
+		updateAct: activations.Sigmoid{},
+		resetAct:  activations.Sigmoid{},
+		cellAct:   activations.Tanh{},
+
+		savedHiddenOffsets: make([]int, 0, 16),
+		timeStep:           0,
+		device:             &CPUDevice{},
+	}
+
+	if inSize != -1 {
+		g.Build(inSize)
+	}
+
+	return g
+}
+
+// Build initializes the layer with the given input size.
+func (g *GRU) Build(inSize int) {
+	g.inSize = inSize
+	outSize := g.outSize
+
 	// Xavier/Glorot initialization
 	scale := float32(math.Sqrt(2.0 / (float64(inSize) + float64(outSize))))
 
@@ -81,74 +106,48 @@ func NewGRU(inSize, outSize int) *GRU {
 	weightRecSize := outSize * outSize * 2
 	biasSize := outSize * 3
 	totalParams := weightInSize + weightRecSize + biasSize
-	params := make([]float32, totalParams)
+	g.params = make([]float32, totalParams)
 
-	inputWeights := params[:weightInSize]
-	recurrentWeights := params[weightInSize : weightInSize+weightRecSize]
-	biases := params[weightInSize+weightRecSize:]
+	g.inputWeights = g.params[:weightInSize]
+	g.recurrentWeights = g.params[weightInSize : weightInSize+weightRecSize]
+	g.biases = g.params[weightInSize+weightRecSize:]
 
-	// Create deterministic RNG with layer-specific seed
 	rng := NewRNG(uint64(inSize*1000 + outSize*100 + 242))
-
-	// Initialize weights for 3 input gates
 	for i := 0; i < outSize*3; i++ {
 		for j := 0; j < inSize; j++ {
-			inputWeights[i*inSize+j] = rng.RandFloat()*2*scale - scale
+			g.inputWeights[i*inSize+j] = rng.RandFloat()*2*scale - scale
 		}
 	}
-	// Initialize recurrent weights for 2 gates
 	for i := 0; i < outSize*2; i++ {
 		for j := 0; j < outSize; j++ {
-			recurrentWeights[i*outSize+j] = rng.RandFloat()*2*scale - scale
+			g.recurrentWeights[i*outSize+j] = rng.RandFloat()*2*scale - scale
 		}
 	}
 
-	// Allocate gradients contiguously
-	grads := make([]float32, totalParams)
+	g.grads = make([]float32, totalParams)
+	g.gradInputWeights = g.grads[:weightInSize]
+	g.gradRecurrentWeights = g.grads[weightInSize : weightInSize+weightRecSize]
+	g.gradBiases = g.grads[weightInSize+weightRecSize:]
 
-	return &GRU{
-		inSize:  inSize,
-		outSize: outSize,
+	g.inputBuf = make([]float32, inSize)
+	g.outputBuf = make([]float32, outSize)
+	g.preActBuf = make([]float32, outSize*3)
+	g.cellBuf = make([]float32, outSize)
 
-		params:           params,
-		inputWeights:     inputWeights,
-		recurrentWeights: recurrentWeights,
-		biases:           biases,
+	g.dUpdateBuf = make([]float32, outSize)
+	g.dResetBuf = make([]float32, outSize)
+	g.dCellBuf = make([]float32, outSize)
 
-		updateAct: activations.Sigmoid{},
-		resetAct:  activations.Sigmoid{},
-		cellAct:   activations.Tanh{},
+	g.dhBuf = make([]float32, outSize)
+	g.dhCandidateBuf = make([]float32, outSize)
+	g.dUpdateBiBuf = make([]float32, outSize)
+	g.dxBuf = make([]float32, inSize)
+	g.dhPrevBuf = make([]float32, outSize)
+	g.hPrevBuf = make([]float32, outSize)
 
-		// Pre-allocate all working buffers
-		inputBuf:  make([]float32, inSize),
-		outputBuf: make([]float32, outSize),
-		preActBuf: make([]float32, outSize*3),
-		cellBuf:   make([]float32, outSize),
-
-		grads:                grads,
-		gradInputWeights:     grads[:weightInSize],
-		gradRecurrentWeights: grads[weightInSize : weightInSize+weightRecSize],
-		gradBiases:           grads[weightInSize+weightRecSize:],
-
-		dUpdateBuf: make([]float32, outSize),
-		dResetBuf:  make([]float32, outSize),
-		dCellBuf:   make([]float32, outSize),
-
-		dhBuf:          make([]float32, outSize),
-		dhCandidateBuf: make([]float32, outSize),
-		dUpdateBiBuf:   make([]float32, outSize),
-		dxBuf:          make([]float32, inSize),
-		dhPrevBuf:      make([]float32, outSize),
-		hPrevBuf:       make([]float32, outSize),
-
-		updateGateOut: make([]float32, outSize),
-		resetGateOut:  make([]float32, outSize),
-		cellGateOut:   make([]float32, outSize),
-
-		savedHiddenOffsets: make([]int, 0, 16),
-		timeStep:           0,
-		device:             &CPUDevice{},
-	}
+	g.updateGateOut = make([]float32, outSize)
+	g.resetGateOut = make([]float32, outSize)
+	g.cellGateOut = make([]float32, outSize)
 }
 
 // SetDevice sets the computation device.

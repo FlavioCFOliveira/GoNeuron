@@ -41,6 +41,11 @@ func (f *Flatten) SetDevice(device Device) {
 	f.device = device
 }
 
+// Build initializes the layer with the given input size.
+func (f *Flatten) Build(inSize int) {
+	f.outSize = inSize
+}
+
 // SetDimensions sets the start and end dimensions for flattening.
 // startDim: first dimension to flatten (default 1, skips batch dimension)
 // endDim: last dimension to flatten (default -1, all remaining)

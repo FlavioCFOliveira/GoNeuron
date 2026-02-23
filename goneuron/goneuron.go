@@ -14,6 +14,7 @@ type (
 	Layer     = layer.Layer
 	Optimizer = opt.Optimizer
 	Loss      = loss.Loss
+	Dataset   = net.Dataset
 )
 
 // Model creation
@@ -43,40 +44,72 @@ func ELU(alpha float32) activations.Activation {
 }
 
 // Layers
-func Dense(in, out int, act activations.Activation) Layer {
-	return layer.NewDense(in, out, act)
+func Dense(out int, act activations.Activation, in ...int) Layer {
+	inSize := -1
+	if len(in) > 0 {
+		inSize = in[0]
+	}
+	return layer.NewDense(inSize, out, act)
 }
 
-func Conv2D(inChannels, outChannels, kernelSize, stride, padding int, act activations.Activation) Layer {
+func Conv2D(outChannels, kernelSize, stride, padding int, act activations.Activation, in ...int) Layer {
+	inChannels := -1
+	if len(in) > 0 {
+		inChannels = in[0]
+	}
 	return layer.NewConv2D(inChannels, outChannels, kernelSize, stride, padding, act)
 }
 
-func LSTM(in, out int) Layer {
-	return layer.NewLSTM(in, out)
+func LSTM(out int, in ...int) Layer {
+	inSize := -1
+	if len(in) > 0 {
+		inSize = in[0]
+	}
+	return layer.NewLSTM(inSize, out)
 }
 
-func GRU(in, out int) Layer {
-	return layer.NewGRU(in, out)
+func GRU(out int, in ...int) Layer {
+	inSize := -1
+	if len(in) > 0 {
+		inSize = in[0]
+	}
+	return layer.NewGRU(inSize, out)
 }
 
 func Dropout(prob float32, in int) Layer {
 	return layer.NewDropout(prob, in)
 }
 
-func BatchNorm2D(inChannels int) Layer {
-	return layer.NewBatchNorm2D(inChannels, 1e-5, 0.1, true)
+func BatchNorm2D(inChannels ...int) Layer {
+	in := -1
+	if len(inChannels) > 0 {
+		in = inChannels[0]
+	}
+	return layer.NewBatchNorm2D(in, 1e-5, 0.1, true)
 }
 
-func LayerNorm(normalizedShape int) Layer {
-	return layer.NewLayerNorm(normalizedShape, 1e-5, true)
+func LayerNorm(normalizedShape ...int) Layer {
+	in := -1
+	if len(normalizedShape) > 0 {
+		in = normalizedShape[0]
+	}
+	return layer.NewLayerNorm(in, 1e-5, true)
 }
 
-func MaxPool2D(inChannels, kernelSize, stride, padding int) Layer {
-	return layer.NewMaxPool2D(inChannels, kernelSize, stride, padding)
+func MaxPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
+	in := -1
+	if len(inChannels) > 0 {
+		in = inChannels[0]
+	}
+	return layer.NewMaxPool2D(in, kernelSize, stride, padding)
 }
 
-func Flatten() Layer {
-	return layer.NewFlatten()
+func Flatten(inSize ...int) Layer {
+	f := layer.NewFlatten()
+	if len(inSize) > 0 {
+		f.Build(inSize[0])
+	}
+	return f
 }
 
 func Embedding(numEmbeddings, embeddingDim int) Layer {
@@ -91,16 +124,28 @@ func RBF(in, numCenters, out int, gamma float32) Layer {
 	return layer.NewRBF(in, numCenters, out, gamma)
 }
 
-func TransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) Layer {
-	return layer.NewTransformerBlock(dim, numHeads, seqLen, ffDim, causal)
+func TransformerBlock(numHeads, seqLen, ffDim int, causal bool, dim ...int) Layer {
+	inDim := -1
+	if len(dim) > 0 {
+		inDim = dim[0]
+	}
+	return layer.NewTransformerBlock(inDim, numHeads, seqLen, ffDim, causal)
 }
 
-func PositionalEncoding(seqLen, dim int) Layer {
-	return layer.NewPositionalEncoding(seqLen, dim)
+func PositionalEncoding(seqLen int, dim ...int) Layer {
+	inDim := -1
+	if len(dim) > 0 {
+		inDim = dim[0]
+	}
+	return layer.NewPositionalEncoding(seqLen, inDim)
 }
 
-func MultiHeadAttention(dim, numHeads, seqLen int, causal bool) Layer {
-	return layer.NewMultiHeadAttention(dim, numHeads, seqLen, causal)
+func MultiHeadAttention(numHeads, seqLen int, causal bool, dim ...int) Layer {
+	inDim := -1
+	if len(dim) > 0 {
+		inDim = dim[0]
+	}
+	return layer.NewMultiHeadAttention(inDim, numHeads, seqLen, causal)
 }
 
 func GlobalAveragePooling1D(seqLen, dim int) Layer {
@@ -119,7 +164,11 @@ func Bidirectional(l Layer) Layer {
 	return layer.NewBidirectional(l)
 }
 
-func MoE(inSize, outSize, numExperts, k int) Layer {
+func MoE(outSize, numExperts, k int, in ...int) Layer {
+	inSize := -1
+	if len(in) > 0 {
+		inSize = in[0]
+	}
 	return layer.NewMoE(inSize, outSize, numExperts, k)
 }
 
@@ -151,6 +200,10 @@ func SchedulerCallback(scheduler opt.Scheduler) net.Callback {
 	return net.NewSchedulerCallback(scheduler)
 }
 
+func CSVLogger(filename string, append bool) net.Callback {
+	return net.NewCSVLogger(filename, append)
+}
+
 // Devices
 func GetDefaultDevice() layer.Device {
 	return layer.GetDefaultDevice()
@@ -170,6 +223,11 @@ var (
 
 func Huber(delta float32) Loss {
 	return loss.NewHuber(delta)
+}
+
+// Data Loading
+func LoadCSV(filename string, labelCols []int, hasHeader bool) (*Dataset, error) {
+	return net.LoadCSV(filename, labelCols, hasHeader)
 }
 
 // Model Persistence

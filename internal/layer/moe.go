@@ -50,45 +50,66 @@ func NewMoE(inSize, outSize, numExperts, k int) *MoE {
 	// Gating uses Linear activation so we can add noise before Softmax
 	gating := NewDense(inSize, numExperts, activations.Linear{})
 
-	// Aggregate parameters
-	gLen := len(gating.Params())
-	eLen := len(experts[0].Params())
-	totalParams := gLen + numExperts*eLen
-	params := make([]float32, totalParams)
-	grads := make([]float32, totalParams)
-
-	offset := 0
-	gating.SetParams(params[offset : offset+gLen])
-	gating.SetGradients(grads[offset : offset+gLen])
-	offset += gLen
-
-	for i := 0; i < numExperts; i++ {
-		experts[i].SetParams(params[offset : offset+eLen])
-		experts[i].SetGradients(grads[offset : offset+eLen])
-		offset += eLen
-	}
-
-	return &MoE{
+	m := &MoE{
 		gating:        gating,
 		experts:       experts,
 		k:             k,
 		inSize:        inSize,
 		outSize:       outSize,
 		numExperts:    numExperts,
-		inputBuf:      make([]float32, inSize),
 		outputBuf:     make([]float32, outSize),
 		gateLogits:    make([]float32, numExperts),
 		gateProbs:     make([]float32, numExperts),
 		lastActive:    make([]int, k),
 		expertOutputs: expertOutputs,
 		gateGradBuf:   make([]float32, numExperts),
-		dxTotalBuf:    make([]float32, inSize),
 		expertGradBuf: make([]float32, outSize),
 		weightsBuf:    make([]expertWeight, numExperts),
 		rng:           NewRNG(42),
-		params:        params,
-		grads:         grads,
 	}
+
+	if inSize != -1 {
+		m.Build(inSize)
+	}
+
+	return m
+}
+
+func (m *MoE) Build(inSize int) {
+	m.inSize = inSize
+
+	// Build sub-layers if they are deferred
+	if m.gating.InSize() <= 0 {
+		m.gating.Build(inSize)
+	}
+	for _, e := range m.experts {
+		if e.InSize() <= 0 {
+			if de, ok := e.(DeferredLayer); ok {
+				de.Build(inSize)
+			}
+		}
+	}
+
+	// Aggregate parameters
+	gLen := len(m.gating.Params())
+	eLen := len(m.experts[0].Params())
+	totalParams := gLen + m.numExperts*eLen
+	m.params = make([]float32, totalParams)
+	m.grads = make([]float32, totalParams)
+
+	offset := 0
+	m.gating.SetParams(m.params[offset : offset+gLen])
+	m.gating.SetGradients(m.grads[offset : offset+gLen])
+	offset += gLen
+
+	for i := 0; i < m.numExperts; i++ {
+		m.experts[i].SetParams(m.params[offset : offset+eLen])
+		m.experts[i].SetGradients(m.grads[offset : offset+eLen])
+		offset += eLen
+	}
+
+	m.inputBuf = make([]float32, inSize)
+	m.dxTotalBuf = make([]float32, inSize)
 }
 
 func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {

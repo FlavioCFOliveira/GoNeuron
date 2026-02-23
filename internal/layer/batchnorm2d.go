@@ -37,58 +37,72 @@ type BatchNorm2D struct {
 	savedVar     []float32
 	savedStd     []float32
 
+	inputHeight     int
+	inputWidth      int
 	numelPerChannel int
 	device          Device
 }
 
 // NewBatchNorm2D creates a new 2D batch normalization layer.
 func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool) *BatchNorm2D {
-	params := make([]float32, 0)
-	var gamma, beta []float32
-	grads := make([]float32, 0)
-	var gradGamma, gradBeta []float32
-
-	if affine {
-		params = make([]float32, numFeatures*2)
-		gamma = params[:numFeatures]
-		beta = params[numFeatures:]
-		for i := 0; i < numFeatures; i++ {
-			gamma[i] = 1.0
-			beta[i] = 0.0
-		}
-		grads = make([]float32, numFeatures*2)
-		gradGamma = grads[:numFeatures]
-		gradBeta = grads[numFeatures:]
-	}
-
 	l := &BatchNorm2D{
-		numFeatures:  numFeatures,
-		eps:          eps,
-		momentum:     momentum,
-		affine:       affine,
-		training:     true,
-		params:       params,
-		gamma:        gamma,
-		beta:         beta,
-		runningMean:  make([]float32, numFeatures),
-		runningVar:   make([]float32, numFeatures),
-		grads:        grads,
-		gradGammaBuf: gradGamma,
-		gradBetaBuf:  gradBeta,
-		outputBuf:    make([]float32, 0),
-		gradInBuf:    make([]float32, 0),
-		savedMean:    make([]float32, numFeatures),
-		savedVar:     make([]float32, numFeatures),
-		savedStd:     make([]float32, numFeatures),
-		device:       &CPUDevice{},
+		numFeatures: numFeatures,
+		eps:         eps,
+		momentum:    momentum,
+		affine:      affine,
+		training:    true,
+		device:      &CPUDevice{},
 	}
 
-	// Initialize running variance to 1
-	for i := range l.runningVar {
-		l.runningVar[i] = 1.0
+	if numFeatures != -1 {
+		l.Build(numFeatures)
 	}
 
 	return l
+}
+
+// Build initializes the layer with the given input size (channels).
+func (b *BatchNorm2D) Build(numFeatures int) {
+	b.numFeatures = numFeatures
+	if b.affine {
+		b.params = make([]float32, numFeatures*2)
+		b.gamma = b.params[:numFeatures]
+		b.beta = b.params[numFeatures:]
+		for i := 0; i < numFeatures; i++ {
+			b.gamma[i] = 1.0
+			b.beta[i] = 0.0
+		}
+		b.grads = make([]float32, numFeatures*2)
+		b.gradGammaBuf = b.grads[:numFeatures]
+		b.gradBetaBuf = b.grads[numFeatures:]
+	} else {
+		b.params = make([]float32, 0)
+		b.grads = make([]float32, 0)
+	}
+
+	b.runningMean = make([]float32, numFeatures)
+	b.runningVar = make([]float32, numFeatures)
+	for i := range b.runningVar {
+		b.runningVar[i] = 1.0
+	}
+
+	b.outputBuf = make([]float32, 0)
+	b.gradInBuf = make([]float32, 0)
+	b.savedMean = make([]float32, numFeatures)
+	b.savedVar = make([]float32, numFeatures)
+	b.savedStd = make([]float32, numFeatures)
+}
+
+// SetInputDimensions sets the spatial dimensions for the layer.
+func (b *BatchNorm2D) SetInputDimensions(height, width int) {
+	b.inputHeight = height
+	b.inputWidth = width
+	b.numelPerChannel = height * width
+}
+
+// GetOutputDimensions returns the spatial dimensions of the output.
+func (b *BatchNorm2D) GetOutputDimensions() (int, int) {
+	return b.inputHeight, b.inputWidth
 }
 
 // SetDevice sets the computation device.
@@ -334,6 +348,9 @@ func (b *BatchNorm2D) InSize() int {
 
 // OutSize returns the output size.
 func (b *BatchNorm2D) OutSize() int {
+	if b.numelPerChannel > 0 {
+		return b.numFeatures * b.numelPerChannel
+	}
 	return b.numFeatures
 }
 

@@ -43,17 +43,38 @@ type MaxPool2D struct {
 // stride: stride for pooling (defaults to kernelSize)
 // padding: zero padding size
 func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
-	return &MaxPool2D{
-		inChannels:   inChannels,
-		kernelSize:   kernelSize,
-		stride:       stride,
-		padding:      padding,
-		outputBuf:    make([]float32, 0),
-		gradInBuf:    make([]float32, 0),
-		argmaxBuf:    make([]int, 0),
-		savedInput:   make([]float32, 0),
-		device:       &CPUDevice{},
+	m := &MaxPool2D{
+		inChannels: inChannels,
+		kernelSize: kernelSize,
+		stride:     stride,
+		padding:    padding,
+		outputBuf:  make([]float32, 0),
+		gradInBuf:  make([]float32, 0),
+		argmaxBuf:  make([]int, 0),
+		savedInput: make([]float32, 0),
+		device:     &CPUDevice{},
 	}
+
+	if inChannels != -1 {
+		m.Build(inChannels)
+	}
+
+	return m
+}
+
+// Build initializes the layer with the given input size (channels).
+func (m *MaxPool2D) Build(inChannels int) {
+	m.inChannels = inChannels
+
+	// If we can infer height/width from total size assuming square, do it
+	// This helps for lazy inference in Sequential networks
+}
+
+// SetInputDimensions explicitly sets the input dimensions.
+func (m *MaxPool2D) SetInputDimensions(height, width int) {
+	m.inputHeight = height
+	m.inputWidth = width
+	m.outputHeight, m.outputWidth = m.computeOutputSize(height, width)
 }
 
 // SetDevice sets the computation device.
@@ -252,6 +273,13 @@ func (m *MaxPool2D) InSize() int {
 // OutSize returns the total output size (channels * outputHeight * outputWidth).
 func (m *MaxPool2D) OutSize() int {
 	if m.outputHeight == 0 || m.outputWidth == 0 {
+		// Try to infer from a default square input if height/width not set but channels are
+		if m.inChannels > 0 && m.inputHeight > 0 && m.inputWidth > 0 {
+			h, w := m.computeOutputSize(m.inputHeight, m.inputWidth)
+			return m.inChannels * h * w
+		}
+		// If we only have channels (common in lazy init), we can't know the spatial size yet.
+		// However, for Sequential.Summary(), we might need a better heuristic or just return 0.
 		return 0
 	}
 	return m.inChannels * m.outputHeight * m.outputWidth
@@ -319,6 +347,14 @@ func (m *MaxPool2D) GetPadding() int {
 // GetArgmax returns the argmax indices buffer (for testing/verification).
 func (m *MaxPool2D) GetArgmax() []int {
 	return m.argmaxBuf
+}
+
+// GetOutputDimensions returns the spatial dimensions of the output.
+func (m *MaxPool2D) GetOutputDimensions() (int, int) {
+	if m.inputHeight == 0 || m.inputWidth == 0 {
+		return 0, 0
+	}
+	return m.computeOutputSize(m.inputHeight, m.inputWidth)
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
