@@ -7,11 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 func main() {
@@ -108,25 +104,25 @@ func main() {
 	fmt.Printf("Vocab Size: %d, Samples: %d, Max Length: %d\n", vocabSize, len(x), maxLen)
 
 	// 4. Define Architecture: Embedding -> Unrolled GRU -> Dense
-	layers := []layer.Layer{
-		layer.NewEmbedding(vocabSize, 16), // [maxLen, 16]
-		layer.NewFlatten(),                // SequenceUnroller expects [T * InSize]
-		layer.NewSequenceUnroller(layer.NewGRU(16, 32), maxLen, false), // Returns [32]
-		layer.NewDense(32, 2, activations.LogSoftmax{}),
-	}
+	model := goneuron.NewSequential(
+		goneuron.Embedding(vocabSize, 16), // [maxLen, 16]
+		goneuron.Flatten(),                // SequenceUnroller expects [T * InSize]
+		goneuron.SequenceUnroller(goneuron.GRU(16, 32), maxLen, false), // Returns [32]
+		goneuron.Dense(32, 2, goneuron.LogSoftmax),
+	)
 
-	optimizer := opt.NewAdam(0.001)
-	model := net.New(layers, loss.NLLLoss{}, optimizer)
+	optimizer := goneuron.Adam(0.001)
+	model.Compile(optimizer, goneuron.NLLLoss)
 
 	// 5. Training with Callbacks
 	fmt.Println("\nStarting training...")
 	start := time.Now()
 
-	scheduler := opt.NewReduceLROnPlateau(optimizer, 0.5, 5, 0.0001, 0.00001)
-	callbacks := []net.Callback{
-		net.Logger{Interval: 10},
-		net.NewEarlyStopping(10, 0.0001),
-		net.NewSchedulerCallback(scheduler),
+	scheduler := goneuron.ReduceLROnPlateau(optimizer, 0.5, 5, 0.0001, 0.00001)
+	callbacks := []goneuron.Callback{
+		goneuron.Logger(10),
+		goneuron.EarlyStopping(10, 0.0001),
+		goneuron.SchedulerCallback(scheduler),
 	}
 
 	model.Fit(x, y, 200, 4, callbacks...)

@@ -8,11 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 // Vocabulary holds the word-to-index mapping
@@ -193,47 +189,35 @@ func main() {
 	// 3. Global Attention
 	// 4. Dense Classifier
 
-	// Create components
-	emb := layer.NewEmbedding(vocab.nextIdx, embeddingDim)
+	model := goneuron.NewSequential(
+		goneuron.Embedding(vocab.nextIdx, embeddingDim),
+		goneuron.Flatten(),
+		goneuron.SequenceUnroller(goneuron.Bidirectional(goneuron.LSTM(embeddingDim, lstmUnits)), maxLen, true),
+		goneuron.GlobalAttention(lstmUnits*2),
+		goneuron.Dense(lstmUnits*2, 2, goneuron.LogSoftmax),
+	)
 
-	// BiLSTM
-	lstmBase := layer.NewLSTM(embeddingDim, lstmUnits)
-	bilstm := layer.NewBidirectional(lstmBase)
-	// We need to unroll the bidirectional layer over the sequence
-	seqUnroller := layer.NewSequenceUnroller(bilstm, maxLen, true) // return full sequence for attention
-
-	// Attention
-	attention := layer.NewGlobalAttention(lstmUnits * 2) // BiLSTM output is 2x lstmUnits
-
-	layers := []layer.Layer{
-		emb,
-		layer.NewFlatten(),
-		seqUnroller,
-		attention,
-		layer.NewDense(lstmUnits*2, 2, activations.LogSoftmax{}),
-	}
-
-	optimizer := opt.NewAdam(0.001)
-	network := net.New(layers, loss.CrossEntropy{}, optimizer)
+	optimizer := goneuron.Adam(0.001)
+	model.Compile(optimizer, goneuron.CrossEntropy)
 
 	fmt.Println("\nStarting BiLSTM + Attention training...")
 	start := time.Now()
 	epochs := 50
 	batchSize := 4
 
-	scheduler := opt.NewReduceLROnPlateau(optimizer, 0.5, 5, 0.01, 1e-6)
+	scheduler := goneuron.ReduceLROnPlateau(optimizer, 0.5, 5, 0.01, 1e-6)
 
-	callbacks := []net.Callback{
-		net.Logger{Interval: 10},
-		net.NewSchedulerCallback(scheduler),
+	callbacks := []goneuron.Callback{
+		goneuron.Logger(10),
+		goneuron.SchedulerCallback(scheduler),
 	}
 
-	network.Fit(xTrain, yTrain, epochs, batchSize, callbacks...)
+	model.Fit(xTrain, yTrain, epochs, batchSize, callbacks...)
 	fmt.Printf("\nTraining finished in %v\n", time.Since(start))
 
 	correct := 0
 	for i := 0; i < len(xTest); i++ {
-		pred := network.Forward(xTest[i])
+		pred := model.Forward(xTest[i])
 		if argmax(pred) == argmax(yTest[i]) {
 			correct++
 		}
@@ -241,7 +225,7 @@ func main() {
 	fmt.Printf("Test Accuracy: %.2f%%\n", float32(correct)/float32(len(xTest))*100)
 
 	// Save model
-	network.Save("sentiment_imdb_bilstm_attention.gob")
+	model.Save("sentiment_imdb_bilstm_attention.gob")
 }
 
 func argmax(v []float32) int {

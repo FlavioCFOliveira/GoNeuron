@@ -13,11 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 const (
@@ -178,56 +174,40 @@ func main() {
 		yTrain[i], yTrain[j] = yTrain[j], yTrain[i]
 	})
 
-	// 2. Define Sequential Architecture
-	// Each MNIST image (28x28) is treated as a sequence of 28 rows
-	// Each row (28 pixels) is fed to LSTM at each time step
+	// 2. Define Architecture using High-Level API
 	lstmUnits := 64
+	model := goneuron.NewSequential(
+		goneuron.SequenceUnroller(goneuron.LSTM(cols, lstmUnits), rows, false),
+		goneuron.Dense(lstmUnits, 128, goneuron.Tanh),
+		goneuron.Dense(128, 10, goneuron.LogSoftmax),
+	)
 
-	// Create LSTM layer
-	lstm := layer.NewLSTM(cols, lstmUnits)
+	// 3. Compile Model
+	optimizer := goneuron.Adam(0.001)
+	model.Compile(optimizer, goneuron.CrossEntropy)
 
-	// Wrap in SequenceUnroller for processing full sequences
-	seqUnroller := layer.NewSequenceUnroller(lstm, rows, false)
-
-	layers := []layer.Layer{
-		seqUnroller, // Processes rows sequentially through LSTM
-		layer.NewDense(lstmUnits, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.LogSoftmax{}),
-	}
-
-	// 3. Initialize Network
-	optimizer := opt.NewAdam(0.001)
-	// Using CrossEntropy for classification. Note: CrossEntropy in GoNeuron handles Softmax.
-	// But we use LogSoftmax + CrossEntropy for stability, or custom NLL if available.
-	network := net.New(layers, loss.CrossEntropy{}, optimizer)
-
-	// 4. Training with Callbacks
+	// 4. Training
 	fmt.Println("\nStarting Sequential MNIST training...")
-	fmt.Printf("Architecture: %dx%d image -> LSTM(%d) -> Dense(128) -> Dense(10)\n",
-		rows, cols, lstmUnits)
+	model.Summary()
 
 	start := time.Now()
-	epochs := 10
-	batchSize := 64 // Larger batch for efficiency
+	scheduler := goneuron.ReduceLROnPlateau(optimizer, 0.5, 2, 0.01, 1e-8)
 
-	// Learning rate scheduler
-	scheduler := opt.NewReduceLROnPlateau(optimizer, 0.5, 2, 0.01, 1e-8)
-
-	callbacks := []net.Callback{
-		net.Logger{Interval: 1},
-		net.NewModelCheckpoint("sequential_mnist_best.gob"),
-		net.NewEarlyStopping(5, 0.001),
-		net.NewSchedulerCallback(scheduler),
+	callbacks := []goneuron.Callback{
+		goneuron.Logger(1),
+		goneuron.ModelCheckpoint("sequential_mnist_best.gob"),
+		goneuron.EarlyStopping(5, 0.001),
+		goneuron.SchedulerCallback(scheduler),
 	}
 
-	network.Fit(xTrain, yTrain, epochs, batchSize, callbacks...)
+	model.Fit(xTrain, yTrain, 10, 64, callbacks...)
 	fmt.Printf("\nTraining finished in %v\n", time.Since(start))
 
 	// 5. Evaluation
 	fmt.Println("\nEvaluating on test set...")
 	correct := 0
 	for i := 0; i < len(xTest); i++ {
-		pred := network.Forward(xTest[i])
+		pred := model.Predict(xTest[i])
 		if argmax(pred) == argmax(yTest[i]) {
 			correct++
 		}
@@ -237,7 +217,7 @@ func main() {
 	fmt.Printf("Test Accuracy: %.2f%%\n", accuracy*100)
 
 	// Save final model
-	network.Save("sequential_mnist_final.gob")
+	model.Save("sequential_mnist_final.gob")
 	fmt.Println("Model saved to sequential_mnist_final.gob")
 }
 

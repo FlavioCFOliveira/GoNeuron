@@ -4,15 +4,11 @@ import (
 	"fmt"
 
 	"github.com/FlavioCFOliveira/GoNeuron/examples/utils"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 func main() {
-	fmt.Println("=== SLP for Iris Classification ===")
+	fmt.Println("=== SLP for Iris Classification (High-Level API) ===")
 
 	// 1. Load and prepare data
 	data, err := utils.LoadIris()
@@ -31,31 +27,21 @@ func main() {
 	testTargets := data.Targets[trainSize:]
 
 	// 2. Create architecture (4 inputs -> 3 outputs with Softmax)
-	layers := []layer.Layer{
-		layer.NewDense(4, 3, activations.Softmax{}),
-	}
+	model := goneuron.NewSequential(
+		goneuron.Dense(4, 3, goneuron.Softmax),
+	)
 
-	optimizer := opt.NewAdam(0.01)
-	network := net.New(layers, loss.CrossEntropy{}, optimizer)
+	// 3. Compile
+	model.Compile(goneuron.Adam(0.01), goneuron.CrossEntropy)
 
-	// 3. Train
-	epochs := 200
-	fmt.Printf("Training for %d epochs...\n", epochs)
+	// 4. Train
+	fmt.Println("Training...")
+	model.Fit(trainInputs, trainTargets, 200, 1, goneuron.Logger(20))
 
-	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := float32(0.0)
-		for i := range trainInputs {
-			totalLoss += network.Train(trainInputs[i], trainTargets[i])
-		}
-		if epoch%20 == 0 {
-			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float32(trainSize))
-		}
-	}
-
-	// 4. Evaluate
+	// 5. Evaluate
 	correct := 0
 	for i := range testInputs {
-		output := network.Forward(testInputs[i])
+		output := model.Predict(testInputs[i])
 		if argmax(output) == argmax(testTargets[i]) {
 			correct++
 		}

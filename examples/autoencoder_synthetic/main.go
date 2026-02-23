@@ -4,11 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 func main() {
@@ -30,38 +26,29 @@ func main() {
 	}
 
 	// 2. Create architecture (10 -> 2 -> 10)
-	layers := []layer.Layer{
+	model := goneuron.NewSequential(
 		// Encoder
-		layer.NewDense(10, 2, activations.ReLU{}),
+		goneuron.Dense(10, 2, goneuron.ReLU),
 		// Decoder
-		layer.NewDense(2, 10, activations.Sigmoid{}), // Using Sigmoid assuming input normalized to [0,1]
-	}
+		goneuron.Dense(2, 10, goneuron.Sigmoid), // Using Sigmoid assuming input normalized to [0,1]
+	)
 
-	optimizer := opt.NewAdam(0.01)
-	network := net.New(layers, loss.MSE{}, optimizer)
+	model.Compile(goneuron.Adam(0.01), goneuron.MSE)
 
 	// 3. Train (self-supervised: target == input)
 	epochs := 100
 	fmt.Printf("Training for %d epochs...\n", epochs)
-	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := float32(0.0)
-		for i := range data {
-			totalLoss += network.Train(data[i], data[i])
-		}
-		if epoch%20 == 0 {
-			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float32(numSamples))
-		}
-	}
+	model.Fit(data, data, epochs, 32, goneuron.Logger(20))
 
 	// 4. Demonstrate compression
 	fmt.Println("\n=== Sample Reconstruction ===")
 	sample := data[0]
-	reconstructed := network.Forward(sample)
+	reconstructed := model.Forward(sample)
 
 	fmt.Printf("Original:      %.3f\n", sample[:5])
 	fmt.Printf("Reconstructed: %.3f\n", reconstructed[:5])
 
 	// Latent space (encoder output)
-	latent := layers[0].Forward(sample)
+	latent := model.Layers()[0].Forward(sample)
 	fmt.Printf("Latent (2D):   %.3f\n", latent)
 }

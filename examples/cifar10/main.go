@@ -9,11 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 const (
@@ -111,37 +107,33 @@ func main() {
 	// Conv2D (64 filters, 3x3) -> BatchNorm2D -> Conv2D (64 filters, 3x3) -> BatchNorm2D -> MaxPool2D (2x2)
 	// Flatten -> Dense (512) -> Dropout (0.5) -> Dense (10) -> LogSoftmax
 
-	l0 := layer.NewConv2D(3, 32, 3, 1, 1, activations.ReLU{})
-	bn0 := layer.NewBatchNorm2D(32, 1e-5, 0.1, true)
-	l1 := layer.NewConv2D(32, 32, 3, 1, 1, activations.ReLU{})
-	bn1 := layer.NewBatchNorm2D(32, 1e-5, 0.1, true)
-	mp0 := layer.NewMaxPool2D(32, 2, 2, 0) // 32x32 -> 16x16
+	// 2. Architecture Design
+	model := goneuron.NewSequential(
+		goneuron.Conv2D(3, 32, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(32),
+		goneuron.Conv2D(32, 32, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(32),
+		goneuron.MaxPool2D(32, 2, 2, 0), // 32x32 -> 16x16
 
-	l2 := layer.NewConv2D(32, 64, 3, 1, 1, activations.ReLU{})
-	bn2 := layer.NewBatchNorm2D(64, 1e-5, 0.1, true)
-	l3 := layer.NewConv2D(64, 64, 3, 1, 1, activations.ReLU{})
-	bn3 := layer.NewBatchNorm2D(64, 1e-5, 0.1, true)
-	mp1 := layer.NewMaxPool2D(64, 2, 2, 0) // 16x16 -> 8x8
+		goneuron.Conv2D(32, 64, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(64),
+		goneuron.Conv2D(64, 64, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(64),
+		goneuron.MaxPool2D(64, 2, 2, 0), // 16x16 -> 8x8
 
-	flatten := layer.NewFlatten()
-	// Output of mp1 is 64 channels * 8 * 8 = 4096
-	dense1 := layer.NewDense(4096, 512, activations.ReLU{})
-	dropout := layer.NewDropout(0.5, 512)
-	dense2 := layer.NewDense(512, 10, activations.LogSoftmax{})
+		goneuron.Flatten(),
+		goneuron.Dense(4096, 512, goneuron.ReLU),
+		goneuron.Dropout(0.5, 512),
+		goneuron.Dense(512, 10, goneuron.LogSoftmax),
+	)
 
-	layers := []layer.Layer{
-		l0, bn0, l1, bn1, mp0,
-		l2, bn2, l3, bn3, mp1,
-		flatten, dense1, dropout, dense2,
-	}
-
-	network := net.New(layers, loss.NLLLoss{}, opt.NewAdam(0.001))
+	model.Compile(goneuron.Adam(0.001), goneuron.NLLLoss)
 
 	// Support for MetalDevice if available
-	metal := layer.NewMetalDevice()
-	if metal.IsAvailable() {
-		fmt.Println("Using Metal device for acceleration")
-		network.SetDevice(metal)
+	metal := goneuron.GetDefaultDevice()
+	if metal.Type() == 1 { // GPU
+		fmt.Println("Using GPU device for acceleration")
+		model.SetDevice(metal)
 	} else {
 		fmt.Println("Using CPU device")
 	}
@@ -172,8 +164,8 @@ func main() {
 			}
 
 			// Use training mode for dropout
-			dropout.SetTraining(true)
-			lossVal := network.TrainBatch(batchX, batchY)
+			model.SetTraining(true)
+			lossVal := model.TrainBatch(batchX, batchY)
 			totalLoss += lossVal
 		}
 
@@ -181,7 +173,7 @@ func main() {
 		avgLoss := totalLoss / float32(len(dataset.TrainInputs)/batchSize)
 
 		// 4. Evaluation
-		accuracy := evaluate(network, dataset.TestInputs, dataset.TestTargets, dropout)
+		accuracy := evaluate(model, dataset.TestInputs, dataset.TestTargets)
 		fmt.Printf("Epoch %d/%d - Loss: %.4f - Test Accuracy: %.2f%% - Duration: %v\n",
 			epoch+1, epochs, avgLoss, accuracy*100, duration)
 	}
@@ -190,12 +182,12 @@ func main() {
 	fmt.Println("Training complete!")
 }
 
-func evaluate(network *net.Network, inputs, targets [][]float32, dropout *layer.Dropout) float32 {
+func evaluate(model *goneuron.Model, inputs, targets [][]float32) float32 {
 	correct := 0
-	dropout.SetTraining(false)
+	model.SetTraining(false)
 
 	for i := range inputs {
-		pred := network.Forward(inputs[i])
+		pred := model.Forward(inputs[i])
 		if argmax(pred) == argmax(targets[i]) {
 			correct++
 		}

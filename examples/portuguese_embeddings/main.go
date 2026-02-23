@@ -5,10 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
 // SimpleTokenizer simulates a basic subword tokenizer for Portuguese.
@@ -75,7 +73,7 @@ func SimulatedDataset() []string {
 }
 
 func main() {
-	fmt.Println("=== GoNeuron: Portuguese Embeddings Architecture ===")
+	fmt.Println("=== GoNeuron: Portuguese Embeddings Architecture (High-Level API) ===")
 
 	// BERT-like dimensions
 	const (
@@ -86,21 +84,18 @@ func main() {
 		ffDim        = 3072
 	)
 
-	// 1. Initialize Device (Metal/MPS if available on macOS arm64)
+	// 1. Initialize Device
 	device := layer.GetDefaultDevice()
 	fmt.Printf("Device initialized: %v\n", device.Type())
 
-	// 2. Build Architecture
-	// Embedding -> PositionalEncoding -> TransformerBlock -> CLSPooling
-	layers := []layer.Layer{
-		layer.NewEmbedding(vocabSize, embeddingDim),
-		layer.NewPositionalEncoding(seqLen, embeddingDim),
-		layer.NewTransformerBlock(embeddingDim, numHeads, seqLen, ffDim),
-		layer.NewCLSPooling(seqLen, embeddingDim),
-	}
+	// 2. Build Architecture using High-Level API
+	model := goneuron.NewSequential(
+		goneuron.Embedding(vocabSize, embeddingDim),
+		goneuron.PositionalEncoding(seqLen, embeddingDim),
+		goneuron.TransformerBlock(embeddingDim, numHeads, seqLen, ffDim, false),
+		goneuron.CLSPooling(seqLen, embeddingDim),
+	)
 
-	// Create Network
-	model := net.New(layers, loss.MSE{}, opt.NewAdam(0.001))
 	model.SetDevice(device)
 
 	// 3. Prepare Simulated Data
@@ -119,8 +114,7 @@ func main() {
 	tokens := tokenizer.Tokenize(sampleSentence)
 
 	start := time.Now()
-	// In the real implementation of Forward in net.Network, it calls Forward for each layer
-	embedding := model.Forward(tokens)
+	embedding := model.Predict(tokens)
 	elapsed := time.Since(start)
 
 	// 5. Results
@@ -132,13 +126,6 @@ func main() {
 	fmt.Printf("Memory Layout: Contiguous float32\n")
 	fmt.Printf("Zero-Allocation Pooling: Yes\n")
 	fmt.Printf("Hardware Acceleration: %v\n", device.Type() == layer.GPU)
-	fmt.Printf("Total Model Parameters: ~%d\n", countParams(model))
-}
 
-func countParams(n *net.Network) int {
-	count := 0
-	for _, l := range n.Layers() {
-		count += len(l.Params())
-	}
-	return count
+	model.Summary()
 }

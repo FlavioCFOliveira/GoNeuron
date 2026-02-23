@@ -8,11 +8,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 type StockData struct {
@@ -106,16 +102,16 @@ func main() {
 	xTrain, xTest := x[:splitIdx], x[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
-	layers := []layer.Layer{
-		layer.NewSequenceUnroller(layer.NewLSTM(1, lstmUnits), lookback, false),
-		layer.NewDense(lstmUnits, 1, activations.Linear{}),
-	}
+	model := goneuron.NewSequential(
+		goneuron.SequenceUnroller(goneuron.LSTM(1, lstmUnits), lookback, false),
+		goneuron.Dense(lstmUnits, 1, goneuron.Linear),
+	)
 
-	optimizer := opt.NewAdam(0.001)
-	model := net.New(layers, loss.MSE{}, optimizer)
+	optimizer := goneuron.Adam(0.001)
+	model.Compile(optimizer, goneuron.MSE)
 
 	fmt.Println("Training...")
-	model.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 20})
+	model.Fit(xTrain, yTrain, epochs, 16, goneuron.Logger(20))
 
 	fmt.Println("\nEvaluating...")
 	var totalSE float32

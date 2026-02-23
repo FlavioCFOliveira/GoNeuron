@@ -4,11 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 func main() {
@@ -33,33 +29,24 @@ func main() {
 	}
 
 	// 2. Create architecture (8 -> 64 -> 32 -> 1)
-	layers := []layer.Layer{
-		layer.NewDense(8, 64, activations.ReLU{}),
-		layer.NewDense(64, 32, activations.ReLU{}),
-		layer.NewDense(32, 1, activations.Linear{}),
-	}
+	model := goneuron.NewSequential(
+		goneuron.Dense(8, 64, goneuron.ReLU),
+		goneuron.Dense(64, 32, goneuron.ReLU),
+		goneuron.Dense(32, 1, goneuron.Linear),
+	)
 
-	optimizer := opt.NewAdam(0.005)
-	network := net.New(layers, loss.Huber{Delta: 1.0}, optimizer)
+	model.Compile(goneuron.Adam(0.005), goneuron.Huber(1.0))
 
 	// 3. Train
 	epochs := 200
 	fmt.Printf("Training for %d epochs...\n", epochs)
 
-	for epoch := 1; epoch <= epochs; epoch++ {
-		totalLoss := float32(0.0)
-		for i := range inputs {
-			totalLoss += network.Train(inputs[i], targets[i])
-		}
-		if epoch%20 == 0 {
-			fmt.Printf("Epoch %d - Avg Loss: %.6f\n", epoch, totalLoss/float32(numSamples))
-		}
-	}
+	model.Fit(inputs, targets, epochs, 32, goneuron.Logger(20))
 
 	// 4. Evaluate
 	fmt.Println("\n=== Sample Predictions ===")
 	for i := 0; i < 5; i++ {
-		output := network.Forward(inputs[i])
+		output := model.Forward(inputs[i])
 		fmt.Printf("Target: %8.3f, Prediction: %8.3f, Diff: %8.3f\n",
 			targets[i][0], output[0], output[0]-targets[i][0])
 	}

@@ -7,11 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 )
 
 // Vocabulary holds the word-to-index mapping
@@ -61,7 +57,7 @@ func Tokenize(sentence string, vocab *Vocabulary, maxLength int) []float32 {
 }
 
 func main() {
-	fmt.Println("=== Mini-Transformer Sentiment Analysis ===")
+	fmt.Println("=== Mini-Transformer Sentiment Analysis (High-Level API) ===")
 
 	// 1. Data Preparation
 	posSentences := []string{
@@ -114,32 +110,25 @@ func main() {
 		ffDim    = 64
 	)
 
-	// Architecture:
-	// 1. Embedding
-	// 2. Positional Encoding
-	// 3. Transformer Block
-	// 4. Global Average Pooling
-	// 5. Dense -> LogSoftmax
+	model := goneuron.NewSequential(
+		goneuron.Embedding(vocab.nextIdx, dModel),
+		goneuron.PositionalEncoding(maxLen, dModel),
+		goneuron.TransformerBlock(dModel, numHeads, maxLen, ffDim, false), // false for sentiment (not causal)
+		goneuron.GlobalAveragePooling1D(maxLen, dModel),
+		goneuron.Dense(dModel, 2, goneuron.LogSoftmax),
+	)
 
-	layers := []layer.Layer{
-		layer.NewEmbedding(vocab.nextIdx, dModel),
-		layer.NewPositionalEncoding(maxLen, dModel),
-		layer.NewTransformerBlock(dModel, numHeads, maxLen, ffDim),
-		layer.NewGlobalAveragePooling1D(maxLen, dModel),
-		layer.NewDense(dModel, 2, activations.LogSoftmax{}),
-	}
+	// 3. Compile and Train
+	model.Compile(goneuron.Adam(0.001), goneuron.CrossEntropy)
 
-	optimizer := opt.NewAdam(0.001)
-	network := net.New(layers, loss.CrossEntropy{}, optimizer)
-
-	// 3. Training (Simplified for demonstration)
 	fmt.Println("Starting training...")
-	network.Fit(x, y, 10, 2, net.Logger{Interval: 2})
+	model.Summary()
+	model.Fit(x, y, 10, 2, goneuron.Logger(2))
 
 	// 4. Inference
 	testSentence := "i loved the movie"
 	testTokens := Tokenize(testSentence, vocab, maxLen)
-	prediction := network.Forward(testTokens)
+	prediction := model.Predict(testTokens)
 
 	fmt.Printf("\nTest Sentence: \"%s\"\n", testSentence)
 	if prediction[0] > prediction[1] {

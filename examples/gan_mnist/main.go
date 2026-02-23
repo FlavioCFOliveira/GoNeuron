@@ -14,11 +14,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
 const (
@@ -137,28 +134,26 @@ func main() {
 	}
 	fmt.Printf("Loaded %d training samples\n", len(xTrain))
 
-	// 2. Define Generator
-	// Noise (100) -> 256 (ReLU) -> 512 (ReLU) -> 1024 (ReLU) -> 784 (Tanh)
-	genLayers := []layer.Layer{
-		layer.NewDense(noiseSize, 256, activations.ReLU{}),
-		layer.NewDense(256, 512, activations.ReLU{}),
-		layer.NewDense(512, 1024, activations.ReLU{}),
-		layer.NewDense(1024, imgSize, activations.Tanh{}),
-	}
-	gen := net.New(genLayers, nil, opt.NewAdam(0.0002))
+	// 2. Define Generator using High-Level API
+	gen := goneuron.NewSequential(
+		goneuron.Dense(noiseSize, 256, goneuron.ReLU),
+		goneuron.Dense(256, 512, goneuron.ReLU),
+		goneuron.Dense(512, 1024, goneuron.ReLU),
+		goneuron.Dense(1024, imgSize, goneuron.Tanh),
+	)
+	gen.Compile(goneuron.Adam(0.0002), goneuron.MSE) // Loss not used directly for G
 	gen.SetDevice(device)
 
-	// 3. Define Discriminator
-	// 784 -> 1024 (LeakyReLU) -> Dropout (0.3) -> 512 (LeakyReLU) -> Dropout (0.3) -> 256 (LeakyReLU) -> 1 (Sigmoid)
-	discLayers := []layer.Layer{
-		layer.NewDense(imgSize, 1024, activations.NewLeakyReLU(0.2)),
-		layer.NewDropout(0.3, 1024),
-		layer.NewDense(1024, 512, activations.NewLeakyReLU(0.2)),
-		layer.NewDropout(0.3, 512),
-		layer.NewDense(512, 256, activations.NewLeakyReLU(0.2)),
-		layer.NewDense(256, 1, activations.Sigmoid{}),
-	}
-	disc := net.New(discLayers, loss.BCELoss{}, opt.NewAdam(0.0002))
+	// 3. Define Discriminator using High-Level API
+	disc := goneuron.NewSequential(
+		goneuron.Dense(imgSize, 1024, goneuron.LeakyReLU(0.2)),
+		goneuron.Dropout(0.3, 1024),
+		goneuron.Dense(1024, 512, goneuron.LeakyReLU(0.2)),
+		goneuron.Dropout(0.3, 512),
+		goneuron.Dense(512, 256, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(256, 1, goneuron.Sigmoid),
+	)
+	disc.Compile(goneuron.Adam(0.0002), goneuron.BCELoss)
 	disc.SetDevice(device)
 
 	// 4. Training loop
@@ -166,12 +161,10 @@ func main() {
 	batchSize := 128
 	numBatches := len(xTrain) / batchSize
 
-	realLabels := make([]float32, 1)
-	realLabels[0] = 1.0
-	fakeLabels := make([]float32, 1)
-	fakeLabels[0] = 0.0
+	realLabels := []float32{1.0}
+	fakeLabels := []float32{0.0}
 
-	fmt.Println("Starting GAN training...")
+	fmt.Println("Starting GAN training (High-Level API)...")
 	for epoch := 0; epoch < epochs; epoch++ {
 		start := time.Now()
 		totalDLoss := float32(0)
@@ -184,7 +177,7 @@ func main() {
 			// Real images
 			for i := 0; i < batchSize; i++ {
 				idx := rand.Intn(len(xTrain))
-				yPred := disc.Forward(xTrain[idx])
+				yPred := disc.Predict(xTrain[idx])
 				totalDLoss += disc.Loss().Forward(yPred, realLabels)
 				grad := disc.Loss().Backward(yPred, realLabels)
 				disc.Backward(grad)
@@ -193,8 +186,8 @@ func main() {
 			// Fake images
 			noise := generateNoise(batchSize)
 			for i := 0; i < batchSize; i++ {
-				fakeImg := gen.Forward(noise[i])
-				yPred := disc.Forward(fakeImg)
+				fakeImg := gen.Predict(noise[i])
+				yPred := disc.Predict(fakeImg)
 				totalDLoss += disc.Loss().Forward(yPred, fakeLabels)
 				grad := disc.Loss().Backward(yPred, fakeLabels)
 				disc.Backward(grad)
@@ -214,15 +207,13 @@ func main() {
 			gen.ClearGradients()
 			noise = generateNoise(batchSize)
 			for i := 0; i < batchSize; i++ {
-				fakeImg := gen.Forward(noise[i])
-				yPred := disc.Forward(fakeImg) // D(G(noise))
+				fakeImg := gen.Predict(noise[i])
+				yPred := disc.Predict(fakeImg) // D(G(noise))
 
 				totalGLoss += disc.Loss().Forward(yPred, realLabels)
 				grad := disc.Loss().Backward(yPred, realLabels)
 
 				// Backprop through Discriminator to get grad w.r.t fakeImg
-				// We don't want to update D here, but disc.Backward will accumulate grads.
-				// However, since we don't call disc.Step(), it's fine as long as we clear D grads next batch.
 				gradFakeImg := disc.Backward(grad)
 				gen.Backward(gradFakeImg)
 			}
@@ -245,7 +236,7 @@ func main() {
 		// Save sample images
 		if (epoch+1)%10 == 0 || epoch == 0 {
 			noise := generateNoise(1)
-			sample := gen.Forward(noise[0])
+			sample := gen.Predict(noise[0])
 			samplePath := filepath.Join("examples", "gan_mnist", fmt.Sprintf("sample_epoch_%d.png", epoch+1))
 			saveImage(sample, samplePath)
 			fmt.Printf("Saved sample to %s\n", samplePath)
