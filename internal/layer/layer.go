@@ -196,7 +196,7 @@ func (d *Dense) Backward(grad []float32) []float32 {
 		for o := 0; o < outSize; o++ {
 			deriv := d.act.Derivative(d.preActBuf[o])
 			dz[o] = grad[o] * deriv
-			gradB[o] = dz[o]
+			gradB[o] += dz[o]
 		}
 	}
 
