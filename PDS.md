@@ -1,0 +1,59 @@
+# Plano de Desenvolvimento de Software (PDS) - GoNeuron API Simplificada
+
+## 1. Visão Geral
+O projeto visa transformar o GoNeuron de uma biblioteca modular de baixo nível numa framework de Deep Learning de alta produtividade para Go, mantendo a performance crítica. O foco é a "Human API" (API para humanos), minimizando o boilerplate e a complexidade de gestão de memória para o utilizador final.
+
+## 2. Objetivos
+- **Redução de Código**: Diminuir em pelo menos 60% as linhas necessárias para definir e treinar um modelo.
+- **Abstração de Gestão de Memória**: Ocultar a gestão de buffers e estados intermédios.
+- **Unificação de Interfaces**: Criar um ponto de entrada único (`goneuron`) para todas as funcionalidades comuns.
+- **Automação de Treino**: Implementar loops de treino robustos com suporte a callbacks.
+
+## 3. Arquitetura da "Human API"
+
+### 3.1. Camada de Abstração (`Sequential`)
+A estrutura `Sequential` atua como um orchestrator que:
+- Encapsula a lógica de `Network`.
+- Gere automaticamente a compatibilidade de dimensões entre camadas.
+- Propaga o estado de `Training/Inference` globalmente (ex: afetando Dropout e BatchNorm).
+
+### 3.2. Fachada `goneuron`
+Um pacote que re-exporta componentes internos para facilitar o acesso:
+- **Factory Functions**: `Dense()`, `Conv2D()`, `LSTM()`, etc.
+- **Constantes de Ativação**: `ReLU`, `Tanh`, `Softmax`.
+- **Utilitários de Treino**: Callbacks e Schedulers integrados.
+
+## 4. Estado Atual (Concluído)
+- [x] Implementação do modelo `Sequential`.
+- [x] Criação do pacote de fachada `goneuron`.
+- [x] Implementação de métodos `Compile`, `Fit`, `Predict` e `Evaluate`.
+- [x] Conversão de 100% dos exemplos existentes para a nova API.
+- [x] Suporte a Hardware Acceleration (Metal/MPS) transparente via `SetDevice`.
+- [x] Sistema de Callbacks (Logger, Checkpoint, EarlyStopping).
+
+## 5. Roadmap de Desenvolvimento Futuro
+
+### Fase 5: Validação e Diagnóstico (Próximos Passos)
+- [ ] **Lazy Shape Inference**: Permitir que uma camada detecte automaticamente o `InSize` com base na saída da camada anterior.
+- [ ] **Data Loaders**: Criar uma interface amigável para carregar datasets CSV, Imagens e Sequências.
+- [ ] **Visualização de Métricas**: Exportação de métricas de treino para formatos compatíveis com ferramentas de visualização (ex: CSV ou JSON para gráficos).
+
+### Fase 6: Expansão de Arquiteturas
+- [ ] **Functional API**: Permitir arquiteturas não lineares (ResNet, Inception) através de uma API de grafos.
+- [ ] **Novas Camadas**: Suporte nativo para Attention Mecanisms mais avançados e camadas de Normalização adicionais.
+
+## 6. Exemplo de Utilização (Padrão PDS)
+```go
+model := goneuron.NewSequential(
+    goneuron.Conv2D(1, 32, 3, 1, 1, goneuron.ReLU),
+    goneuron.MaxPool2D(32, 2, 2, 0),
+    goneuron.Flatten(),
+    goneuron.Dense(6272, 10, goneuron.Softmax),
+)
+
+model.Compile(goneuron.Adam(0.001), goneuron.CrossEntropy)
+model.Fit(xTrain, yTrain, 10, 32, goneuron.Logger(1))
+```
+
+## 7. Conclusão
+A modernização da API coloca o GoNeuron no mesmo nível de usabilidade de frameworks líderes de mercado, tornando o ecossistema Go mais apelativo para investigadores e engenheiros de Machine Learning.
