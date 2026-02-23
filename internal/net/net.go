@@ -58,6 +58,15 @@ func (n *Network) SetDevice(device layer.Device) {
 	}
 }
 
+// SetTraining sets the training mode for all layers that support it.
+func (n *Network) SetTraining(training bool) {
+	for _, l := range n.layers {
+		if t, ok := l.(interface{ SetTraining(bool) }); ok {
+			t.SetTraining(training)
+		}
+	}
+}
+
 // Clone creates a deep copy of the network.
 func (n *Network) Clone() *Network {
 	newLayers := make([]layer.Layer, len(n.layers))
