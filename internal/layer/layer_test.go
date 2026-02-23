@@ -193,6 +193,7 @@ func TestDenseIdentityMapping(t *testing.T) {
 
 	// Train for identity mapping
 	for i := 0; i < 1000; i++ {
+		d.ClearGradients()
 		input := []float32{0.5, 0.5}
 		// Forward
 		output := d.Forward(input)
