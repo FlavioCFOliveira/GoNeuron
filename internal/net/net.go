@@ -2,6 +2,7 @@
 package net
 
 import (
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
@@ -727,6 +728,115 @@ func (n *Network) SaveJSON(filename string) error {
 	}
 
 	return encoder.Encode(data)
+}
+
+// SaveBinaryWeights saves all network parameters to a simple binary format.
+// Format:
+// - Magic: "GONN" (4 bytes)
+// - Version: 1 (int32)
+// - NumTensors: (int32)
+// - For each tensor:
+//   - NameLen: (int32)
+//   - Name: (string)
+//   - Rank: (int32)
+//   - Shape: (int32 array)
+//   - DataLen: (int32, number of float32s)
+//   - Data: (float32 array)
+func (n *Network) SaveBinaryWeights(filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	// 1. Write magic and version
+	if _, err := file.Write([]byte("GONN")); err != nil {
+		return err
+	}
+	if err := binary.Write(file, binary.LittleEndian, int32(1)); err != nil {
+		return err
+	}
+
+	// 2. Collect all named parameters from all layers
+	type tensor struct {
+		name  string
+		shape []int32
+		data  []float32
+	}
+	var tensors []tensor
+
+	for i, l := range n.layers {
+		prefix := fmt.Sprintf("layer_%d_", i)
+		typeName := "unknown"
+		// Use ExtractLayerConfig to get type if possible, or just use type switching
+		cfg := ExtractLayerConfig(l)
+		typeName = cfg.Type
+		prefix = fmt.Sprintf("layer_%d_%s_", i, typeName)
+
+		if provider, ok := l.(layer.NamedParamProvider); ok {
+			named := provider.NamedParams()
+			for _, p := range named {
+				shape32 := make([]int32, len(p.Shape))
+				for j, v := range p.Shape {
+					shape32[j] = int32(v)
+				}
+				tensors = append(tensors, tensor{
+					name:  prefix + p.Name,
+					shape: shape32,
+					data:  p.Data,
+				})
+			}
+		} else {
+			// Fallback: just export Params() as a flat tensor
+			params := l.Params()
+			if len(params) > 0 {
+				tensors = append(tensors, tensor{
+					name:  prefix + "params",
+					shape: []int32{int32(len(params))},
+					data:  params,
+				})
+			}
+		}
+	}
+
+	// 3. Write number of tensors
+	if err := binary.Write(file, binary.LittleEndian, int32(len(tensors))); err != nil {
+		return err
+	}
+
+	// 4. Write each tensor
+	for _, t := range tensors {
+		// Name
+		nameBytes := []byte(t.name)
+		if err := binary.Write(file, binary.LittleEndian, int32(len(nameBytes))); err != nil {
+			return err
+		}
+		if _, err := file.Write(nameBytes); err != nil {
+			return err
+		}
+
+		// Rank
+		if err := binary.Write(file, binary.LittleEndian, int32(len(t.shape))); err != nil {
+			return err
+		}
+
+		// Shape
+		if err := binary.Write(file, binary.LittleEndian, t.shape); err != nil {
+			return err
+		}
+
+		// Data Length
+		if err := binary.Write(file, binary.LittleEndian, int32(len(t.data))); err != nil {
+			return err
+		}
+
+		// Data
+		if err := binary.Write(file, binary.LittleEndian, t.data); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // LayerConfig holds the configuration needed to reconstruct a layer.

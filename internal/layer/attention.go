@@ -188,6 +188,16 @@ func (g *GlobalAttention) OutSize() int {
 	return g.inSize
 }
 
+func (g *GlobalAttention) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "context_vector",
+			Shape: []int{g.inSize},
+			Data:  g.contextVector,
+		},
+	}
+}
+
 // AccumulateBackward accumulates gradients.
 func (g *GlobalAttention) AccumulateBackward(grad []float32) []float32 {
 	return g.Backward(grad)

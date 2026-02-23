@@ -455,6 +455,26 @@ func (g *GRU) OutSize() int {
 	return g.outSize
 }
 
+func (g *GRU) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "input_weights",
+			Shape: []int{g.outSize * 3, g.inSize},
+			Data:  g.inputWeights,
+		},
+		{
+			Name:  "recurrent_weights",
+			Shape: []int{g.outSize * 2, g.outSize},
+			Data:  g.recurrentWeights,
+		},
+		{
+			Name:  "biases",
+			Shape: []int{g.outSize * 3},
+			Data:  g.biases,
+		},
+	}
+}
+
 // Hidden returns the current hidden state of the GRU.
 func (g *GRU) Hidden() []float32 {
 	return g.cellBuf

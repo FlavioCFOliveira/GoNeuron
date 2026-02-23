@@ -207,6 +207,26 @@ func (r *RBF) OutSize() int {
 	return r.outSize
 }
 
+func (r *RBF) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "weights",
+			Shape: []int{r.outSize, r.numCenters},
+			Data:  r.weights,
+		},
+		{
+			Name:  "biases",
+			Shape: []int{r.outSize},
+			Data:  r.biases,
+		},
+		{
+			Name:  "centers",
+			Shape: []int{r.numCenters, r.inSize},
+			Data:  r.centers,
+		},
+	}
+}
+
 // Clone creates a deep copy.
 func (r *RBF) Clone() Layer {
 	newR := NewRBF(r.inSize, r.numCenters, r.outSize, r.gamma)

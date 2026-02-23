@@ -67,6 +67,17 @@ func (p *PositionalEncoding) SetGradients(g []float32)   { copy(p.gradBuf, g) }
 func (p *PositionalEncoding) SetDevice(d Device)         { p.device = d }
 func (p *PositionalEncoding) InSize() int                { return p.seqLen * p.dim }
 func (p *PositionalEncoding) OutSize() int               { return p.seqLen * p.dim }
+
+func (p *PositionalEncoding) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "weights",
+			Shape: []int{p.seqLen, p.dim},
+			Data:  p.weights,
+		},
+	}
+}
+
 func (p *PositionalEncoding) Reset()                    {}
 func (p *PositionalEncoding) ClearGradients()           { for i := range p.gradBuf { p.gradBuf[i] = 0 } }
 func (p *PositionalEncoding) Clone() Layer {
@@ -350,6 +361,24 @@ func (m *MultiHeadAttention) SetDevice(d Device) {
 
 func (m *MultiHeadAttention) InSize() int  { return m.seqLen * m.dim }
 func (m *MultiHeadAttention) OutSize() int { return m.seqLen * m.dim }
+
+func (m *MultiHeadAttention) NamedParams() []NamedParam {
+	var params []NamedParam
+	for _, p := range m.wQ.NamedParams() {
+		params = append(params, NamedParam{Name: "wQ_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range m.wK.NamedParams() {
+		params = append(params, NamedParam{Name: "wK_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range m.wV.NamedParams() {
+		params = append(params, NamedParam{Name: "wV_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range m.wOut.NamedParams() {
+		params = append(params, NamedParam{Name: "wOut_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	return params
+}
+
 func (m *MultiHeadAttention) Reset() {
 	m.wQ.Reset()
 	m.wK.Reset()
@@ -541,6 +570,27 @@ func (t *TransformerBlock) SetGradients(g []float32) {
 func (t *TransformerBlock) SetDevice(d Device)         { t.mha.SetDevice(d) }
 func (t *TransformerBlock) InSize() int                { return t.seqLen * t.dim }
 func (t *TransformerBlock) OutSize() int               { return t.seqLen * t.dim }
+
+func (t *TransformerBlock) NamedParams() []NamedParam {
+	var params []NamedParam
+	for _, p := range t.mha.NamedParams() {
+		params = append(params, NamedParam{Name: "mha_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range t.norm1.NamedParams() {
+		params = append(params, NamedParam{Name: "norm1_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range t.norm2.NamedParams() {
+		params = append(params, NamedParam{Name: "norm2_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range t.ff1.NamedParams() {
+		params = append(params, NamedParam{Name: "ff1_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	for _, p := range t.ff2.NamedParams() {
+		params = append(params, NamedParam{Name: "ff2_" + p.Name, Shape: p.Shape, Data: p.Data})
+	}
+	return params
+}
+
 func (t *TransformerBlock) Reset() {
 	t.mha.Reset()
 	t.norm1.Reset()

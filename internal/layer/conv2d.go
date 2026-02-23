@@ -400,6 +400,21 @@ func (c *Conv2D) OutSize() int {
 	return c.outChannels
 }
 
+func (c *Conv2D) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "weights",
+			Shape: []int{c.outChannels, c.inChannels, c.kernelSize, c.kernelSize},
+			Data:  c.weights,
+		},
+		{
+			Name:  "biases",
+			Shape: []int{c.outChannels},
+			Data:  c.biases,
+		},
+	}
+}
+
 // Reset clears any cached state (for compatibility with other layer types).
 func (c *Conv2D) Reset() {
 	// No state to reset for Conv2D

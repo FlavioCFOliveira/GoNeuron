@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"math"
+	"os"
 	"testing"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
@@ -1115,5 +1116,31 @@ func TestNetworkTrainWithLSTMReset(t *testing.T) {
 				t.Errorf("Output mismatch at training step %d: %v vs %v", i, outputs[0][j], outputs[i][j])
 			}
 		}
+	}
+}
+
+// TestNetworkSaveBinaryWeights tests the binary weights export functionality.
+func TestNetworkSaveBinaryWeights(t *testing.T) {
+	layers := []layer.Layer{
+		layer.NewEmbedding(10, 8),
+		layer.NewDense(8, 4, activations.ReLU{}),
+	}
+	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
+
+	filename := "test_weights.bin"
+	defer os.Remove(filename)
+
+	err := network.SaveBinaryWeights(filename)
+	if err != nil {
+		t.Fatalf("Failed to save binary weights: %v", err)
+	}
+
+	// Verify file exists and has content
+	info, err := os.Stat(filename)
+	if err != nil {
+		t.Fatalf("Failed to stat file: %v", err)
+	}
+	if info.Size() < 4 {
+		t.Errorf("File too small: %d bytes", info.Size())
 	}
 }

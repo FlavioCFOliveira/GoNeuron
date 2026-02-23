@@ -51,6 +51,18 @@ type Layer interface {
 	OutSize() int
 }
 
+// NamedParam represents a named parameter with its shape and data.
+type NamedParam struct {
+	Name  string
+	Shape []int
+	Data  []float32
+}
+
+// NamedParamProvider is an optional interface for layers that can provide named parameters.
+type NamedParamProvider interface {
+	NamedParams() []NamedParam
+}
+
 // Dense is a fully connected layer optimized for performance.
 type Dense struct {
 	weights   []float32
@@ -260,6 +272,21 @@ func (d *Dense) SetDevice(device Device) {
 
 func (d *Dense) InSize() int { return d.inSize }
 func (d *Dense) OutSize() int { return d.outSize }
+
+func (d *Dense) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "weights",
+			Shape: []int{d.outSize, d.inSize},
+			Data:  d.weights,
+		},
+		{
+			Name:  "biases",
+			Shape: []int{d.outSize},
+			Data:  d.biases,
+		},
+	}
+}
 
 // GetActivation returns the activation function.
 func (d *Dense) GetActivation() activations.Activation {

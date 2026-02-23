@@ -166,6 +166,16 @@ func (e *Embedding) OutSize() int {
 	return e.embedding_dim
 }
 
+func (e *Embedding) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "weights",
+			Shape: []int{e.num_embeddings, e.embedding_dim},
+			Data:  e.weights,
+		},
+	}
+}
+
 // Reset resets the embedding layer.
 func (e *Embedding) Reset() {
 	e.savedIndices = make([]int, 0)

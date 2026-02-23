@@ -601,6 +601,26 @@ func (l *LSTM) OutSize() int {
 	return l.outSize
 }
 
+func (l *LSTM) NamedParams() []NamedParam {
+	return []NamedParam{
+		{
+			Name:  "input_weights",
+			Shape: []int{l.outSize * 4, l.inSize},
+			Data:  l.inputWeights,
+		},
+		{
+			Name:  "recurrent_weights",
+			Shape: []int{l.outSize * 4, l.outSize},
+			Data:  l.recurrentWeights,
+		},
+		{
+			Name:  "biases",
+			Shape: []int{l.outSize * 4},
+			Data:  l.biases,
+		},
+	}
+}
+
 // Hidden returns the current hidden state of the LSTM.
 func (l *LSTM) Hidden() []float32 {
 	return l.hiddenBuf

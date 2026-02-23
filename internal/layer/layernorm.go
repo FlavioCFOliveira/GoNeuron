@@ -227,6 +227,25 @@ func (l *LayerNorm) OutSize() int {
 	return l.normalizedShape
 }
 
+func (l *LayerNorm) NamedParams() []NamedParam {
+	if !l.elementwiseAffine {
+		return nil
+	}
+
+	return []NamedParam{
+		{
+			Name:  "gamma",
+			Shape: []int{l.normalizedShape},
+			Data:  l.gamma,
+		},
+		{
+			Name:  "beta",
+			Shape: []int{l.normalizedShape},
+			Data:  l.beta,
+		},
+	}
+}
+
 // Reset resets the layer normalization layer.
 func (l *LayerNorm) Reset() {
 	// No state to reset

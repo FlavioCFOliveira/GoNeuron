@@ -259,6 +259,38 @@ func (b *BatchNorm2D) OutSize() int {
 	return b.numFeatures
 }
 
+func (b *BatchNorm2D) NamedParams() []NamedParam {
+	params := []NamedParam{
+		{
+			Name:  "running_mean",
+			Shape: []int{b.numFeatures},
+			Data:  b.runningMean,
+		},
+		{
+			Name:  "running_var",
+			Shape: []int{b.numFeatures},
+			Data:  b.runningVar,
+		},
+	}
+
+	if b.affine {
+		params = append(params,
+			NamedParam{
+				Name:  "gamma",
+				Shape: []int{b.numFeatures},
+				Data:  b.gamma,
+			},
+			NamedParam{
+				Name:  "beta",
+				Shape: []int{b.numFeatures},
+				Data:  b.beta,
+			},
+		)
+	}
+
+	return params
+}
+
 // Reset resets the batch normalization layer.
 func (b *BatchNorm2D) Reset() {
 	// No state to reset
