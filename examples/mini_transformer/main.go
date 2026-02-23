@@ -113,13 +113,14 @@ func main() {
 	model := goneuron.NewSequential(
 		goneuron.Embedding(vocab.nextIdx, dModel),
 		goneuron.PositionalEncoding(maxLen, dModel),
-		goneuron.TransformerBlock(dModel, numHeads, maxLen, ffDim, false), // false for sentiment (not causal)
+		// Using modern SOTA features: RMSNorm, SwiGLU, and RoPE
+		goneuron.TransformerBlockExt(numHeads, maxLen, ffDim, false, goneuron.ActSwiGLU, goneuron.NormRMS, true, dModel),
 		goneuron.GlobalAveragePooling1D(maxLen, dModel),
-		goneuron.Dense(dModel, 2, goneuron.LogSoftmax),
+		goneuron.Dense(2, goneuron.Softmax, dModel),
 	)
 
 	// 3. Compile and Train
-	model.Compile(goneuron.Adam(0.001), goneuron.CrossEntropy)
+	model.Compile(goneuron.Adam(0.01), goneuron.NLLLoss)
 
 	fmt.Println("Starting training...")
 	model.Summary()

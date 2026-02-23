@@ -96,6 +96,22 @@ func LayerNorm(normalizedShape ...int) Layer {
 	return layer.NewLayerNorm(in, 1e-5, true)
 }
 
+func RMSNorm(normalizedShape ...int) Layer {
+	in := -1
+	if len(normalizedShape) > 0 {
+		in = normalizedShape[0]
+	}
+	return layer.NewRMSNorm(in, 1e-5)
+}
+
+func SwiGLU(out int, in ...int) Layer {
+	inSize := -1
+	if len(in) > 0 {
+		inSize = in[0]
+	}
+	return layer.NewSwiGLU(inSize, out)
+}
+
 func MaxPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
 	in := -1
 	if len(inChannels) > 0 {
@@ -131,6 +147,22 @@ func TransformerBlock(numHeads, seqLen, ffDim int, causal bool, dim ...int) Laye
 	}
 	return layer.NewTransformerBlock(inDim, numHeads, seqLen, ffDim, causal)
 }
+
+func TransformerBlockExt(numHeads, seqLen, ffDim int, causal bool, actType layer.ActivationType, normType layer.NormType, useRoPE bool, dim ...int) Layer {
+	inDim := -1
+	if len(dim) > 0 {
+		inDim = dim[0]
+	}
+	return layer.NewTransformerBlockExt(inDim, numHeads, seqLen, ffDim, causal, actType, normType, useRoPE)
+}
+
+// Transformer Constants
+const (
+	ActReLU   = layer.ActReLU
+	ActSwiGLU = layer.ActSwiGLU
+	NormLN    = layer.NormLN
+	NormRMS   = layer.NormRMS
+)
 
 func PositionalEncoding(seqLen int, dim ...int) Layer {
 	inDim := -1
