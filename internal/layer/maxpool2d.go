@@ -32,6 +32,8 @@ type MaxPool2D struct {
 	// Saved input for backward pass
 	savedInput []float32
 
+	training bool
+
 	device Device
 }
 
@@ -67,10 +69,12 @@ func (m *MaxPool2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 	return outH, outW
 }
 
-// Forward performs a forward pass through the max pooling layer.
-// input: flattened [inChannels, inputHeight, inputWidth]
-// Returns: flattened [outChannels, outputHeight, outputWidth]
-func (m *MaxPool2D) Forward(input []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (m *MaxPool2D) SetTraining(training bool) {
+	m.training = training
+}
+
+func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
 	totalInput := len(input)
 	if totalInput == 0 {
 		return make([]float32, 0)
@@ -86,22 +90,18 @@ func (m *MaxPool2D) Forward(input []float32) []float32 {
 
 	channelSize := totalInput / m.inChannels
 
-	// Infer input dimensions (assuming square for now)
+	// Infer input dimensions
 	m.inputHeight = int(math.Sqrt(float64(channelSize)))
 	if m.inputHeight*m.inputHeight == channelSize {
 		m.inputWidth = m.inputHeight
 	} else {
 		m.inputWidth = channelSize / m.inputHeight
-		if m.inputHeight*m.inputWidth != channelSize {
-			// Fall back
-			m.inputWidth = channelSize / m.inputHeight
-		}
 	}
 
 	// Compute output dimensions
 	m.outputHeight, m.outputWidth = m.computeOutputSize(m.inputHeight, m.inputWidth)
 
-	outChannels := m.inChannels // Each channel is pooled independently
+	outChannels := m.inChannels
 	outSize := m.outputHeight * m.outputWidth
 
 	// Ensure buffers are sized correctly
@@ -118,13 +118,26 @@ func (m *MaxPool2D) Forward(input []float32) []float32 {
 		m.gradInBuf = make([]float32, totalInput)
 	}
 
-	if cap(m.savedInput) < totalInput {
-		m.savedInput = make([]float32, totalInput)
+	// Save input for backward pass
+	if arena != nil && offset != nil {
+		if len(*arena) < *offset+totalInput {
+			newArena := make([]float32, (*offset+totalInput)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		saved := (*arena)[*offset : *offset+totalInput]
+		copy(saved, input)
+		m.savedInput = saved
+		*offset += totalInput
+	} else {
+		if cap(m.savedInput) < totalInput {
+			m.savedInput = make([]float32, totalInput)
+		}
+		m.savedInput = m.savedInput[:totalInput]
+		copy(m.savedInput, input)
 	}
-	m.savedInput = m.savedInput[:totalInput]
-	copy(m.savedInput, input)
 
-	// Max pooling: for each channel, then for each output position
+	// Max pooling logic
 	outH := m.outputHeight
 	outW := m.outputWidth
 	kernelSize := m.kernelSize
@@ -147,7 +160,6 @@ func (m *MaxPool2D) Forward(input []float32) []float32 {
 
 				for kh := 0; kh < kernelSize; kh++ {
 					for kw := 0; kw < kernelSize; kw++ {
-						// Calculate input position with padding
 						inH := oh*stride + kh - padding
 						inW := ow*stride + kw - padding
 
@@ -170,6 +182,12 @@ func (m *MaxPool2D) Forward(input []float32) []float32 {
 
 	return m.outputBuf[:requiredOutput]
 }
+
+// Forward performs a forward pass through the max pooling layer.
+func (m *MaxPool2D) Forward(input []float32) []float32 {
+	return m.ForwardWithArena(input, nil, nil)
+}
+
 
 // Backward performs backpropagation through the max pooling layer.
 func (m *MaxPool2D) Backward(grad []float32) []float32 {
@@ -260,6 +278,26 @@ func (m *MaxPool2D) Clone() Layer {
 	newM.outputHeight = m.outputHeight
 	newM.outputWidth = m.outputWidth
 	newM.device = m.device
+	return newM
+}
+
+func (m *MaxPool2D) LightweightClone(params []float32, grads []float32) Layer {
+	newM := &MaxPool2D{
+		inChannels:   m.inChannels,
+		kernelSize:   m.kernelSize,
+		stride:       m.stride,
+		padding:      m.padding,
+		inputHeight:  m.inputHeight,
+		inputWidth:   m.inputWidth,
+		outputHeight: m.outputHeight,
+		outputWidth:  m.outputWidth,
+		outputBuf:    make([]float32, 0),
+		gradInBuf:    make([]float32, 0),
+		argmaxBuf:    make([]int, 0),
+		savedInput:   make([]float32, 0),
+		training:     m.training,
+		device:       m.device,
+	}
 	return newM
 }
 

@@ -11,7 +11,8 @@ A pure Go neural network library with no external dependencies. Built for high p
 - **Pure Go** - No external BLAS or C dependencies.
 - **Hardware Acceleration** - Native Metal/MPS support for Apple Silicon (macOS).
 - **Multiple Layer Types** - Dense, Conv2D, LSTM, GRU, Bidirectional, Transformer, Attention, and more.
-- **Zero-Allocation Core** - Performance optimized with pre-allocated buffers and contiguous memory.
+- **Zero-Allocation Core** - Performance optimized with pre-allocated contiguous memory and arena-based state saving (0 allocs/op in training loops).
+- **High-Performance Parallelism** - Built-in worker pool for parallel batch training with minimal overhead.
 
 ## Installation
 
@@ -156,6 +157,16 @@ loadedModel, lossFn, err := goneuron.Load("model.gob")
 | `goneuron.ReduceLROnPlateau(...)` | Callback to reduce learning rate when progress stalls. |
 | `goneuron.LeakyReLU(alpha)` | Activation that prevents dying neurons. |
 | `goneuron.BatchNorm2D(channels)`| Normalization for faster CNN training. |
+
+---
+
+## Performance & Efficiency
+
+GoNeuron is engineered for maximum throughput by minimizing Go's runtime overhead:
+
+- **Zero-Allocation Training**: Sequential training loops achieve `0 allocs/op`. All intermediate states (activations, gradients, pre-activations) are managed via a contiguous **Arena Buffer** using offsets instead of slice allocations.
+- **Persistent Worker Pool**: Parallel training reuses a pool of worker networks. This avoids the heavy cost of cloning the model architecture for every batch, reducing garbage collection pressure by over 99%.
+- **Contiguous Memory Layout**: Model parameters and gradients are stored in unified flat buffers, improving cache locality and enabling faster hardware transfers.
 
 ---
 

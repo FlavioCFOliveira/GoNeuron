@@ -25,23 +25,28 @@ internal/
 3. **Persistent Buffers**: Reusing GPU buffers to minimize synchronization overhead
 
 ### Memory Optimization (Zero Allocation Patterns)
-1. **Pre-allocated buffers**: All intermediate values are allocated once in layer constructors
-   - `inputBuf`, `outputBuf`, `preActBuf`, `gradWBuf`, `gradBBuf`, `gradInBuf`, `dzBuf` in Dense
-   - `cellBuf`, `hiddenBuf`, `preActBuf` in LSTM
-2. **Contiguous memory layout**: Weights stored as row-major `[]float64` for cache efficiency
-3. **In-place updates**: `SetParams` and optimizer step methods
+1. **Arena-based state saving**: Intermediate activations and states are saved using offsets into a contiguous `arena []float32` buffer to avoid slice header allocations.
+2. **Pre-allocated buffers**: All intermediate values are allocated once in layer constructors or during the first forward pass (growing as needed).
+3. **Contiguous memory layout**: Weights and gradients are stored as flat `[]float32` buffers for cache efficiency and thread-safe worker sharing.
+4. **Worker Pool**: Persistent worker networks avoid `Clone()` calls during `TrainBatch`.
 
 ### Key Implementation Patterns
 ```go
-// Forward: Reuse buffers, avoid allocations
-copy(d.inputBuf, x)
-// ... compute using pre-allocated buffers ...
-d.preActBuf[o] = sum  // Store for backward pass
+// ForwardWithArena: Save state using offsets
+if arena != nil && offset != nil {
+    d.savedInputOffsets = append(d.savedInputOffsets, *offset)
+    copy((*arena)[*offset:], x)
+    *offset += len(x)
+}
 
-// Backward: Use pre-allocated buffers for gradient computation
-for o := 0; o < outSize; o++ {
-    d.dzBuf[o] = grad[o] * d.act.Derivative(d.preActBuf[o])
-    d.gradBBuf[o] = d.dzBuf[o]
+// LightweightClone: Share params/grads but keep private buffers
+func (d *Dense) LightweightClone(params, grads []float32) Layer {
+    return &Dense{
+        params: params,
+        grads:  grads,
+        inputBuf: make([]float32, d.inSize),
+        // ... other private buffers ...
+    }
 }
 ```
 

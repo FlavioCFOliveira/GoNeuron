@@ -96,10 +96,7 @@ func (b *BatchNorm2D) SetDevice(device Device) {
 	b.device = device
 }
 
-// Forward performs a forward pass through the batch normalization layer.
-// x: input tensor of shape [batchSize * numFeatures * spatialSize]
-// Returns: normalized output with same shape as input
-func (b *BatchNorm2D) Forward(x []float32) []float32 {
+func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	if len(x) == 0 {
 		return make([]float32, 0)
 	}
@@ -120,10 +117,24 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 	output := b.outputBuf
 
 	// Save input for backward pass
-	if cap(b.savedInput) < total {
-		b.savedInput = make([]float32, total)
+	if b.training {
+		if arena != nil && offset != nil {
+			if len(*arena) < *offset+total {
+				newArena := make([]float32, (*offset+total)*2)
+				copy(newArena, *arena)
+				*arena = newArena
+			}
+			saved := (*arena)[*offset : *offset+total]
+			copy(saved, x)
+			b.savedInput = saved
+			*offset += total
+		} else {
+			if cap(b.savedInput) < total {
+				b.savedInput = make([]float32, total)
+			}
+			copy(b.savedInput, x)
+		}
 	}
-	copy(b.savedInput, x)
 
 	numel := b.numelPerChannel
 	numFeatures := b.numFeatures
@@ -185,6 +196,12 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 
 	return output
 }
+
+// Forward performs a forward pass through the batch normalization layer.
+func (b *BatchNorm2D) Forward(x []float32) []float32 {
+	return b.ForwardWithArena(x, nil, nil)
+}
+
 
 // Backward performs backpropagation through the batch normalization layer.
 func (b *BatchNorm2D) Backward(grad []float32) []float32 {
@@ -354,7 +371,7 @@ func (b *BatchNorm2D) NamedParams() []NamedParam {
 
 // Reset resets the batch normalization layer.
 func (b *BatchNorm2D) Reset() {
-	// No state to reset
+	b.savedInput = nil
 }
 
 // ClearGradients zeroes out the accumulated gradients.
@@ -374,6 +391,40 @@ func (b *BatchNorm2D) Clone() Layer {
 	copy(newB.runningMean, b.runningMean)
 	copy(newB.runningVar, b.runningVar)
 	newB.device = b.device
+	return newB
+}
+
+func (b *BatchNorm2D) LightweightClone(params []float32, grads []float32) Layer {
+	var gamma, beta, gradGamma, gradBeta []float32
+	if b.affine {
+		gamma = params[:b.numFeatures]
+		beta = params[b.numFeatures:]
+		gradGamma = grads[:b.numFeatures]
+		gradBeta = grads[b.numFeatures:]
+	}
+
+	newB := &BatchNorm2D{
+		numFeatures:     b.numFeatures,
+		eps:             b.eps,
+		momentum:        b.momentum,
+		affine:          b.affine,
+		training:        b.training,
+		params:          params,
+		gamma:           gamma,
+		beta:            beta,
+		runningMean:     b.runningMean, // shared statistics
+		runningVar:      b.runningVar,  // shared statistics
+		grads:           grads,
+		gradGammaBuf:    gradGamma,
+		gradBetaBuf:     gradBeta,
+		outputBuf:       make([]float32, 0),
+		gradInBuf:       make([]float32, 0),
+		savedMean:       make([]float32, b.numFeatures),
+		savedVar:        make([]float32, b.numFeatures),
+		savedStd:        make([]float32, b.numFeatures),
+		device:          b.device,
+		numelPerChannel: b.numelPerChannel,
+	}
 	return newB
 }
 

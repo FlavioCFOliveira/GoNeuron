@@ -17,6 +17,8 @@ type Flatten struct {
 	// Reusable buffers
 	outputBuf []float32
 
+	training bool
+
 	device Device
 }
 
@@ -48,15 +50,13 @@ func (f *Flatten) SetDimensions(startDim, endDim int) {
 	f.endDim = endDim
 }
 
-// Forward performs a forward pass, flattening the input.
-// input: multi-dimensional array, typically [batch, channels, height, width]
-// Returns: 2D array [batch, flattened_features]
-func (f *Flatten) Forward(x []float32) []float32 {
-	// Infer input shape from length
-	total := len(x)
+// SetTraining sets whether the layer is in training mode.
+func (f *Flatten) SetTraining(training bool) {
+	f.training = training
+}
 
-	// For inference, we assume batch dimension is first
-	// and flatten everything else
+func (f *Flatten) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+	total := len(x)
 	f.inputShape = []int{1, total}
 
 	flattened := total
@@ -68,6 +68,12 @@ func (f *Flatten) Forward(x []float32) []float32 {
 	copy(f.outputBuf, x)
 	return f.outputBuf[:flattened]
 }
+
+// Forward performs a forward pass, flattening the input.
+func (f *Flatten) Forward(x []float32) []float32 {
+	return f.ForwardWithArena(x, nil, nil)
+}
+
 
 // Backward performs backpropagation, reshaping gradient to original shape.
 func (f *Flatten) Backward(grad []float32) []float32 {
@@ -129,6 +135,19 @@ func (f *Flatten) Clone() Layer {
 	newF.endDim = f.endDim
 	newF.outSize = f.outSize
 	newF.device = f.device
+	return newF
+}
+
+func (f *Flatten) LightweightClone(params []float32, grads []float32) Layer {
+	newF := &Flatten{
+		startDim:   f.startDim,
+		endDim:     f.endDim,
+		outSize:    f.outSize,
+		outputBuf:  make([]float32, 0),
+		inputShape: make([]int, 0),
+		training:   f.training,
+		device:     f.device,
+	}
 	return newF
 }
 

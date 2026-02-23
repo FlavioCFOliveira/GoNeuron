@@ -287,16 +287,27 @@ func TestNetworkTrainBatchConsistency(t *testing.T) {
 	network2 := New(layers2, loss.MSE{}, optimizer2)
 
 	// Set same initial params
-	params := network1.Params()
+	params := make([]float32, len(network1.Params()))
+	copy(params, network1.Params())
 	network2.SetParams(params)
 
 	trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
 	trainY := [][]float32{{0}, {1}, {1}, {0}}
 
-	// Train one epoch with sequential
+	// Train one epoch with sequential (looping over samples)
 	for i := range trainX {
-		network1.Train(trainX[i], trainY[i])
+		// Manual sequential accumulation for exact match
+		yPred := network1.Forward(trainX[i])
+		grad := network1.loss.Backward(yPred, trainY[i])
+		network1.Backward(grad)
 	}
+	// Average and step manually to match TrainBatch behavior
+	invBS := float32(1.0 / float64(len(trainX)))
+	grads1 := network1.Gradients()
+	for i := range grads1 {
+		grads1[i] *= invBS
+	}
+	network1.Step()
 
 	// Train one epoch with batch
 	network2.TrainBatch(trainX, trainY)
@@ -309,10 +320,10 @@ func TestNetworkTrainBatchConsistency(t *testing.T) {
 		t.Errorf("Params length mismatch: sequential=%d, batch=%d", len(params1), len(params2))
 	}
 
-	// Check params are similar (batch averaging may cause slight differences)
+	// Check params are similar
 	for i := range params1 {
-		if float32(math.Abs(float64(params1[i]-params2[i]))) > 0.01 {
-			t.Logf("Param %d: sequential=%v, batch=%v", i, params1[i], params2[i])
+		if float32(math.Abs(float64(params1[i]-params2[i]))) > 1e-5 {
+			t.Errorf("Param %d mismatch: sequential=%v, batch=%v", i, params1[i], params2[i])
 		}
 	}
 }

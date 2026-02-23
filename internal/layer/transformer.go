@@ -19,6 +19,8 @@ type PositionalEncoding struct {
 	outputBuf []float32
 	gradBuf   []float32
 
+	training bool
+
 	device Device
 }
 
@@ -40,7 +42,12 @@ func NewPositionalEncoding(seqLen, dim int) *PositionalEncoding {
 	}
 }
 
-func (p *PositionalEncoding) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (p *PositionalEncoding) SetTraining(training bool) {
+	p.training = training
+}
+
+func (p *PositionalEncoding) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	// x is [seqLen * dim]
 	if len(p.outputBuf) != len(x) {
 		p.outputBuf = make([]float32, len(x))
@@ -50,6 +57,11 @@ func (p *PositionalEncoding) Forward(x []float32) []float32 {
 	}
 	return p.outputBuf
 }
+
+func (p *PositionalEncoding) Forward(x []float32) []float32 {
+	return p.ForwardWithArena(x, nil, nil)
+}
+
 
 func (p *PositionalEncoding) Backward(grad []float32) []float32 {
 	// Gradient w.r.t. parameters is same as gradient w.r.t. output
@@ -106,6 +118,19 @@ func (p *PositionalEncoding) Clone() Layer {
 	copy(newP.weights, p.weights)
 	return newP
 }
+
+func (p *PositionalEncoding) LightweightClone(params []float32, grads []float32) Layer {
+	newP := &PositionalEncoding{
+		seqLen:    p.seqLen,
+		dim:       p.dim,
+		weights:   params,
+		outputBuf: make([]float32, p.seqLen*p.dim),
+		gradBuf:   grads,
+		training:  p.training,
+		device:    p.device,
+	}
+	return newP
+}
 func (p *PositionalEncoding) AccumulateBackward(grad []float32) []float32 { return p.Backward(grad) }
 
 // MultiHeadAttention implements scaled dot-product multi-head attention.
@@ -134,6 +159,8 @@ type MultiHeadAttention struct {
 	// Contiguous parameter and gradient buffers
 	params []float32
 	grads  []float32
+
+	training bool
 
 	device Device
 }
@@ -189,8 +216,16 @@ func NewMultiHeadAttention(dim, numHeads, seqLen int, causal bool) *MultiHeadAtt
 	}
 }
 
-// Forward performs self-attention.
-func (m *MultiHeadAttention) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (m *MultiHeadAttention) SetTraining(training bool) {
+	m.training = training
+	m.wQ.SetTraining(training)
+	m.wK.SetTraining(training)
+	m.wV.SetTraining(training)
+	m.wOut.SetTraining(training)
+}
+
+func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	// x is [seqLen * dim]
 	seqLen := m.seqLen
 	dim := m.dim
@@ -203,9 +238,19 @@ func (m *MultiHeadAttention) Forward(x []float32) []float32 {
 	for t := 0; t < seqLen; t++ {
 		start := t * dim
 		end := start + dim
-		copy(m.qBuf[start:end], m.wQ.Forward(x[start:end]))
-		copy(m.kBuf[start:end], m.wK.Forward(x[start:end]))
-		copy(m.vBuf[start:end], m.wV.Forward(x[start:end]))
+		var q, k, v []float32
+		if arena != nil && offset != nil {
+			q = m.wQ.ForwardWithArena(x[start:end], arena, offset)
+			k = m.wK.ForwardWithArena(x[start:end], arena, offset)
+			v = m.wV.ForwardWithArena(x[start:end], arena, offset)
+		} else {
+			q = m.wQ.Forward(x[start:end])
+			k = m.wK.Forward(x[start:end])
+			v = m.wV.Forward(x[start:end])
+		}
+		copy(m.qBuf[start:end], q)
+		copy(m.kBuf[start:end], k)
+		copy(m.vBuf[start:end], v)
 	}
 
 	// 2. Scaled Dot-Product Attention for each head
@@ -255,11 +300,23 @@ func (m *MultiHeadAttention) Forward(x []float32) []float32 {
 	for t := 0; t < seqLen; t++ {
 		start := t * dim
 		end := start + dim
-		copy(m.outputBuf[start:end], m.wOut.Forward(m.finalOutBuf[start:end]))
+		var out []float32
+		if arena != nil && offset != nil {
+			out = m.wOut.ForwardWithArena(m.finalOutBuf[start:end], arena, offset)
+		} else {
+			out = m.wOut.Forward(m.finalOutBuf[start:end])
+		}
+		copy(m.outputBuf[start:end], out)
 	}
 
 	return m.outputBuf
 }
+
+// Forward performs self-attention.
+func (m *MultiHeadAttention) Forward(x []float32) []float32 {
+	return m.ForwardWithArena(x, nil, nil)
+}
+
 
 func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
 	// grad is [seqLen * dim]
@@ -465,6 +522,37 @@ func (m *MultiHeadAttention) ClearGradients() {
 func (m *MultiHeadAttention) Clone() Layer {
 	return NewMultiHeadAttention(m.dim, m.numHeads, m.seqLen, m.Causal)
 }
+
+func (m *MultiHeadAttention) LightweightClone(params []float32, grads []float32) Layer {
+	paramSize := len(m.wQ.Params())
+	gradSize := len(m.wQ.Gradients())
+
+	newM := &MultiHeadAttention{
+		dim:         m.dim,
+		numHeads:    m.numHeads,
+		headDim:     m.headDim,
+		seqLen:      m.seqLen,
+		Causal:      m.Causal,
+		params:      params,
+		grads:       grads,
+		outputBuf:   make([]float32, m.seqLen*m.dim),
+		gradInBuf:   make([]float32, m.seqLen*m.dim),
+		qBuf:        make([]float32, m.seqLen*m.dim),
+		kBuf:        make([]float32, m.seqLen*m.dim),
+		vBuf:        make([]float32, m.seqLen*m.dim),
+		scoresBuf:   make([]float32, m.seqLen*m.seqLen),
+		finalOutBuf: make([]float32, m.seqLen*m.dim),
+		training:    m.training,
+		device:      m.device,
+	}
+
+	newM.wQ = m.wQ.LightweightClone(params[0:paramSize], grads[0:gradSize]).(*Dense)
+	newM.wK = m.wK.LightweightClone(params[paramSize:2*paramSize], grads[gradSize:2*gradSize]).(*Dense)
+	newM.wV = m.wV.LightweightClone(params[2*paramSize:3*paramSize], grads[2*gradSize:3*gradSize]).(*Dense)
+	newM.wOut = m.wOut.LightweightClone(params[3*paramSize:4*paramSize], grads[3*gradSize:4*gradSize]).(*Dense)
+
+	return newM
+}
 func (m *MultiHeadAttention) AccumulateBackward(grad []float32) []float32 { return m.Backward(grad) }
 
 // TransformerBlock combines Self-Attention, LayerNorm, and Feed-Forward.
@@ -494,6 +582,8 @@ type TransformerBlock struct {
 	// Contiguous parameter and gradient buffers
 	params []float32
 	grads  []float32
+
+	training bool
 }
 
 func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *TransformerBlock {
@@ -557,37 +647,80 @@ func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *Transfo
 	}
 }
 
-func (t *TransformerBlock) Forward(x []float32) []float32 {
-	// 1. Multi-Head Attention + Residual Connection + LayerNorm
-	attOut := t.mha.Forward(x)
+// SetTraining sets whether the layer is in training mode.
+func (t *TransformerBlock) SetTraining(training bool) {
+	t.training = training
+	t.mha.SetTraining(training)
+	t.norm1.SetTraining(training)
+	t.norm2.SetTraining(training)
+	t.ff1.SetTraining(training)
+	t.ff2.SetTraining(training)
+}
 
-	// Add & Norm 1 (Residual without new slice)
+func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+	// 1. Multi-Head Attention + Residual Connection + LayerNorm
+	var attOut []float32
+	if arena != nil && offset != nil {
+		attOut = t.mha.ForwardWithArena(x, arena, offset)
+	} else {
+		attOut = t.mha.Forward(x)
+	}
+
+	// Add & Norm 1
 	for i := range x {
 		t.res1Buf[i] = x[i] + attOut[i]
 	}
 
 	// LayerNorm 1
-	copy(t.norm1OutBuf, t.norm1.Forward(t.res1Buf))
+	var norm1Out []float32
+	if arena != nil && offset != nil {
+		norm1Out = t.norm1.ForwardWithArena(t.res1Buf, arena, offset)
+	} else {
+		norm1Out = t.norm1.Forward(t.res1Buf)
+	}
+	copy(t.norm1OutBuf, norm1Out)
 
 	// 2. Feed-Forward + Residual Connection + LayerNorm
 	for s := 0; s < t.seqLen; s++ {
 		start := s * t.dim
 		end := start + t.dim
-		mid := t.ff1.Forward(t.norm1OutBuf[start:end])
-		copy(t.ffOutBuf[start:end], t.ff2.Forward(mid))
+		var mid []float32
+		if arena != nil && offset != nil {
+			mid = t.ff1.ForwardWithArena(t.norm1OutBuf[start:end], arena, offset)
+		} else {
+			mid = t.ff1.Forward(t.norm1OutBuf[start:end])
+		}
+
+		var ffOut []float32
+		if arena != nil && offset != nil {
+			ffOut = t.ff2.ForwardWithArena(mid, arena, offset)
+		} else {
+			ffOut = t.ff2.Forward(mid)
+		}
+		copy(t.ffOutBuf[start:end], ffOut)
 	}
 
-	// Add & Norm 2 (Residual without new slice)
+	// Add & Norm 2
 	for i := range x {
 		t.res2Buf[i] = t.norm1OutBuf[i] + t.ffOutBuf[i]
 	}
 
 	// LayerNorm 2
-	copy(t.outputBuf, t.norm2.Forward(t.res2Buf))
-
+	var output []float32
+	if arena != nil && offset != nil {
+		output = t.norm2.ForwardWithArena(t.res2Buf, arena, offset)
+	} else {
+		output = t.norm2.Forward(t.res2Buf)
+	}
+	copy(t.outputBuf, output)
 
 	return t.outputBuf
 }
+
+func (t *TransformerBlock) Forward(x []float32) []float32 {
+	return t.ForwardWithArena(x, nil, nil)
+}
+
 
 func (t *TransformerBlock) Backward(grad []float32) []float32 {
 	// grad is [seqLen * dim]
@@ -754,19 +887,80 @@ func (t *TransformerBlock) ClearGradients() {
 func (t *TransformerBlock) Clone() Layer {
 	return NewTransformerBlock(t.dim, t.mha.numHeads, t.seqLen, t.ff1.OutSize(), t.mha.Causal)
 }
+
+func (t *TransformerBlock) LightweightClone(params []float32, grads []float32) Layer {
+	sizeMHA := len(t.mha.Params())
+	sizeNorm1 := len(t.norm1.Params())
+	sizeNorm2 := len(t.norm2.Params())
+	sizeFF1 := len(t.ff1.Params())
+	sizeFF2 := len(t.ff2.Params())
+
+	gradSizeMHA := len(t.mha.Gradients())
+	gradSizeNorm1 := len(t.norm1.Gradients())
+	gradSizeNorm2 := len(t.norm2.Gradients())
+	gradSizeFF1 := len(t.ff1.Gradients())
+	gradSizeFF2 := len(t.ff2.Gradients())
+
+	newT := &TransformerBlock{
+		dim:               t.dim,
+		seqLen:            t.seqLen,
+		outputBuf:         make([]float32, t.seqLen*t.dim),
+		res1Buf:           make([]float32, t.seqLen*t.dim),
+		norm1OutBuf:       make([]float32, t.seqLen*t.dim),
+		ffOutBuf:          make([]float32, t.seqLen*t.dim),
+		res2Buf:           make([]float32, t.seqLen*t.dim),
+		gradRes2Buf:       make([]float32, t.seqLen*t.dim),
+		gradNorm1OutFFBuf: make([]float32, t.seqLen*t.dim),
+		combinedGradBuf:   make([]float32, t.seqLen*t.dim),
+		gradRes1Buf:       make([]float32, t.seqLen*t.dim),
+		gradInBuf:         make([]float32, t.seqLen*t.dim),
+		params:            params,
+		grads:             grads,
+		training:          t.training,
+	}
+
+	offset := 0
+	gradOffset := 0
+	newT.mha = t.mha.LightweightClone(params[offset:offset+sizeMHA], grads[gradOffset:gradOffset+gradSizeMHA]).(*MultiHeadAttention)
+	offset += sizeMHA
+	gradOffset += gradSizeMHA
+
+	newT.norm1 = t.norm1.LightweightClone(params[offset:offset+sizeNorm1], grads[gradOffset:gradOffset+gradSizeNorm1]).(*LayerNorm)
+	offset += sizeNorm1
+	gradOffset += gradSizeNorm1
+
+	newT.norm2 = t.norm2.LightweightClone(params[offset:offset+sizeNorm2], grads[gradOffset:gradOffset+gradSizeNorm2]).(*LayerNorm)
+	offset += sizeNorm2
+	gradOffset += gradSizeNorm2
+
+	newT.ff1 = t.ff1.LightweightClone(params[offset:offset+sizeFF1], grads[gradOffset:gradOffset+gradSizeFF1]).(*Dense)
+	offset += sizeFF1
+	gradOffset += gradSizeFF1
+
+	newT.ff2 = t.ff2.LightweightClone(params[offset:offset+sizeFF2], grads[gradOffset:gradOffset+gradSizeFF2]).(*Dense)
+
+	return newT
+}
 func (t *TransformerBlock) AccumulateBackward(grad []float32) []float32 { return t.Backward(grad) }
 
 // GlobalAveragePooling1D pools across the sequence dimension.
 type GlobalAveragePooling1D struct {
 	seqLen int
 	dim    int
+
+	training bool
 }
 
 func NewGlobalAveragePooling1D(seqLen, dim int) *GlobalAveragePooling1D {
 	return &GlobalAveragePooling1D{seqLen: seqLen, dim: dim}
 }
 
-func (g *GlobalAveragePooling1D) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (g *GlobalAveragePooling1D) SetTraining(training bool) {
+	g.training = training
+}
+
+func (g *GlobalAveragePooling1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	out := make([]float32, g.dim)
 	for i := 0; i < g.dim; i++ {
 		sum := float32(0.0)
@@ -777,6 +971,11 @@ func (g *GlobalAveragePooling1D) Forward(x []float32) []float32 {
 	}
 	return out
 }
+
+func (g *GlobalAveragePooling1D) Forward(x []float32) []float32 {
+	return g.ForwardWithArena(x, nil, nil)
+}
+
 
 func (g *GlobalAveragePooling1D) Backward(grad []float32) []float32 {
 	dx := make([]float32, g.seqLen*g.dim)
@@ -797,7 +996,13 @@ func (g *GlobalAveragePooling1D) InSize() int               { return g.seqLen * 
 func (g *GlobalAveragePooling1D) OutSize() int              { return g.dim }
 func (g *GlobalAveragePooling1D) Reset()                   {}
 func (g *GlobalAveragePooling1D) ClearGradients()          {}
-func (g *GlobalAveragePooling1D) Clone() Layer              { return &GlobalAveragePooling1D{g.seqLen, g.dim} }
+func (g *GlobalAveragePooling1D) Clone() Layer {
+	return &GlobalAveragePooling1D{seqLen: g.seqLen, dim: g.dim, training: g.training}
+}
+
+func (g *GlobalAveragePooling1D) LightweightClone(params []float32, grads []float32) Layer {
+	return &GlobalAveragePooling1D{seqLen: g.seqLen, dim: g.dim, training: g.training}
+}
 func (g *GlobalAveragePooling1D) AccumulateBackward(grad []float32) []float32 { return g.Backward(grad) }
 
 // CLSPooling extracts the first vector (CLS token) from a sequence.
@@ -807,6 +1012,8 @@ type CLSPooling struct {
 
 	outputBuf []float32
 	gradBuf   []float32
+
+	training bool
 }
 
 func NewCLSPooling(seqLen, dim int) *CLSPooling {
@@ -818,11 +1025,21 @@ func NewCLSPooling(seqLen, dim int) *CLSPooling {
 	}
 }
 
-func (c *CLSPooling) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (c *CLSPooling) SetTraining(training bool) {
+	c.training = training
+}
+
+func (c *CLSPooling) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	// x is [seqLen * dim]
 	copy(c.outputBuf, x[0:c.dim])
 	return c.outputBuf
 }
+
+func (c *CLSPooling) Forward(x []float32) []float32 {
+	return c.ForwardWithArena(x, nil, nil)
+}
+
 
 func (c *CLSPooling) Backward(grad []float32) []float32 {
 	// grad is [dim]
@@ -842,5 +1059,17 @@ func (c *CLSPooling) InSize() int               { return c.seqLen * c.dim }
 func (c *CLSPooling) OutSize() int              { return c.dim }
 func (c *CLSPooling) Reset()                   {}
 func (c *CLSPooling) ClearGradients()          {}
-func (c *CLSPooling) Clone() Layer              { return &CLSPooling{c.seqLen, c.dim, make([]float32, c.dim), make([]float32, c.seqLen*c.dim)} }
+func (c *CLSPooling) Clone() Layer {
+	return &CLSPooling{seqLen: c.seqLen, dim: c.dim, outputBuf: make([]float32, c.dim), gradBuf: make([]float32, c.seqLen*c.dim), training: c.training}
+}
+
+func (c *CLSPooling) LightweightClone(params []float32, grads []float32) Layer {
+	return &CLSPooling{
+		seqLen:    c.seqLen,
+		dim:       c.dim,
+		outputBuf: make([]float32, c.dim),
+		gradBuf:   make([]float32, c.seqLen*c.dim),
+		training:  c.training,
+	}
+}
 func (c *CLSPooling) AccumulateBackward(grad []float32) []float32 { return c.Backward(grad) }

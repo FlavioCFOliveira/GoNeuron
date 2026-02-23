@@ -24,6 +24,8 @@ type GlobalAttention struct {
 	// Gradients
 	gradContext []float32
 	timeStep    int
+
+	training bool
 }
 
 // NewGlobalAttention creates a new global attention layer.
@@ -44,19 +46,38 @@ func NewGlobalAttention(inSize int) *GlobalAttention {
 	}
 }
 
-// Forward accumulates inputs and returns zeros (or current input) until end of sequence.
-// In global attention, the "real" output is produced after the sequence ends.
-// But to fit the Layer interface, we accumulate.
-func (g *GlobalAttention) Forward(x []float32) []float32 {
-	xCopy := make([]float32, len(x))
-	copy(xCopy, x)
-	g.inputHistory = append(g.inputHistory, xCopy)
-	g.timeStep++
+// SetTraining sets whether the layer is in training mode.
+func (g *GlobalAttention) SetTraining(training bool) {
+	g.training = training
+}
 
-	// For per-step forward, we return the current x or zeros.
-	// Global attention is usually the last step before classification.
+func (g *GlobalAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+	var saved []float32
+	if arena != nil && offset != nil {
+		inSize := len(x)
+		if len(*arena) < *offset+inSize {
+			newArena := make([]float32, (*offset+inSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		saved = (*arena)[*offset : *offset+inSize]
+		copy(saved, x)
+		*offset += inSize
+	} else {
+		saved = make([]float32, len(x))
+		copy(saved, x)
+	}
+	g.inputHistory = append(g.inputHistory, saved)
+
+	g.timeStep++
 	return x
 }
+
+// Forward accumulates inputs and returns zeros (or current input) until end of sequence.
+func (g *GlobalAttention) Forward(x []float32) []float32 {
+	return g.ForwardWithArena(x, nil, nil)
+}
+
 
 // ComputeContext processes the accumulated history and returns the context vector.
 func (g *GlobalAttention) ComputeContext() []float32 {
@@ -180,6 +201,18 @@ func (g *GlobalAttention) ClearGradients() {
 func (g *GlobalAttention) Clone() Layer {
 	newG := NewGlobalAttention(g.inSize)
 	copy(newG.contextVector, g.contextVector)
+	return newG
+}
+
+func (g *GlobalAttention) LightweightClone(params []float32, grads []float32) Layer {
+	newG := &GlobalAttention{
+		inSize:        g.inSize,
+		contextVector: params,
+		inputHistory:  make([][]float32, 0),
+		outputBuf:     make([]float32, g.inSize),
+		gradContext:   grads,
+		training:      g.training,
+	}
 	return newG
 }
 

@@ -45,6 +45,8 @@ type Conv2D struct {
 	// Saved input for backward pass
 	savedInput []float32
 
+	training bool
+
 	device Device
 }
 
@@ -111,10 +113,12 @@ func (c *Conv2D) SetInputDimensions(height, width int) {
 	c.setInputWidth = width
 }
 
-// Forward performs a forward pass through the convolutional layer.
-// input: flattened [inChannels, inputHeight, inputWidth]
-// Returns: flattened [outChannels, outputHeight, outputWidth]
-func (c *Conv2D) Forward(input []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (c *Conv2D) SetTraining(training bool) {
+	c.training = training
+}
+
+func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
 	// Infer input dimensions from length
 	totalInput := len(input)
 	if totalInput%c.inChannels != 0 {
@@ -141,7 +145,6 @@ func (c *Conv2D) Forward(input []float32) []float32 {
 			inputWidth = channelSize / inputHeight
 			if inputHeight*inputWidth != channelSize {
 				// Fall back to a reasonable approximation
-				// This may not be exact for all inputs
 				inputWidth = channelSize / inputHeight
 			}
 		}
@@ -167,18 +170,28 @@ func (c *Conv2D) Forward(input []float32) []float32 {
 	}
 
 	// Save input for backward pass
-	if cap(c.savedInput) < len(input) {
-		c.savedInput = make([]float32, len(input))
+	if arena != nil && offset != nil {
+		if len(*arena) < *offset+len(input) {
+			newArena := make([]float32, (*offset+len(input))*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		saved := (*arena)[*offset : *offset+len(input)]
+		copy(saved, input)
+		c.savedInput = saved
+		*offset += len(input)
+	} else {
+		if cap(c.savedInput) < len(input) {
+			c.savedInput = make([]float32, len(input))
+		}
+		copy(c.savedInput, input)
 	}
-	copy(c.savedInput, input)
 
 	// Cache dimensions for backward pass
 	c.inputHeight = inputHeight
 	c.inputWidth = inputWidth
 
-	// Convolution: for each output position and channel
-	// Input layout: [inChannels, inputHeight, inputWidth]
-	// Output layout: [outChannels, outH, outW]
+	// Convolution logic
 	outSize := outH * outW
 	kernelSize := c.kernelSize
 	stride := c.stride
@@ -244,6 +257,12 @@ func (c *Conv2D) Forward(input []float32) []float32 {
 
 	return c.outputBuf[:requiredOutput]
 }
+
+// Forward performs a forward pass through the convolutional layer.
+func (c *Conv2D) Forward(input []float32) []float32 {
+	return c.ForwardWithArena(input, nil, nil)
+}
+
 
 // Backward performs backpropagation through the convolutional layer.
 // grad: gradient of loss w.r.t. activated output (shape: [outChannels, outH, outW] flattened)
@@ -399,6 +418,32 @@ func (c *Conv2D) Clone() Layer {
 	return newC
 }
 
+func (c *Conv2D) LightweightClone(params []float32, grads []float32) Layer {
+	weightSize := c.outChannels * c.inChannels * c.kernelSize * c.kernelSize
+	newC := &Conv2D{
+		inChannels:     c.inChannels,
+		outChannels:    c.outChannels,
+		kernelSize:     c.kernelSize,
+		stride:         c.stride,
+		padding:        c.padding,
+		setInputHeight: c.setInputHeight,
+		setInputWidth:  c.setInputWidth,
+		activation:     c.activation,
+		params:         params,
+		weights:        params[:weightSize],
+		biases:         params[weightSize:],
+		grads:          grads,
+		gradWeights:    grads[:weightSize],
+		gradBiases:     grads[weightSize:],
+		outputBuf:      make([]float32, 0),
+		gradInBuf:      make([]float32, 0),
+		savedInput:     make([]float32, 0),
+		training:       c.training,
+		device:         c.device,
+	}
+	return newC
+}
+
 // InSize returns the number of input channels.
 func (c *Conv2D) InSize() int {
 	return c.inChannels
@@ -426,7 +471,7 @@ func (c *Conv2D) NamedParams() []NamedParam {
 
 // Reset clears any cached state (for compatibility with other layer types).
 func (c *Conv2D) Reset() {
-	// No state to reset for Conv2D
+	c.savedInput = nil
 }
 
 // OutputBuf returns the raw output buffer for advanced use.

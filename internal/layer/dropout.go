@@ -69,25 +69,35 @@ func (d *Dropout) IsTraining() bool {
 	return d.training
 }
 
-// Forward performs a forward pass through the dropout layer.
-// During training: applies dropout mask and scales remaining values.
-// During inference: passes inputs through unchanged.
-func (d *Dropout) Forward(x []float32) []float32 {
+func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	copy(d.inputBuf, x)
 
 	if d.training {
 		// Generate dropout mask
-		// Values above p are kept (1.0), values below p are dropped (0.0)
 		keepProb := 1.0 - d.p
 		scale := 1.0 / keepProb
+
+		var mask []float32
+		if arena != nil && offset != nil {
+			if len(*arena) < *offset+d.inSize {
+				newArena := make([]float32, (*offset+d.inSize)*2)
+				copy(newArena, *arena)
+				*arena = newArena
+			}
+			mask = (*arena)[*offset : *offset+d.inSize]
+			d.maskBuf = mask // Update reference for Backward
+			*offset += d.inSize
+		} else {
+			mask = d.maskBuf
+		}
 
 		for i := 0; i < d.inSize; i++ {
 			r := d.rng.RandFloat()
 			if r < d.p {
-				d.maskBuf[i] = 0
+				mask[i] = 0
 				d.outputBuf[i] = 0
 			} else {
-				d.maskBuf[i] = 1
+				mask[i] = 1
 				d.outputBuf[i] = d.inputBuf[i] * scale
 			}
 		}
@@ -98,6 +108,12 @@ func (d *Dropout) Forward(x []float32) []float32 {
 
 	return d.outputBuf
 }
+
+// Forward performs a forward pass through the dropout layer.
+func (d *Dropout) Forward(x []float32) []float32 {
+	return d.ForwardWithArena(x, nil, nil)
+}
+
 
 // Backward performs backpropagation through the dropout layer.
 func (d *Dropout) Backward(grad []float32) []float32 {
@@ -172,6 +188,23 @@ func (d *Dropout) Clone() Layer {
 	newD := NewDropout(d.p, d.inSize)
 	newD.training = d.training
 	newD.device = d.device
+	return newD
+}
+
+func (d *Dropout) LightweightClone(params []float32, grads []float32) Layer {
+	newD := &Dropout{
+		p:          d.p,
+		training:   d.training,
+		inSize:     d.inSize,
+		outSize:    d.outSize,
+		inputBuf:   make([]float32, d.inSize),
+		outputBuf:  make([]float32, d.inSize),
+		maskBuf:    make([]float32, d.inSize),
+		gradInBuf:  make([]float32, d.inSize),
+		gradParams: make([]float32, 0),
+		rng:        NewRNG(42),
+		device:     d.device,
+	}
 	return newD
 }
 

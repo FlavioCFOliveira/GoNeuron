@@ -79,6 +79,31 @@ func BenchmarkNetworkTrain(b *testing.B) {
 	}
 }
 
+// BenchmarkNetworkTrainBatchSequentialSmall benchmarks training on a small batch sequentially.
+func BenchmarkNetworkTrainBatchSequentialSmall(b *testing.B) {
+	layers := []layer.Layer{
+		layer.NewDense(784, 256, activations.Tanh{}),
+		layer.NewDense(256, 128, activations.Tanh{}),
+		layer.NewDense(128, 10, activations.Sigmoid{}),
+	}
+	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
+
+	batchSize := 8
+	batchX := make([][]float32, batchSize)
+	batchY := make([][]float32, batchSize)
+	for i := 0; i < batchSize; i++ {
+		batchX[i] = make([]float32, 784)
+		batchY[i] = make([]float32, 10)
+		fillRandom(batchX[i])
+		fillRandom(batchY[i])
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		network.TrainBatch(batchX, batchY)
+	}
+}
+
 // BenchmarkNetworkTrainBatchSequential benchmarks training on a batch sequentially.
 func BenchmarkNetworkTrainBatchSequential(b *testing.B) {
 	layers := []layer.Layer{
@@ -191,5 +216,71 @@ func BenchmarkNetworkGradients(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = network.Gradients()
+	}
+}
+
+// BenchmarkNetworkLSTMTrainBatch benchmarks training on a batch with LSTM layers.
+func BenchmarkNetworkLSTMTrainBatch(b *testing.B) {
+	layers := []layer.Layer{
+		layer.NewLSTM(10, 32),
+		layer.NewDense(32, 1, activations.Sigmoid{}),
+	}
+	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
+
+	batchSize := 16
+	seqLen := 10
+	batchX := make([][]float32, batchSize)
+	batchY := make([][]float32, batchSize)
+	for i := 0; i < batchSize; i++ {
+		batchX[i] = make([]float32, 10)
+		batchY[i] = make([]float32, 1)
+		fillRandom(batchX[i])
+		fillRandom(batchY[i])
+	}
+
+	// Warm-up to grow arena
+	for s := 0; s < seqLen; s++ {
+		network.TrainBatch(batchX, batchY)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Simulate sequence training
+		for s := 0; s < seqLen; s++ {
+			network.TrainBatch(batchX, batchY)
+		}
+	}
+}
+
+// BenchmarkNetworkGRUTrainBatch benchmarks training on a batch with GRU layers.
+func BenchmarkNetworkGRUTrainBatch(b *testing.B) {
+	layers := []layer.Layer{
+		layer.NewGRU(10, 32),
+		layer.NewDense(32, 1, activations.Sigmoid{}),
+	}
+	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
+
+	batchSize := 16
+	seqLen := 10
+	batchX := make([][]float32, batchSize)
+	batchY := make([][]float32, batchSize)
+	for i := 0; i < batchSize; i++ {
+		batchX[i] = make([]float32, 10)
+		batchY[i] = make([]float32, 1)
+		fillRandom(batchX[i])
+		fillRandom(batchY[i])
+	}
+
+	// Warm-up to grow arena
+	for s := 0; s < seqLen; s++ {
+		network.TrainBatch(batchX, batchY)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Simulate sequence training
+		for s := 0; s < seqLen; s++ {
+			network.TrainBatch(batchX, batchY)
+		}
 	}
 }

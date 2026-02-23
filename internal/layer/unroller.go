@@ -13,7 +13,15 @@ type SequenceUnroller struct {
 	outputBuf   []float32
 	gradInBuf   []float32
 	storedInput [][]float32
+	training    bool
 }
+
+// SetTraining sets the training mode for the base layer.
+func (s *SequenceUnroller) SetTraining(training bool) {
+	s.training = training
+	s.base.SetTraining(training)
+}
+
 
 func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnroller {
 	outSize := base.OutSize()
@@ -32,7 +40,7 @@ func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnr
 	}
 }
 
-func (s *SequenceUnroller) Forward(x []float32) []float32 {
+func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	inSize := s.base.InSize()
 	outSize := s.base.OutSize()
 
@@ -49,7 +57,11 @@ func (s *SequenceUnroller) Forward(x []float32) []float32 {
 				s.storedInput[t] = make([]float32, inSize)
 			}
 			copy(s.storedInput[t], x[t*inSize:(t+1)*inSize])
-			bi.Forward(s.storedInput[t])
+			if arena != nil && offset != nil {
+				bi.ForwardWithArena(s.storedInput[t], arena, offset)
+			} else {
+				bi.Forward(s.storedInput[t])
+			}
 		}
 		bi.ComputeBackwardHiddenStates()
 
@@ -71,7 +83,12 @@ func (s *SequenceUnroller) Forward(x []float32) []float32 {
 			}
 			copy(s.storedInput[t], x[t*inSize:(t+1)*inSize])
 
-			out := s.base.Forward(s.storedInput[t])
+			var out []float32
+			if al, ok := s.base.(ArenaLayer); ok && arena != nil && offset != nil {
+				out = al.ForwardWithArena(s.storedInput[t], arena, offset)
+			} else {
+				out = s.base.Forward(s.storedInput[t])
+			}
 
 			if s.returnSeq {
 				copy(s.outputBuf[t*outSize:(t+1)*outSize], out)
@@ -83,6 +100,11 @@ func (s *SequenceUnroller) Forward(x []float32) []float32 {
 
 	return s.outputBuf
 }
+
+func (s *SequenceUnroller) Forward(x []float32) []float32 {
+	return s.ForwardWithArena(x, nil, nil)
+}
+
 
 func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 	outSize := s.base.OutSize()
@@ -167,7 +189,23 @@ func (s *SequenceUnroller) SetGradients(g []float32)     { s.base.SetGradients(g
 func (s *SequenceUnroller) SetDevice(device Device)      { s.base.SetDevice(device) }
 func (s *SequenceUnroller) Reset()                       { s.base.Reset() }
 func (s *SequenceUnroller) ClearGradients()              { s.base.ClearGradients() }
-func (s *SequenceUnroller) Clone() Layer                 { return NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq) }
+func (s *SequenceUnroller) Clone() Layer {
+	return NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq)
+}
+
+func (s *SequenceUnroller) LightweightClone(params []float32, grads []float32) Layer {
+	newS := &SequenceUnroller{
+		base:        s.base.LightweightClone(params, grads),
+		timeSteps:   s.timeSteps,
+		returnSeq:   s.returnSeq,
+		inputBuf:    make([]float32, len(s.inputBuf)),
+		outputBuf:   make([]float32, len(s.outputBuf)),
+		gradInBuf:   make([]float32, len(s.gradInBuf)),
+		storedInput: make([][]float32, s.timeSteps),
+		training:    s.training,
+	}
+	return newS
+}
 func (s *SequenceUnroller) InSize() int                  { return s.timeSteps * s.base.InSize() }
 func (s *SequenceUnroller) OutSize() int {
 	if s.returnSeq {

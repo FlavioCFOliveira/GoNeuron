@@ -65,14 +65,17 @@ type LSTM struct {
 	outputGateOut []float32
 
 	// Saved states for BPTT
-	storedCellStates  [][]float32
-	storedHiddenStates [][]float32
+	savedCellOffsets   []int
+	savedHiddenOffsets []int
+	arena              []float32
 
 	// Current time step
 	timeStep int
 
 	// Device for computation
 	device Device
+
+	training bool
 
 	// GPU persistent buffers
 	bufWeightsIn  *MetalBuffer
@@ -173,9 +176,9 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		cellGateOut:   make([]float32, outSize),
 		outputGateOut: make([]float32, outSize),
 
-		storedCellStates:  make([][]float32, 0),
-		storedHiddenStates: make([][]float32, 0),
-		timeStep:          0,
+		savedCellOffsets:   make([]int, 0, 16),
+		savedHiddenOffsets: make([]int, 0, 16),
+		timeStep:           0,
 	}
 
 	if metal, ok := device.(*MetalDevice); ok && metal.IsAvailable() {
@@ -198,8 +201,8 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 // Reset resets the LSTM state for a new sequence.
 func (l *LSTM) Reset() {
 	l.timeStep = 0
-	l.storedCellStates = l.storedCellStates[:0]
-	l.storedHiddenStates = l.storedHiddenStates[:0]
+	l.savedCellOffsets = l.savedCellOffsets[:0]
+	l.savedHiddenOffsets = l.savedHiddenOffsets[:0]
 	// Clear buffers
 	for i := range l.cellBuf {
 		l.cellBuf[i] = 0
@@ -209,10 +212,7 @@ func (l *LSTM) Reset() {
 	}
 }
 
-// Forward performs a forward pass for one time step.
-// x: input vector of length inSize
-// Returns: output vector of length outSize
-func (l *LSTM) Forward(x []float32) []float32 {
+func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	// Copy input to buffer
 	copy(l.inputBuf, x)
 
@@ -305,11 +305,11 @@ func (l *LSTM) Forward(x []float32) []float32 {
 		l.outputGateOut[i] = l.outputAct.Activate(l.preActBuf[outputStart+i])
 	}
 
-	// === Compute new cell state ===
 	// c_new = forget * c_prev + input * cell_candidate
 	// Copy previous cell state (or zeros if first step)
-	if l.timeStep > 0 && len(l.storedCellStates) > 0 {
-		copy(l.cellBuf, l.storedCellStates[len(l.storedCellStates)-1])
+	if l.timeStep > 0 && len(l.savedCellOffsets) > 0 {
+		prevCOffset := l.savedCellOffsets[len(l.savedCellOffsets)-1]
+		copy(l.cellBuf, l.arena[prevCOffset:prevCOffset+l.outSize])
 	} else {
 		for i := range l.cellBuf {
 			l.cellBuf[i] = 0
@@ -328,12 +328,26 @@ func (l *LSTM) Forward(x []float32) []float32 {
 
 storeState:
 	// === Store states for backprop ===
-	if l.timeStep >= len(l.storedCellStates) {
-		l.storedCellStates = append(l.storedCellStates, make([]float32, l.outSize))
-		l.storedHiddenStates = append(l.storedHiddenStates, make([]float32, l.outSize))
+	if arena != nil && offset != nil {
+		l.arena = *arena
+		outSize := l.outSize
+		if len(*arena) < *offset+outSize*2 {
+			newArena := make([]float32, (*offset+outSize*2)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+			l.arena = *arena
+		}
+
+		l.savedCellOffsets = append(l.savedCellOffsets, *offset)
+		copy((*arena)[*offset:*offset+outSize], l.cellBuf)
+		*offset += outSize
+
+		l.savedHiddenOffsets = append(l.savedHiddenOffsets, *offset)
+		copy((*arena)[*offset:*offset+outSize], l.hiddenBuf)
+		*offset += outSize
+	} else {
+		l.saveState(l.cellBuf, l.hiddenBuf)
 	}
-	copy(l.storedCellStates[l.timeStep], l.cellBuf)
-	copy(l.storedHiddenStates[l.timeStep], l.hiddenBuf)
 
 	l.timeStep++
 
@@ -342,32 +356,59 @@ storeState:
 	return l.outputBuf
 }
 
+func (l *LSTM) saveState(c, h []float32) {
+	outSize := l.outSize
+	offset := len(l.arena)
+	if cap(l.arena) < offset+outSize*2 {
+		newArena := make([]float32, (offset+outSize*2)*2)
+		copy(newArena, l.arena)
+		l.arena = newArena
+	}
+	l.arena = l.arena[:offset+outSize*2]
+	copy(l.arena[offset:offset+outSize], c)
+	l.savedCellOffsets = append(l.savedCellOffsets, offset)
+	copy(l.arena[offset+outSize:offset+outSize*2], h)
+	l.savedHiddenOffsets = append(l.savedHiddenOffsets, offset+outSize)
+}
+
+// Forward performs a forward pass for one time step.
+func (l *LSTM) Forward(x []float32) []float32 {
+	return l.ForwardWithArena(x, nil, nil)
+}
+
+
 // Backward performs backpropagation through time for one time step.
 // grad: gradient of loss w.r.t. output (length outSize)
 // Returns: gradient of loss w.r.t. input (length inSize)
 func (l *LSTM) Backward(grad []float32) []float32 {
 	// Get time step index
 	ts := l.timeStep - 1
-	if ts < 0 || ts >= len(l.storedCellStates) {
+	if ts < 0 || ts >= len(l.savedCellOffsets) {
 		for i := range l.inputBuf {
 			l.inputBuf[i] = 0
 		}
 		return l.inputBuf
 	}
 
-	// Get saved states
-	c := l.storedCellStates[ts]
+	// Get saved states from arena
+	outSize := l.outSize
+	cOffset := l.savedCellOffsets[ts]
+	c := l.arena[cOffset : cOffset+outSize]
+
 	cPrev := l.cPrevBuf
 	if ts > 0 {
-		copy(cPrev, l.storedCellStates[ts-1])
+		prevCOffset := l.savedCellOffsets[ts-1]
+		copy(cPrev, l.arena[prevCOffset:prevCOffset+outSize])
 	} else {
 		for i := range cPrev {
 			cPrev[i] = 0
 		}
 	}
+
 	hPrev := l.hPrevBuf
 	if ts > 0 {
-		copy(hPrev, l.storedHiddenStates[ts-1])
+		prevHOffset := l.savedHiddenOffsets[ts-1]
+		copy(hPrev, l.arena[prevHOffset:prevHOffset+outSize])
 	} else {
 		for i := range hPrev {
 			hPrev[i] = 0
@@ -628,6 +669,11 @@ func (l *LSTM) SetDevice(device Device) {
 	l.device = device
 }
 
+// SetTraining sets whether the layer is in training mode.
+func (l *LSTM) SetTraining(training bool) {
+	l.training = training
+}
+
 // InSize returns the input size of the LSTM.
 func (l *LSTM) InSize() int {
 	return l.inSize
@@ -682,6 +728,52 @@ func (l *LSTM) Clone() Layer {
 	copy(newL.inputWeights, l.inputWeights)
 	copy(newL.recurrentWeights, l.recurrentWeights)
 	copy(newL.biases, l.biases)
+	return newL
+}
+
+func (l *LSTM) LightweightClone(params []float32, grads []float32) Layer {
+	weightInSize := l.outSize * 4 * l.inSize
+	weightRecSize := l.outSize * 4 * l.outSize
+
+	newL := &LSTM{
+		inSize:               l.inSize,
+		outSize:              l.outSize,
+		params:               params,
+		inputWeights:         params[:weightInSize],
+		recurrentWeights:     params[weightInSize : weightInSize+weightRecSize],
+		biases:               params[weightInSize+weightRecSize:],
+		grads:                grads,
+		gradInputWeights:     grads[:weightInSize],
+		gradRecurrentWeights: grads[weightInSize : weightInSize+weightRecSize],
+		gradBiases:           grads[weightInSize+weightRecSize:],
+		inputAct:             l.inputAct,
+		forgetAct:            l.forgetAct,
+		cellAct:              l.cellAct,
+		outputAct:            l.outputAct,
+		inputBuf:             make([]float32, l.inSize),
+		outputBuf:            make([]float32, l.outSize),
+		preActBuf:            make([]float32, l.outSize*4),
+		cellBuf:              make([]float32, l.outSize),
+		hiddenBuf:            make([]float32, l.outSize),
+		dInputBuf:            make([]float32, l.outSize),
+		dForgetBuf:           make([]float32, l.outSize),
+		dCellBuf:             make([]float32, l.outSize),
+		dOutputBuf:           make([]float32, l.outSize),
+		dcBuf:                make([]float32, l.outSize),
+		dxBuf:                make([]float32, l.inSize),
+		dhPrevBuf:            make([]float32, l.outSize),
+		cPrevBuf:             make([]float32, l.outSize),
+		hPrevBuf:             make([]float32, l.outSize),
+		inputGateOut:         make([]float32, l.outSize),
+		forgetGateOut:        make([]float32, l.outSize),
+		cellGateOut:          make([]float32, l.outSize),
+		outputGateOut:        make([]float32, l.outSize),
+		savedCellOffsets:     make([]int, 0, 16),
+		savedHiddenOffsets:   make([]int, 0, 16),
+		timeStep:             0,
+		device:               l.device,
+		training:             l.training,
+	}
 	return newL
 }
 

@@ -27,6 +27,8 @@ type AvgPool2D struct {
 	// Saved input for backward pass
 	savedInput []float32
 
+	training bool
+
 	device Device
 }
 
@@ -60,10 +62,12 @@ func (a *AvgPool2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 	return outH, outW
 }
 
-// Forward performs a forward pass through the average pooling layer.
-// input: flattened [inChannels, inputHeight, inputWidth]
-// Returns: flattened [outChannels, outputHeight, outputWidth]
-func (a *AvgPool2D) Forward(input []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (a *AvgPool2D) SetTraining(training bool) {
+	a.training = training
+}
+
+func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
 	totalInput := len(input)
 	if totalInput == 0 {
 		return make([]float32, 0)
@@ -81,7 +85,7 @@ func (a *AvgPool2D) Forward(input []float32) []float32 {
 	// Compute output dimensions
 	a.outputHeight, a.outputWidth = a.computeOutputSize(a.inputHeight, a.inputWidth)
 
-	outChannels := 1 // For now, assume single channel
+	outChannels := 1
 	outSize := a.outputHeight * a.outputWidth
 
 	// Ensure buffers are sized correctly
@@ -92,13 +96,26 @@ func (a *AvgPool2D) Forward(input []float32) []float32 {
 		a.gradInBuf = make([]float32, totalInput)
 	}
 
-	if cap(a.savedInput) < len(input) {
-		a.savedInput = make([]float32, len(input))
+	// Save input for backward pass
+	if arena != nil && offset != nil {
+		if len(*arena) < *offset+totalInput {
+			newArena := make([]float32, (*offset+totalInput)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		saved := (*arena)[*offset : *offset+totalInput]
+		copy(saved, input)
+		a.savedInput = saved
+		*offset += totalInput
+	} else {
+		if cap(a.savedInput) < totalInput {
+			a.savedInput = make([]float32, totalInput)
+		}
+		a.savedInput = a.savedInput[:totalInput]
+		copy(a.savedInput, input)
 	}
-	a.savedInput = a.savedInput[:len(input)]
-	copy(a.savedInput, input)
 
-	// Average pooling: for each output position
+	// Average pooling logic
 	outH := a.outputHeight
 	outW := a.outputWidth
 	kernelSize := a.kernelSize
@@ -114,7 +131,6 @@ func (a *AvgPool2D) Forward(input []float32) []float32 {
 
 			for kh := 0; kh < kernelSize; kh++ {
 				for kw := 0; kw < kernelSize; kw++ {
-					// Calculate input position with padding
 					inH := oh*stride + kh - padding
 					inW := ow*stride + kw - padding
 
@@ -139,6 +155,12 @@ func (a *AvgPool2D) Forward(input []float32) []float32 {
 
 	return a.outputBuf[:requiredOutput]
 }
+
+// Forward performs a forward pass through the average pooling layer.
+func (a *AvgPool2D) Forward(input []float32) []float32 {
+	return a.ForwardWithArena(input, nil, nil)
+}
+
 
 // Backward performs backpropagation through the average pooling layer.
 func (a *AvgPool2D) Backward(grad []float32) []float32 {
@@ -238,6 +260,25 @@ func (a *AvgPool2D) Clone() Layer {
 	newA.outputHeight = a.outputHeight
 	newA.outputWidth = a.outputWidth
 	newA.device = a.device
+	return newA
+}
+
+func (a *AvgPool2D) LightweightClone(params []float32, grads []float32) Layer {
+	newA := &AvgPool2D{
+		kernelSize:   a.kernelSize,
+		stride:       a.stride,
+		padding:      a.padding,
+		inputHeight:  a.inputHeight,
+		inputWidth:   a.inputWidth,
+		outputHeight: a.outputHeight,
+		outputWidth:  a.outputWidth,
+		outputBuf:    make([]float32, 0),
+		gradInBuf:    make([]float32, 0),
+		countBuf:     make([]int, 0),
+		savedInput:   make([]float32, 0),
+		training:     a.training,
+		device:       a.device,
+	}
 	return newA
 }
 

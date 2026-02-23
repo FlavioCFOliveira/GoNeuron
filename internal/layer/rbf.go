@@ -36,6 +36,8 @@ type RBF struct {
 	gradInBuf    []float32 // [inSize]
 	dzBuf        []float32 // [outSize]
 
+	training bool
+
 	device Device
 }
 
@@ -97,8 +99,12 @@ func (r *RBF) SetDevice(device Device) {
 	r.device = device
 }
 
-// Forward performs a forward pass.
-func (r *RBF) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (r *RBF) SetTraining(training bool) {
+	r.training = training
+}
+
+func (r *RBF) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	copy(r.inputBuf, x)
 
 	// 1. Compute RBF activations: phi_j = exp(-gamma * ||x - c_j||^2)
@@ -123,8 +129,42 @@ func (r *RBF) Forward(x []float32) []float32 {
 		r.outputBuf[o] = sum
 	}
 
+	// Save input and phi for backward pass
+	if arena != nil && offset != nil {
+		inSize := r.inSize
+		phiSize := r.numCenters
+		required := inSize + phiSize
+		if len(*arena) < *offset+required {
+			newArena := make([]float32, (*offset+required)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		savedIn := (*arena)[*offset : *offset+inSize]
+		copy(savedIn, x)
+		r.inputBuf = savedIn
+		*offset += inSize
+
+		savedPhi := (*arena)[*offset : *offset+phiSize]
+		copy(savedPhi, r.phiBuf)
+		r.phiBuf = savedPhi
+		*offset += phiSize
+	} else {
+		// Ensure input and phi are saved for backward pass even without arena
+		if cap(r.inputBuf) < r.inSize {
+			r.inputBuf = make([]float32, r.inSize)
+		}
+		copy(r.inputBuf, x)
+		// phiBuf is already updated in the loop above
+	}
+
 	return r.outputBuf
 }
+
+// Forward performs a forward pass.
+func (r *RBF) Forward(x []float32) []float32 {
+	return r.ForwardWithArena(x, nil, nil)
+}
+
 
 // Backward performs a backward pass.
 func (r *RBF) Backward(grad []float32) []float32 {
@@ -274,6 +314,34 @@ func (r *RBF) Clone() Layer {
 	copy(newR.biases, r.biases)
 	copy(newR.centers, r.centers)
 	newR.device = r.device
+	return newR
+}
+
+func (r *RBF) LightweightClone(params []float32, grads []float32) Layer {
+	weightSize := r.outSize * r.numCenters
+	biasSize := r.outSize
+	newR := &RBF{
+		params:     params,
+		grads:      grads,
+		weights:    params[:weightSize],
+		biases:     params[weightSize : weightSize+biasSize],
+		centers:    params[weightSize+biasSize:],
+		gradWBuf:   grads[:weightSize],
+		gradBBuf:   grads[weightSize : weightSize+biasSize],
+		gradCBuf:   grads[weightSize+biasSize:],
+		gamma:      r.gamma,
+		inSize:     r.inSize,
+		numCenters: r.numCenters,
+		outSize:    r.outSize,
+		inputBuf:   make([]float32, r.inSize),
+		distBuf:    make([]float32, r.numCenters),
+		phiBuf:     make([]float32, r.numCenters),
+		outputBuf:  make([]float32, r.outSize),
+		gradInBuf:  make([]float32, r.inSize),
+		dzBuf:      make([]float32, r.outSize),
+		training:   r.training,
+		device:     r.device,
+	}
 	return newR
 }
 

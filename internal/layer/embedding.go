@@ -20,9 +20,12 @@ type Embedding struct {
 	// Pre-allocated buffers
 	outputBuf   []float32
 	gradWeights []float32
+	gradInBuf   []float32
 
 	// Saved indices for backward pass
 	savedIndices []int
+
+	training bool
 
 	device Device
 }
@@ -56,10 +59,12 @@ func (e *Embedding) SetDevice(device Device) {
 	e.device = device
 }
 
-// Forward performs a forward pass through the embedding layer.
-// x: input indices of shape [batch_size]
-// Returns: embedded vectors of shape [batch_size, embedding_dim]
-func (e *Embedding) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (e *Embedding) SetTraining(training bool) {
+	e.training = training
+}
+
+func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	batchSize := len(x)
 	outputSize := batchSize * e.embedding_dim
 
@@ -69,16 +74,40 @@ func (e *Embedding) Forward(x []float32) []float32 {
 	}
 
 	// Save indices for backward pass
-	e.savedIndices = make([]int, batchSize)
-	for i := 0; i < batchSize; i++ {
-		e.savedIndices[i] = int(x[i])
+	if arena != nil && offset != nil {
+		if len(*arena) < *offset+batchSize {
+			newArena := make([]float32, (*offset+batchSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		saved := (*arena)[*offset : *offset+batchSize]
+		copy(saved, x)
+		// For backward compatibility with current Backward() we might still need savedIndices
+		// but we can optimize Backward later to use the arena if we want.
+		// For now, let's just make sure savedIndices is reused.
+		if cap(e.savedIndices) < batchSize {
+			e.savedIndices = make([]int, batchSize)
+		}
+		e.savedIndices = e.savedIndices[:batchSize]
+		for i := 0; i < batchSize; i++ {
+			e.savedIndices[i] = int(x[i])
+		}
+		*offset += batchSize
+	} else {
+		if cap(e.savedIndices) < batchSize {
+			e.savedIndices = make([]int, batchSize)
+		}
+		e.savedIndices = e.savedIndices[:batchSize]
+		for i := 0; i < batchSize; i++ {
+			e.savedIndices[i] = int(x[i])
+		}
 	}
 
 	output := e.outputBuf[:outputSize]
 
 	// For each input index
 	for b := 0; b < batchSize; b++ {
-		idx := e.savedIndices[b]
+		idx := int(x[b])
 
 		// Bounds check
 		if idx < 0 || idx >= e.num_embeddings {
@@ -96,8 +125,12 @@ func (e *Embedding) Forward(x []float32) []float32 {
 	return output
 }
 
+// Forward performs a forward pass through the embedding layer.
+func (e *Embedding) Forward(x []float32) []float32 {
+	return e.ForwardWithArena(x, nil, nil)
+}
+
 // Backward performs backpropagation through the embedding layer.
-// In embedding layers, gradients are sparse - only the used embeddings get updates.
 func (e *Embedding) Backward(grad []float32) []float32 {
 	batchSize := len(e.savedIndices)
 	gradBatchSize := len(grad) / e.embedding_dim
@@ -108,7 +141,13 @@ func (e *Embedding) Backward(grad []float32) []float32 {
 	}
 
 	// Gradient w.r.t. input is zero (indices don't have gradients)
-	gradInput := make([]float32, batchSize)
+	if cap(e.gradInBuf) < batchSize {
+		e.gradInBuf = make([]float32, batchSize)
+	}
+	gradInput := e.gradInBuf[:batchSize]
+	for i := range gradInput {
+		gradInput[i] = 0
+	}
 
 	for b := 0; b < gradBatchSize; b++ {
 		idx := e.savedIndices[b]
@@ -129,6 +168,7 @@ func (e *Embedding) Backward(grad []float32) []float32 {
 
 	return gradInput
 }
+
 
 // Params returns layer parameters (weights).
 func (e *Embedding) Params() []float32 {
@@ -182,7 +222,7 @@ func (e *Embedding) NamedParams() []NamedParam {
 
 // Reset resets the embedding layer.
 func (e *Embedding) Reset() {
-	e.savedIndices = make([]int, 0)
+	e.savedIndices = e.savedIndices[:0]
 }
 
 // ClearGradients zeroes out the accumulated gradients.
@@ -199,6 +239,23 @@ func (e *Embedding) Clone() Layer {
 	newE.padding_idx = e.padding_idx
 	newE.max_norm = e.max_norm
 	newE.device = e.device
+	return newE
+}
+
+func (e *Embedding) LightweightClone(params []float32, grads []float32) Layer {
+	newE := &Embedding{
+		num_embeddings: e.num_embeddings,
+		embedding_dim:  e.embedding_dim,
+		padding_idx:    e.padding_idx,
+		max_norm:       e.max_norm,
+		weights:        params,
+		outputBuf:      make([]float32, e.embedding_dim),
+		gradWeights:    grads,
+		gradInBuf:      make([]float32, 0),
+		savedIndices:   make([]int, 0),
+		training:       e.training,
+		device:         e.device,
+	}
 	return newE
 }
 

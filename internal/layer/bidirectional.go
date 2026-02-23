@@ -40,26 +40,60 @@ func NewBidirectional(l Layer) *Bidirectional {
 	}
 }
 
-// Forward performs a forward pass. Note: In bidirectional layers, the full sequence
-// is accumulated to allow the backward layer to process it later.
-func (b *Bidirectional) Forward(x []float32) []float32 {
+// SetTraining sets the training mode for both forward and backward layers.
+func (b *Bidirectional) SetTraining(training bool) {
+	b.forward.SetTraining(training)
+	b.backward.SetTraining(training)
+}
+
+func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	// Store input for backward pass
-	input := make([]float32, len(x))
-	copy(input, x)
+	var input []float32
+	if arena != nil && offset != nil {
+		inSize := len(x)
+		if len(*arena) < *offset+inSize {
+			newArena := make([]float32, (*offset+inSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		input = (*arena)[*offset : *offset+inSize]
+		copy(input, x)
+		*offset += inSize
+	} else {
+		input = make([]float32, len(x))
+		copy(input, x)
+	}
 	b.inputHistory = append(b.inputHistory, input)
 
 	// Forward pass for forward layer
-	fOut := b.forward.Forward(x)
-	fOutCopy := make([]float32, len(fOut))
-	copy(fOutCopy, fOut)
+	var fOut []float32
+	if arenaLayer, ok := b.forward.(ArenaLayer); ok && arena != nil && offset != nil {
+		fOut = arenaLayer.ForwardWithArena(x, arena, offset)
+	} else {
+		fOut = b.forward.Forward(x)
+	}
+
+	// Store forward output history
+	var fOutCopy []float32
+	if arena != nil && offset != nil {
+		outSize := len(fOut)
+		if len(*arena) < *offset+outSize {
+			newArena := make([]float32, (*offset+outSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		fOutCopy = (*arena)[*offset : *offset+outSize]
+		copy(fOutCopy, fOut)
+		*offset += outSize
+	} else {
+		fOutCopy = make([]float32, len(fOut))
+		copy(fOutCopy, fOut)
+	}
 	b.forwardHistory = append(b.forwardHistory, fOutCopy)
 
-	// Combine (Forward part + Zeros for backward part for now)
-	// The actual backward layer pass will happen during a specialized "SequenceForward"
-	// or during the first Backward call when we have the full history.
+	// Combine
 	outSize := b.forward.OutSize()
 	copy(b.outputBuf[:outSize], fOut)
-	// Clear backward part (will be filled when full sequence is known or during Backward)
 	for i := outSize; i < outSize*2; i++ {
 		b.outputBuf[i] = 0
 	}
@@ -67,6 +101,14 @@ func (b *Bidirectional) Forward(x []float32) []float32 {
 	b.timeStep++
 	return b.outputBuf
 }
+
+// Forward performs a forward pass. Note: In bidirectional layers, the full sequence
+// is accumulated to allow the backward layer to process it later.
+func (b *Bidirectional) Forward(x []float32) []float32 {
+	return b.ForwardWithArena(x, nil, nil)
+}
+
+
 
 // Backward performs backpropagation.
 // When Backward is called, we assume the sequence has ended, and we first
@@ -205,6 +247,22 @@ func (b *Bidirectional) ClearGradients() {
 // Clone creates a deep copy.
 func (b *Bidirectional) Clone() Layer {
 	return NewBidirectional(b.forward.Clone())
+}
+
+func (b *Bidirectional) LightweightClone(params []float32, grads []float32) Layer {
+	fLen := len(b.forward.Params())
+	fGradLen := len(b.forward.Gradients())
+
+	newB := &Bidirectional{
+		forward:         b.forward.LightweightClone(params[:fLen], grads[:fGradLen]),
+		backward:        b.backward.LightweightClone(params[fLen:], grads[fGradLen:]),
+		outputBuf:       make([]float32, len(b.outputBuf)),
+		inputHistory:    make([][]float32, 0),
+		forwardHistory:  make([][]float32, 0),
+		backwardHistory: make([][]float32, 0),
+		timeStep:        0,
+	}
+	return newB
 }
 
 // InSize returns input size.

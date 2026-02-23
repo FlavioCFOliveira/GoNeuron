@@ -91,22 +91,24 @@ func NewMoE(inSize, outSize, numExperts, k int) *MoE {
 	}
 }
 
-func (m *MoE) Forward(x []float32) []float32 {
+func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	copy(m.inputBuf, x)
 
-	// 1. Gating Network: get logits
-	logits := m.gating.Forward(x)
+	// 1. Gating Network
+	var logits []float32
+	if arena != nil && offset != nil {
+		logits = m.gating.ForwardWithArena(x, arena, offset)
+	} else {
+		logits = m.gating.Forward(x)
+	}
 	copy(m.gateLogits, logits)
 
-	// Add noise during training to encourage exploration and prevent collapse
 	if m.training {
 		for i := range m.gateLogits {
-			// Simple noise: +/- 5% of range or small absolute noise
 			m.gateLogits[i] += (m.rng.RandFloat()*2 - 1) * 0.05
 		}
 	}
 
-	// Apply Softmax manually
 	maxLogit := m.gateLogits[0]
 	for _, v := range m.gateLogits {
 		if v > maxLogit {
@@ -123,7 +125,6 @@ func (m *MoE) Forward(x []float32) []float32 {
 		m.gateProbs[i] /= sumExp
 	}
 
-	// 2. Selecionar Top-K experts
 	for i, w := range m.gateProbs {
 		m.weightsBuf[i] = expertWeight{i, w}
 	}
@@ -132,20 +133,35 @@ func (m *MoE) Forward(x []float32) []float32 {
 		return m.weightsBuf[i].weight > m.weightsBuf[j].weight
 	})
 
-	// Reset output buffer
 	for i := range m.outputBuf {
 		m.outputBuf[i] = 0
 	}
 
-	// 3. Forward apenas nos K especialistas ativos e somar ponderado
 	for i := 0; i < m.k; i++ {
 		idx := m.weightsBuf[i].id
 		m.lastActive[i] = idx
 		w := m.weightsBuf[i].weight
 
-		expertOut := m.experts[idx].Forward(x)
-		// Store expert output for backward pass
-		copy(m.expertOutputs[idx], expertOut)
+		var expertOut []float32
+		if al, ok := m.experts[idx].(ArenaLayer); ok && arena != nil && offset != nil {
+			expertOut = al.ForwardWithArena(x, arena, offset)
+		} else {
+			expertOut = m.experts[idx].Forward(x)
+		}
+
+		if arena != nil && offset != nil {
+			if len(*arena) < *offset+m.outSize {
+				newArena := make([]float32, (*offset+m.outSize)*2)
+				copy(newArena, *arena)
+				*arena = newArena
+			}
+			saved := (*arena)[*offset : *offset+m.outSize]
+			copy(saved, expertOut)
+			m.expertOutputs[idx] = saved
+			*offset += m.outSize
+		} else {
+			copy(m.expertOutputs[idx], expertOut)
+		}
 
 		for j := 0; j < m.outSize; j++ {
 			m.outputBuf[j] += expertOut[j] * w
@@ -154,6 +170,11 @@ func (m *MoE) Forward(x []float32) []float32 {
 
 	return m.outputBuf
 }
+
+func (m *MoE) Forward(x []float32) []float32 {
+	return m.ForwardWithArena(x, nil, nil)
+}
+
 
 func (m *MoE) Backward(grad []float32) []float32 {
 	// Reset buffers
@@ -299,9 +320,19 @@ func (m *MoE) ClearGradients() {
 }
 
 func (m *MoE) Clone() Layer {
+	newM := NewMoE(m.inSize, m.outSize, m.numExperts, m.k)
+	copy(newM.params, m.params)
+	return newM
+}
+
+func (m *MoE) LightweightClone(params []float32, grads []float32) Layer {
+	gLen := len(m.gating.Params())
+	gGradLen := len(m.gating.Gradients())
+	eLen := len(m.experts[0].Params())
+	eGradLen := len(m.experts[0].Gradients())
+
 	newM := &MoE{
-		gating:        m.gating.Clone().(*Dense),
-		experts:       make([]Layer, len(m.experts)),
+		experts:       make([]Layer, m.numExperts),
 		k:             m.k,
 		inSize:        m.inSize,
 		outSize:       m.outSize,
@@ -311,17 +342,30 @@ func (m *MoE) Clone() Layer {
 		gateLogits:    make([]float32, m.numExperts),
 		gateProbs:     make([]float32, m.numExperts),
 		lastActive:    make([]int, m.k),
-		expertOutputs: make([][]float32, len(m.expertOutputs)),
+		expertOutputs: make([][]float32, m.numExperts),
 		gateGradBuf:   make([]float32, m.numExperts),
 		dxTotalBuf:    make([]float32, m.inSize),
 		expertGradBuf: make([]float32, m.outSize),
 		weightsBuf:    make([]expertWeight, m.numExperts),
 		rng:           NewRNG(42),
+		params:        params,
+		grads:         grads,
+		training:      m.training,
 	}
-	for i, e := range m.experts {
-		newM.experts[i] = e.Clone()
+
+	offset := 0
+	gradOffset := 0
+	newM.gating = m.gating.LightweightClone(params[offset:offset+gLen], grads[gradOffset:gradOffset+gGradLen]).(*Dense)
+	offset += gLen
+	gradOffset += gGradLen
+
+	for i := 0; i < m.numExperts; i++ {
+		newM.experts[i] = m.experts[i].LightweightClone(params[offset:offset+eLen], grads[gradOffset:gradOffset+eGradLen])
 		newM.expertOutputs[i] = make([]float32, m.outSize)
+		offset += eLen
+		gradOffset += eGradLen
 	}
+
 	return newM
 }
 
@@ -334,12 +378,12 @@ func (m *MoE) SetDevice(d Device) {
 
 func (m *MoE) SetTraining(t bool) {
 	m.training = t
+	m.gating.SetTraining(t)
 	for _, e := range m.experts {
-		if st, ok := e.(interface{ SetTraining(bool) }); ok {
-			st.SetTraining(t)
-		}
+		e.SetTraining(t)
 	}
 }
+
 
 func (m *MoE) InSize() int  { return m.inSize }
 func (m *MoE) OutSize() int { return m.outSize }

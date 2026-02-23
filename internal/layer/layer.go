@@ -49,6 +49,19 @@ type Layer interface {
 
 	// OutSize returns the number of output features.
 	OutSize() int
+
+	// Training state
+	SetTraining(bool)
+
+	// LightweightClone creates a new layer that shares the same parameters and gradients
+	// but has its own internal reusable buffers.
+	LightweightClone(params []float32, grads []float32) Layer
+}
+
+// ArenaLayer is an optional interface for layers that support zero-allocation activation saving.
+type ArenaLayer interface {
+	Layer
+	ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32
 }
 
 // NamedParam represents a named parameter with its shape and data.
@@ -83,9 +96,12 @@ type Dense struct {
 	gradInBuf     []float32
 	dzBuf         []float32
 
-	savedInputs  [][]float32
-	savedPreActs [][]float32
-	savedOutput []float32
+	training bool
+
+	savedInputOffsets  []int
+	savedPreActOffsets []int
+	savedOutput        []float32
+	arena              []float32
 
 	// Metal persistent buffers
 	bufWeights *MetalBuffer
@@ -131,9 +147,9 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 		gradWBuf:     grads[:out*in],
 		gradBBuf:     grads[out*in:],
 		gradInBuf:    make([]float32, in),
-		dzBuf:        make([]float32, out),
-		savedInputs:  make([][]float32, 0),
-		savedPreActs: make([][]float32, 0),
+		dzBuf:              make([]float32, out),
+		savedInputOffsets:  make([]int, 0, 1),
+		savedPreActOffsets: make([]int, 0, 1),
 	}
 
 	if metal, ok := device.(*MetalDevice); ok && metal.IsAvailable() {
@@ -144,6 +160,86 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 	}
 
 	return d
+}
+
+func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+	copy(d.inputBuf, x)
+
+	// Save input to arena
+	if arena != nil && offset != nil {
+		d.arena = *arena
+		inSize := len(x)
+		if len(*arena) < *offset+inSize {
+			// Grow arena if needed
+			newArena := make([]float32, (*offset+inSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+			d.arena = *arena
+		}
+		saved := (*arena)[*offset : *offset+inSize]
+		copy(saved, x)
+		d.savedInputOffsets = append(d.savedInputOffsets, *offset)
+		*offset += inSize
+	} else {
+		d.saveInput(x)
+	}
+
+	outSize := d.outSize
+	inSize := d.inSize
+	weights := d.weights
+	biases := d.biases
+	input := d.inputBuf
+	preAct := d.preActBuf
+	output := d.outputBuf
+
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
+		d.bufIn.Update(x)
+		metal.MatMulPersistent(d.bufWeights, d.bufIn, d.bufOut, outSize, 1, inSize, 0.0)
+		d.bufOut.Read(preAct)
+		for i := 0; i < outSize; i++ {
+			preAct[i] += biases[i]
+		}
+	} else {
+		for o := 0; o < outSize; o++ {
+			sum := biases[o]
+			wBase := o * inSize
+			for i := 0; i < inSize; i++ {
+				sum += weights[wBase+i] * input[i]
+			}
+			preAct[o] = sum
+		}
+	}
+
+	// Save pre-activation to arena
+	if arena != nil && offset != nil {
+		if len(*arena) < *offset+outSize {
+			newArena := make([]float32, (*offset+outSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+			d.arena = *arena
+		}
+		saved := (*arena)[*offset : *offset+outSize]
+		copy(saved, preAct)
+		d.savedPreActOffsets = append(d.savedPreActOffsets, *offset)
+		*offset += outSize
+	} else {
+		d.savePreAct(preAct)
+	}
+
+	if batchAct, ok := d.act.(activations.BatchActivation); ok {
+		copy(output, preAct)
+		batchAct.ActivateBatch(output)
+		if cap(d.savedOutput) < outSize {
+			d.savedOutput = make([]float32, outSize)
+		}
+		copy(d.savedOutput[:outSize], output[:outSize])
+	} else {
+		for o := 0; o < outSize; o++ {
+			output[o] = d.act.Activate(preAct[o])
+		}
+	}
+
+	return output[:outSize]
 }
 
 func (d *Dense) Forward(x []float32) []float32 {
@@ -326,6 +422,10 @@ func (d *Dense) SetDevice(device Device) {
 	d.device = device
 }
 
+func (d *Dense) SetTraining(training bool) {
+	d.training = training
+}
+
 func (d *Dense) InSize() int { return d.inSize }
 func (d *Dense) OutSize() int { return d.outSize }
 
@@ -380,8 +480,8 @@ func (d *Dense) GetBias(out int) float32 {
 }
 
 func (d *Dense) Reset() {
-	d.savedInputs = d.savedInputs[:0]
-	d.savedPreActs = d.savedPreActs[:0]
+	d.savedInputOffsets = d.savedInputOffsets[:0]
+	d.savedPreActOffsets = d.savedPreActOffsets[:0]
 	d.savedOutput = d.savedOutput[:0]
 }
 
@@ -398,18 +498,53 @@ func (d *Dense) Clone() Layer {
 	return newD
 }
 
+func (d *Dense) LightweightClone(params []float32, grads []float32) Layer {
+	newD := &Dense{
+		params:             params,
+		weights:            params[:d.outSize*d.inSize],
+		biases:             params[d.outSize*d.inSize:],
+		act:                d.act,
+		outSize:            d.outSize,
+		inSize:             d.inSize,
+		device:             d.device,
+		inputBuf:           make([]float32, d.inSize),
+		outputBuf:          make([]float32, d.outSize),
+		preActBuf:          make([]float32, d.outSize),
+		grads:              grads,
+		gradWBuf:           grads[:d.outSize*d.inSize],
+		gradBBuf:           grads[d.outSize*d.inSize:],
+		gradInBuf:          make([]float32, d.inSize),
+		dzBuf:              make([]float32, d.outSize),
+		savedInputOffsets:  make([]int, 0, 16),
+		savedPreActOffsets: make([]int, 0, 16),
+		training:           d.training,
+	}
+	return newD
+}
+
 func (d *Dense) saveInput(x []float32) {
-	// Simple append to avoid complex logic that leads to panics
-	// and fix the regression. We can optimize this later if needed.
-	saved := make([]float32, len(x))
-	copy(saved, x)
-	d.savedInputs = append(d.savedInputs, saved)
+	inSize := len(x)
+	// We use the internal arena even when not provided from outside
+	if cap(d.arena) < inSize {
+		d.arena = make([]float32, inSize*2)
+	}
+	d.arena = d.arena[:inSize]
+	copy(d.arena, x)
+	d.savedInputOffsets = append(d.savedInputOffsets[:0], 0)
 }
 
 func (d *Dense) savePreAct(preAct []float32) {
-	saved := make([]float32, len(preAct))
-	copy(saved, preAct)
-	d.savedPreActs = append(d.savedPreActs, saved)
+	outSize := len(preAct)
+	inSize := len(d.arena)
+	offset := inSize
+	if cap(d.arena) < offset+outSize {
+		newArena := make([]float32, (offset+outSize)*2)
+		copy(newArena, d.arena)
+		d.arena = newArena
+	}
+	d.arena = d.arena[:offset+outSize]
+	copy(d.arena[offset:], preAct)
+	d.savedPreActOffsets = append(d.savedPreActOffsets[:0], offset)
 }
 
 func (d *Dense) AccumulateBackward(grad []float32) []float32 {
@@ -421,15 +556,19 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 	gradB := d.gradBBuf
 	gradIn := d.gradInBuf
 
-	numSaved := len(d.savedInputs)
-	if numSaved == 0 { return nil }
+	numSaved := len(d.savedInputOffsets)
+	if numSaved == 0 {
+		return nil
+	}
 
 	s := numSaved - 1
-	savedInput := d.savedInputs[s]
-	savedPreAct := d.savedPreActs[s]
+	inOff := d.savedInputOffsets[s]
+	paOff := d.savedPreActOffsets[s]
+	savedInput := d.arena[inOff : inOff+inSize]
+	savedPreAct := d.arena[paOff : paOff+outSize]
 
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
-		output := make([]float32, outSize)
+		output := d.outputBuf[:outSize]
 		copy(output, savedPreAct)
 		d.act.(activations.BatchActivation).ActivateBatch(output)
 
@@ -480,8 +619,8 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 		gradIn[i] = sum
 	}
 
-	d.savedInputs = d.savedInputs[:s]
-	d.savedPreActs = d.savedPreActs[:s]
+	d.savedInputOffsets = d.savedInputOffsets[:s]
+	d.savedPreActOffsets = d.savedPreActOffsets[:s]
 
 	return gradIn[:inSize]
 }

@@ -58,12 +58,15 @@ type GRU struct {
 	cellGateOut   []float32
 
 	// Saved states for BPTT
-	storedHiddenStates [][]float32
+	savedHiddenOffsets []int
+	arena              []float32
 
 	// Current time step
 	timeStep int
 
 	device Device
+
+	training bool
 }
 
 // NewGRU creates a new GRU layer with pre-allocated buffers.
@@ -142,7 +145,7 @@ func NewGRU(inSize, outSize int) *GRU {
 		resetGateOut:  make([]float32, outSize),
 		cellGateOut:   make([]float32, outSize),
 
-		storedHiddenStates: make([][]float32, 0),
+		savedHiddenOffsets: make([]int, 0, 16),
 		timeStep:           0,
 		device:             &CPUDevice{},
 	}
@@ -156,17 +159,19 @@ func (g *GRU) SetDevice(device Device) {
 // Reset resets the GRU state for a new sequence.
 func (g *GRU) Reset() {
 	g.timeStep = 0
-	g.storedHiddenStates = g.storedHiddenStates[:0]
+	g.savedHiddenOffsets = g.savedHiddenOffsets[:0]
 	// Clear buffers
 	for i := range g.cellBuf {
 		g.cellBuf[i] = 0
 	}
 }
 
-// Forward performs a forward pass for one time step.
-// x: input vector of length inSize
-// Returns: output vector of length outSize
-func (g *GRU) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (g *GRU) SetTraining(training bool) {
+	g.training = training
+}
+
+func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	// Copy input to buffer
 	copy(g.inputBuf, x)
 
@@ -243,10 +248,20 @@ func (g *GRU) Forward(x []float32) []float32 {
 	}
 
 	// === Store states for backprop ===
-	if g.timeStep >= len(g.storedHiddenStates) {
-		g.storedHiddenStates = append(g.storedHiddenStates, make([]float32, outSize))
+	if arena != nil && offset != nil {
+		g.arena = *arena
+		if len(*arena) < *offset+outSize {
+			newArena := make([]float32, (*offset+outSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+			g.arena = *arena
+		}
+		g.savedHiddenOffsets = append(g.savedHiddenOffsets, *offset)
+		copy((*arena)[*offset:*offset+outSize], g.cellBuf)
+		*offset += outSize
+	} else {
+		g.saveState(g.cellBuf)
 	}
-	copy(g.storedHiddenStates[g.timeStep], g.cellBuf)
 
 	g.timeStep++
 
@@ -254,6 +269,25 @@ func (g *GRU) Forward(x []float32) []float32 {
 	copy(g.outputBuf, g.cellBuf)
 	return g.outputBuf
 }
+
+func (g *GRU) saveState(h []float32) {
+	outSize := g.outSize
+	offset := len(g.arena)
+	if cap(g.arena) < offset+outSize {
+		newArena := make([]float32, (offset+outSize)*2)
+		copy(newArena, g.arena)
+		g.arena = newArena
+	}
+	g.arena = g.arena[:offset+outSize]
+	copy(g.arena[offset:offset+outSize], h)
+	g.savedHiddenOffsets = append(g.savedHiddenOffsets, offset)
+}
+
+// Forward performs a forward pass for one time step.
+func (g *GRU) Forward(x []float32) []float32 {
+	return g.ForwardWithArena(x, nil, nil)
+}
+
 
 // Backward performs backpropagation through time for one time step.
 // grad: gradient of loss w.r.t. output (length outSize)
@@ -264,17 +298,18 @@ func (g *GRU) Backward(grad []float32) []float32 {
 
 	// Get time step index
 	ts := g.timeStep - 1
-	if ts < 0 || ts >= len(g.storedHiddenStates) {
+	if ts < 0 || ts >= len(g.savedHiddenOffsets) {
 		for i := range g.inputBuf {
 			g.inputBuf[i] = 0
 		}
 		return g.inputBuf
 	}
 
-	// Get saved states
+	// Get saved states from arena
 	hPrev := g.hPrevBuf
 	if ts > 0 {
-		copy(hPrev, g.storedHiddenStates[ts-1])
+		prevHOffset := g.savedHiddenOffsets[ts-1]
+		copy(hPrev, g.arena[prevHOffset:prevHOffset+outSize])
 	} else {
 		for i := range hPrev {
 			hPrev[i] = 0
@@ -527,6 +562,48 @@ func (g *GRU) Clone() Layer {
 	copy(newG.recurrentWeights, g.recurrentWeights)
 	copy(newG.biases, g.biases)
 	newG.device = g.device
+	return newG
+}
+
+func (g *GRU) LightweightClone(params []float32, grads []float32) Layer {
+	weightInSize := g.outSize * 3 * g.inSize
+	weightRecSize := g.outSize * g.outSize * 2
+
+	newG := &GRU{
+		inSize:               g.inSize,
+		outSize:              g.outSize,
+		params:               params,
+		inputWeights:         params[:weightInSize],
+		recurrentWeights:     params[weightInSize : weightInSize+weightRecSize],
+		biases:               params[weightInSize+weightRecSize:],
+		grads:                grads,
+		gradInputWeights:     grads[:weightInSize],
+		gradRecurrentWeights: grads[weightInSize : weightInSize+weightRecSize],
+		gradBiases:           grads[weightInSize+weightRecSize:],
+		updateAct:            g.updateAct,
+		resetAct:             g.resetAct,
+		cellAct:              g.cellAct,
+		inputBuf:             make([]float32, g.inSize),
+		outputBuf:            make([]float32, g.outSize),
+		preActBuf:            make([]float32, g.outSize*3),
+		cellBuf:              make([]float32, g.outSize),
+		dUpdateBuf:           make([]float32, g.outSize),
+		dResetBuf:            make([]float32, g.outSize),
+		dCellBuf:             make([]float32, g.outSize),
+		dhBuf:                make([]float32, g.outSize),
+		dhCandidateBuf:       make([]float32, g.outSize),
+		dUpdateBiBuf:         make([]float32, g.outSize),
+		dxBuf:                make([]float32, g.inSize),
+		dhPrevBuf:            make([]float32, g.outSize),
+		hPrevBuf:             make([]float32, g.outSize),
+		updateGateOut:        make([]float32, g.outSize),
+		resetGateOut:         make([]float32, g.outSize),
+		cellGateOut:          make([]float32, g.outSize),
+		savedHiddenOffsets:   make([]int, 0, 16),
+		timeStep:             0,
+		device:               g.device,
+		training:             g.training,
+	}
 	return newG
 }
 

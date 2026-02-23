@@ -31,10 +31,22 @@ Um pacote que re-exporta componentes internos para facilitar o acesso:
 - [x] Suporte a Hardware Acceleration (Metal/MPS) transparente via `SetDevice`.
 - [x] Sistema de Callbacks (Logger, Checkpoint, EarlyStopping).
 - [x] Implementação de camada Sparse MoE (Mixture of Experts) com Top-K routing.
+- [x] **Zero-Allocation Contiguous Memory**: Implementação de buffers globais contíguos para parâmetros e gradientes.
+- [x] **Parallel Training Architecture**: Implementação de `Worker Pool` e `LightweightClone` para treino paralelo eficiente sem alocações repetitivas.
+- [x] **Arena-based State Saving**: Eliminação de alocações durante o forward/backward pass através de um sistema de offsets em memória contígua (Arena).
 
 ## 5. Roadmap de Desenvolvimento Futuro
 
-### Fase 5: Validação e Diagnóstico (Próximos Passos)
+### Fase 5: Otimização de Memória e GPU (Concluído)
+- [x] **Contiguous Buffers**: Unificação de pesos e bias em slices contínuos.
+- [x] **Activation Arena**: Sistema de offsets para buffers de ativação (`savedInputs`), atingindo 0 alocações no loop de treino sequencial.
+- [x] **Worker Pool**: Treino paralelo com trabalhadores pré-alocados para minimizar overhead de clonagem.
+
+### Fase 6: Próximos Passos
+- [ ] **Kernel Fusing**: Combinar operações de MatMul + Bias + Activation em kernels Metal/CUDA únicos para reduzir latência de despacho.
+- [ ] **Asynchronous Transfers**: Otimizar a transferência de dados entre CPU e GPU.
+
+### Fase 6: Validação e Diagnóstico
 - [ ] **Lazy Shape Inference**: Permitir que uma camada detecte automaticamente o `InSize` com base na saída da camada anterior.
 - [ ] **Data Loaders**: Criar uma interface amigável para carregar datasets CSV, Imagens e Sequências.
 - [ ] **Visualização de Métricas**: Exportação de métricas de treino para formatos compatíveis com ferramentas de visualização (ex: CSV ou JSON para gráficos).

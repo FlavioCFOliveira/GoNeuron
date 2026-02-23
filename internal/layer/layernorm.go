@@ -30,6 +30,8 @@ type LayerNorm struct {
 	inputMeans []float32
 	inputStds  []float32
 
+	training bool
+
 	device Device
 }
 
@@ -75,26 +77,50 @@ func (l *LayerNorm) SetDevice(device Device) {
 	l.device = device
 }
 
-// Forward performs a forward pass through the layer normalization layer.
-// x: input tensor of shape [..., normalizedShape]
-// Returns: normalized output with same shape as input
-func (l *LayerNorm) Forward(x []float32) []float32 {
+// SetTraining sets whether the layer is in training mode.
+func (l *LayerNorm) SetTraining(training bool) {
+	l.training = training
+}
+
+func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	numSamples := len(x) / l.normalizedShape
 
 	if len(l.outputBuf) != len(x) {
 		l.outputBuf = make([]float32, len(x))
 	}
-	if len(l.inputMeans) != numSamples {
-		l.inputMeans = make([]float32, numSamples)
-		l.inputStds = make([]float32, numSamples)
+
+	if arena != nil && offset != nil {
+		// Save input, means and stds to arena
+		total := len(x)
+		required := total + numSamples*2
+		if len(*arena) < *offset+required {
+			newArena := make([]float32, (*offset+required)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		savedIn := (*arena)[*offset : *offset+total]
+		copy(savedIn, x)
+		l.savedInput = savedIn
+		*offset += total
+
+		l.inputMeans = (*arena)[*offset : *offset+numSamples]
+		*offset += numSamples
+
+		l.inputStds = (*arena)[*offset : *offset+numSamples]
+		*offset += numSamples
+	} else {
+		if len(l.inputMeans) != numSamples {
+			l.inputMeans = make([]float32, numSamples)
+			l.inputStds = make([]float32, numSamples)
+		}
+		if cap(l.savedInput) < len(x) {
+			l.savedInput = make([]float32, len(x))
+		}
+		l.savedInput = l.savedInput[:len(x)]
+		copy(l.savedInput, x)
 	}
 
 	output := l.outputBuf
-	if cap(l.savedInput) < len(x) {
-		l.savedInput = make([]float32, len(x))
-	}
-	copy(l.savedInput, x)
-
 	for s := 0; s < numSamples; s++ {
 		start := s * l.normalizedShape
 		end := start + l.normalizedShape
@@ -127,6 +153,12 @@ func (l *LayerNorm) Forward(x []float32) []float32 {
 
 	return output
 }
+
+// Forward performs a forward pass through the layer normalization layer.
+func (l *LayerNorm) Forward(x []float32) []float32 {
+	return l.ForwardWithArena(x, nil, nil)
+}
+
 
 func (l *LayerNorm) Backward(grad []float32) []float32 {
 	numSamples := len(grad) / l.normalizedShape
@@ -259,7 +291,9 @@ func (l *LayerNorm) NamedParams() []NamedParam {
 
 // Reset resets the layer normalization layer.
 func (l *LayerNorm) Reset() {
-	// No state to reset
+	l.savedInput = nil
+	l.inputMeans = nil
+	l.inputStds = nil
 }
 
 // ClearGradients zeroes out the accumulated gradients.
@@ -276,6 +310,34 @@ func (l *LayerNorm) Clone() Layer {
 		copy(newL.params, l.params)
 	}
 	newL.device = l.device
+	return newL
+}
+
+func (l *LayerNorm) LightweightClone(params []float32, grads []float32) Layer {
+	var gamma, beta, gradGamma, gradBeta []float32
+	if l.elementwiseAffine {
+		gamma = params[:l.normalizedShape]
+		beta = params[l.normalizedShape:]
+		gradGamma = grads[:l.normalizedShape]
+		gradBeta = grads[l.normalizedShape:]
+	}
+
+	newL := &LayerNorm{
+		normalizedShape:   l.normalizedShape,
+		eps:               l.eps,
+		elementwiseAffine: l.elementwiseAffine,
+		params:            params,
+		gamma:             gamma,
+		beta:              beta,
+		grads:             grads,
+		gradGammaBuf:      gradGamma,
+		gradBetaBuf:       gradBeta,
+		outputBuf:         make([]float32, l.normalizedShape),
+		gradInBuf:         make([]float32, l.normalizedShape),
+		gradBuf:           make([]float32, l.normalizedShape),
+		training:          l.training,
+		device:            l.device,
+	}
 	return newL
 }
 

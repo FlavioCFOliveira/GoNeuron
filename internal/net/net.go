@@ -44,6 +44,14 @@ type Network struct {
 	// Pre-allocated gradient buffer for training
 	// This avoids allocations in the training loop
 	lossGradBuf []float32
+
+	// Activation Arena: contiguous buffer for all layers' intermediate states
+	arena      []float32
+	arenaIndex int
+
+	// Worker Pool for parallel training
+	workerPool   []*Network
+	batchLossBuf []float32
 }
 
 // New creates a new neural network with the given layers.
@@ -83,6 +91,58 @@ func (n *Network) initBuffers() {
 			offset += lLen
 		}
 	}
+
+	// Invalidate worker pool if buffers are re-initialized
+	n.workerPool = nil
+}
+
+func (n *Network) initWorkers(num int) {
+	if len(n.workerPool) >= num {
+		return
+	}
+
+	oldPool := n.workerPool
+	n.workerPool = make([]*Network, num)
+	copy(n.workerPool, oldPool)
+
+	for i := len(oldPool); i < num; i++ {
+		n.workerPool[i] = n.LightweightClone()
+		// Give each worker its own private gradient buffer for parallel accumulation
+		workerGrads := make([]float32, len(n.grads))
+		n.workerPool[i].grads = workerGrads
+		offset := 0
+		for _, l := range n.workerPool[i].layers {
+			lLen := len(l.Gradients())
+			if lLen > 0 {
+				l.SetGradients(workerGrads[offset : offset+lLen])
+				offset += lLen
+			}
+		}
+	}
+}
+
+// LightweightClone creates a network that shares the same parameters and gradients
+// but has its own internal buffers and layer instances.
+func (n *Network) LightweightClone() *Network {
+	newLayers := make([]layer.Layer, len(n.layers))
+	offset := 0
+	gradOffset := 0
+	for i, l := range n.layers {
+		lLen := len(l.Params())
+		lGradLen := len(l.Gradients())
+		newLayers[i] = l.LightweightClone(n.params[offset:offset+lLen], n.grads[gradOffset:gradOffset+lGradLen])
+		offset += lLen
+		gradOffset += lGradLen
+	}
+
+	net := &Network{
+		layers: newLayers,
+		loss:   n.loss,
+		opt:    n.opt,
+		params: n.params,
+		grads:  n.grads,
+	}
+	return net
 }
 
 // SetDevice sets the computation device for the entire network.
@@ -119,9 +179,19 @@ func (n *Network) Clone() *Network {
 
 // Forward performs a forward pass through all layers.
 func (n *Network) Forward(x []float32) []float32 {
+	// Reset arena index for forward pass if in training
+	n.arenaIndex = 0
+
 	curr := x
 	for i := range n.layers {
-		curr = n.layers[i].Forward(curr)
+		// Check if layer supports Arena saving
+		if saver, ok := n.layers[i].(interface {
+			ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32
+		}); ok {
+			curr = saver.ForwardWithArena(curr, &n.arena, &n.arenaIndex)
+		} else {
+			curr = n.layers[i].Forward(curr)
+		}
 	}
 	return curr
 }
@@ -282,11 +352,11 @@ func (n *Network) TrainBatch(batchX [][]float32, batchY [][]float32) float32 {
 		return 0
 	}
 
-	// Use parallel processing for batches larger than 16 samples
+	// Use parallel processing for batches larger than 64 samples
 	// Parallel overhead dominates for small batches
-	const parallelThreshold = 16
+	const parallelThreshold = 64
 
-	if batchSize >= parallelThreshold {
+	if batchSize >= parallelThreshold && runtime.NumCPU() > 1 {
 		return n.trainBatchParallel(batchX, batchY)
 	}
 
@@ -407,87 +477,93 @@ func (n *Network) accumulateBackward(grad []float32) []float32 {
 }
 
 // trainBatchParallel performs training on a batch of samples using parallel processing.
-// Each worker gets its own Network copy to avoid buffer sharing issues.
+// It uses a pool of worker networks to avoid allocations and aggregates gradients sequentially.
 func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) float32 {
 	batchSize := len(batchX)
-	numWorkers := min(batchSize, runtime.NumCPU())
-
-	// Create network copies for each worker
-	workers := make([]*Network, numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		workers[i] = n.Clone()
-		workers[i].ClearGradients()
+	numWorkers := runtime.NumCPU()
+	if batchSize < numWorkers {
+		numWorkers = batchSize
 	}
 
-	losses := make([]float32, batchSize)
+	n.initWorkers(numWorkers)
+	workers := n.workerPool[:numWorkers]
+
+	// Clear global gradients
+	n.ClearGradients()
+
+	if cap(n.batchLossBuf) < batchSize {
+		n.batchLossBuf = make([]float32, batchSize)
+	}
+	losses := n.batchLossBuf[:batchSize]
 	var wg sync.WaitGroup
 
 	// Distribute work across workers
 	chunkSize := (batchSize + numWorkers - 1) / numWorkers
 	for w := 0; w < numWorkers; w++ {
 		start := w * chunkSize
-		end := min(start+chunkSize, batchSize)
+		end := start + chunkSize
+		if end > batchSize {
+			end = batchSize
+		}
 		if start >= end {
 			continue
 		}
 
+		workers[w].ClearGradients()
+
 		wg.Add(1)
-		go func(workerIdx, s, e int) {
+		go func(worker *Network, s, e int) {
 			defer wg.Done()
-			netCopy := workers[workerIdx]
 
 			for i := s; i < e; i++ {
-				// Reset internal state for layers that support it (e.g., LSTM, GRU)
-				// This is critical to prevent state from one sample affecting another
-				for _, l := range netCopy.layers {
+				// Reset internal state for layers that support it
+				for _, l := range worker.layers {
 					if resettable, ok := l.(interface{ Reset() }); ok {
 						resettable.Reset()
 					}
 				}
 
 				// Forward pass
-				yPred := netCopy.Forward(batchX[i])
+				yPred := worker.Forward(batchX[i])
 
 				// Compute loss
-				losses[i] = netCopy.loss.Forward(yPred, batchY[i])
+				losses[i] = worker.loss.Forward(yPred, batchY[i])
 
 				// Compute loss gradient
 				yPredLen := len(yPred)
-				grad := make([]float32, yPredLen)
+				// Use worker's lossGradBuf to avoid allocation
+				if cap(worker.lossGradBuf) < yPredLen {
+					worker.lossGradBuf = make([]float32, yPredLen)
+				}
+				grad := worker.lossGradBuf[:yPredLen]
 
-				if backwardInPlace, ok := netCopy.loss.(loss.BackwardInPlacer); ok {
+				if backwardInPlace, ok := worker.loss.(loss.BackwardInPlacer); ok {
 					backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
 				} else {
-					grad = netCopy.loss.Backward(yPred, batchY[i])
+					grad = worker.loss.Backward(yPred, batchY[i])
 				}
 
-				// Backward pass (accumulates into netCopy's layer buffers)
-				_ = netCopy.accumulateBackward(grad)
+				// Backward pass (accumulates into worker's private gradients)
+				_ = worker.accumulateBackward(grad)
 			}
-		}(w, start, end)
+		}(workers[w], start, end)
 	}
 
 	wg.Wait()
 
-	// Sum all gradients from workers into a single buffer
-	totalParams := len(n.Params())
-	sumGrads := make([]float32, totalParams)
-
-	for _, w := range workers {
-		wGrads := w.Gradients()
-		for i := range sumGrads {
-			sumGrads[i] += wGrads[i]
+	// Sum all gradients from workers into the master gradient buffer
+	for w := 0; w < numWorkers; w++ {
+		wGrads := workers[w].grads
+		for i := range n.grads {
+			n.grads[i] += wGrads[i]
 		}
 	}
 
 	// Average gradients
 	invBatchSize := float32(1.0 / float64(batchSize))
-	for i := range sumGrads {
-		sumGrads[i] *= invBatchSize
+	for i := range n.grads {
+		n.grads[i] *= invBatchSize
 	}
-
-	// Set averaged gradients back to original network
-	n.SetGradients(sumGrads)
 
 	// Optimization step
 	n.Step()
