@@ -9,10 +9,10 @@ func TestBatchNorm2DForward(t *testing.T) {
 	// Test batch normalization with 2 features
 	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
-	// Input: 2 batches x 2 features = 4 values
+	// Input: 2 spatial positions x 2 features = 4 values
 	// Feature 0: [1, 5], Feature 1: [2, 6]
-	// Layout: [1, 2, 5, 6] (channel-major)
-	input := []float32{1, 2, 5, 6}
+	// Layout: [1, 5, 2, 6] (channel-major NCHW)
+	input := []float32{1, 5, 2, 6}
 
 	output := bn.Forward(input)
 
@@ -20,7 +20,7 @@ func TestBatchNorm2DForward(t *testing.T) {
 	// Normalized: [(1-3)/2, (5-3)/2] = [-1, 1]
 	// Feature 1: mean=4, std=sqrt(4)=2
 	// Normalized: [(2-4)/2, (6-4)/2] = [-1, 1]
-	expected := []float32{-1, -1, 1, 1}
+	expected := []float32{-1, 1, -1, 1}
 
 	for i := 0; i < 4; i++ {
 		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-5 {
@@ -35,7 +35,7 @@ func TestBatchNorm2DWithAffine(t *testing.T) {
 
 	// Set gamma = [2, 2], beta = [1, 1]
 	// After normalization, output = 2 * normalized + 1
-	input := []float32{1, 2, 5, 6}
+	input := []float32{1, 5, 2, 6}
 	bn.Forward(input)
 
 	// Get gamma and verify
@@ -64,11 +64,11 @@ func TestBatchNorm2DWithoutAffine(t *testing.T) {
 	// Test without affine transformation
 	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
-	input := []float32{1, 2, 5, 6}
+	input := []float32{1, 5, 2, 6}
 	output := bn.Forward(input)
 
 	// Should be same as normalized
-	expected := []float32{-1, -1, 1, 1}
+	expected := []float32{-1, 1, -1, 1}
 
 	for i := 0; i < 4; i++ {
 		if float32(math.Abs(float64(output[i]-expected[i]))) > 1e-5 {
@@ -86,7 +86,7 @@ func TestBatchNorm2DWithoutAffine(t *testing.T) {
 func TestBatchNorm2DBackward(t *testing.T) {
 	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
-	input := []float32{1, 2, 5, 6}
+	input := []float32{1, 5, 2, 6}
 	bn.Forward(input)
 
 	// Pass gradient of all ones
@@ -95,8 +95,8 @@ func TestBatchNorm2DBackward(t *testing.T) {
 
 	// For batch norm with all ones gradient and no affine,
 	// the gradient should sum to zero per channel
-	// Channel 0: grad[0] + grad[2] = 1 + 1 = 2
-	// Channel 1: grad[1] + grad[3] = 1 + 1 = 2
+	// Channel 0: grad[0] + grad[1] = 1 + 1 = 2
+	// Channel 1: grad[2] + grad[3] = 1 + 1 = 2
 	// Sum of all gradients should be ~0 (due to normalization)
 	sumGrad := float32(0.0)
 	for i := 0; i < 4; i++ {
@@ -165,7 +165,7 @@ func TestBatchNorm2DRunningStats(t *testing.T) {
 	bn := NewBatchNorm2D(2, 1e-5, 0.5, false) // Use higher momentum for more noticeable changes
 
 	// First forward pass with input centered around 3
-	input1 := []float32{1, 2, 5, 6} // mean = 3.5
+	input1 := []float32{1, 5, 2, 6} // mean = 3.5
 	bn.Forward(input1)
 
 	runningMean1 := make([]float32, 2)
@@ -174,7 +174,7 @@ func TestBatchNorm2DRunningStats(t *testing.T) {
 	copy(runningVar1, bn.GetRunningVar())
 
 	// Second forward pass with input centered around 6
-	input2 := []float32{4, 5, 8, 9} // mean = 6.5
+	input2 := []float32{4, 8, 5, 9} // mean = 6.5
 	bn.Forward(input2)
 
 	runningMean2 := bn.GetRunningMean()

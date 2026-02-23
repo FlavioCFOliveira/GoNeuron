@@ -114,7 +114,7 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 		// Compute batch mean
 		sum := float32(0.0)
 		for s := 0; s < numel; s++ {
-			idx := s*numFeatures + f
+			idx := f*numel + s
 			sum += x[idx]
 		}
 		mean := sum / float32(numel)
@@ -124,7 +124,7 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 		// Compute batch variance
 		sumSquares := float32(0.0)
 		for s := 0; s < numel; s++ {
-			idx := s*numFeatures + f
+			idx := f*numel + s
 			diff := x[idx] - mean
 			sumSquares += diff * diff
 		}
@@ -136,7 +136,7 @@ func (b *BatchNorm2D) Forward(x []float32) []float32 {
 
 		// Normalize and apply affine transformation
 		for s := 0; s < numel; s++ {
-			idx := s*numFeatures + f
+			idx := f*numel + s
 			normalized := (x[idx] - mean) / std
 			if b.affine {
 				output[idx] = b.gamma[f]*normalized + b.beta[f]
@@ -167,7 +167,7 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 		sumGrad := float32(0.0)
 		sumGradXMean := float32(0.0)
 		for s := 0; s < numel; s++ {
-			idx := s*numFeatures + f
+			idx := f*numel + s
 			diff := b.savedInput[idx] - mean
 			sumGrad += grad[idx]
 			sumGradXMean += grad[idx] * diff
@@ -175,7 +175,7 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 
 		// Compute gradient for each input
 		for s := 0; s < numel; s++ {
-			idx := s*numFeatures + f
+			idx := f*numel + s
 			diff := b.savedInput[idx] - mean
 
 			gradInput := grad[idx]
@@ -190,7 +190,7 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 		// Accumulate parameter gradients
 		if b.affine {
 			for s := 0; s < numel; s++ {
-				idx := s*numFeatures + f
+				idx := f*numel + s
 				normalized := (b.savedInput[idx] - mean) / std
 				b.gradGammaBuf[f] += grad[idx] * normalized
 				b.gradBetaBuf[f] += grad[idx]
