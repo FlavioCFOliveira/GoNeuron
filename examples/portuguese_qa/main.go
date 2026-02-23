@@ -275,6 +275,14 @@ func main() {
 	fmt.Printf("Resposta Gerada: %s\n", answer)
 
 	// Interactive QA
+	fileInfo, _ := os.Stdin.Stat()
+	isTerminal := (fileInfo.Mode() & os.ModeCharDevice) != 0
+
+	if !isTerminal {
+		fmt.Println("\nDetetada execução não interativa. Exemplo concluído.")
+		return
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("\nQueres testar? (s/n)")
 	choice, _ := reader.ReadString('\n')
