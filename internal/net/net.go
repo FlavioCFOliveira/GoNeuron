@@ -518,6 +518,16 @@ func (n *Network) Layers() []layer.Layer {
 	return n.layers
 }
 
+// Loss returns the network's loss function.
+func (n *Network) Loss() loss.Loss {
+	return n.loss
+}
+
+// Optimizer returns the network's optimizer.
+func (n *Network) Optimizer() opt.Optimizer {
+	return n.opt
+}
+
 // Save saves the network to a file using gob encoding.
 // The optimizer state is not saved (will use default).
 func (n *Network) Save(filename string) error {
