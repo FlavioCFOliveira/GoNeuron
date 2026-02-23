@@ -119,6 +119,10 @@ func Bidirectional(l Layer) Layer {
 	return layer.NewBidirectional(l)
 }
 
+func MoE(inSize, outSize, numExperts, k int) Layer {
+	return layer.NewMoE(inSize, outSize, numExperts, k)
+}
+
 // Optimizers
 func Adam(lr float32) Optimizer {
 	return opt.NewAdam(lr)
