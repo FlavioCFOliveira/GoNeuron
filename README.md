@@ -90,6 +90,16 @@ model := goneuron.NewSequential(
 )
 ```
 
+#### Mixture of Experts (MoE)
+Dynamic routing to specialized sub-networks.
+```go
+model := goneuron.NewSequential(
+    goneuron.Dense(1, 16, goneuron.ReLU),
+    goneuron.MoE(16, 16, 4, 2), // 4 experts, activate top-2
+    goneuron.Dense(16, 1, goneuron.Linear),
+)
+```
+
 #### Transformers & Attention
 State-of-the-art NLP architectures.
 ```go

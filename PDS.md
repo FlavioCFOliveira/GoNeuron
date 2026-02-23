@@ -30,6 +30,7 @@ Um pacote que re-exporta componentes internos para facilitar o acesso:
 - [x] Conversão de 100% dos exemplos existentes para a nova API.
 - [x] Suporte a Hardware Acceleration (Metal/MPS) transparente via `SetDevice`.
 - [x] Sistema de Callbacks (Logger, Checkpoint, EarlyStopping).
+- [x] Implementação de camada Sparse MoE (Mixture of Experts) com Top-K routing.
 
 ## 5. Roadmap de Desenvolvimento Futuro
 
