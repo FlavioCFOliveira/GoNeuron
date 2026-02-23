@@ -43,7 +43,9 @@ type Conv2D struct {
 	gradInBuf   []float32
 
 	// Saved input for backward pass
-	savedInput []float32
+	savedInput        []float32
+	savedInputOffsets []int
+	arena             []float32
 
 	training bool
 
@@ -59,9 +61,10 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 		outChannels: outChannels,
 		kernelSize:  kernelSize,
 		stride:      stride,
-		padding:     padding,
-		activation:  activation,
-		device:      &CPUDevice{},
+		padding:           padding,
+		activation:        activation,
+		device:            &CPUDevice{},
+		savedInputOffsets: make([]int, 0, 16),
 	}
 
 	if inChannels != -1 {
@@ -179,20 +182,25 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 
 	// Save input for backward pass
 	if arena != nil && offset != nil {
+		c.arena = *arena
 		if len(*arena) < *offset+len(input) {
 			newArena := make([]float32, (*offset+len(input))*2)
 			copy(newArena, *arena)
 			*arena = newArena
+			c.arena = *arena
 		}
 		saved := (*arena)[*offset : *offset+len(input)]
 		copy(saved, input)
-		c.savedInput = saved
+		c.savedInputOffsets = append(c.savedInputOffsets, *offset)
 		*offset += len(input)
 	} else {
 		if cap(c.savedInput) < len(input) {
 			c.savedInput = make([]float32, len(input))
 		}
+		c.savedInput = c.savedInput[:len(input)]
 		copy(c.savedInput, input)
+		c.savedInputOffsets = append(c.savedInputOffsets[:0], 0)
+		c.arena = c.savedInput
 	}
 
 	// Cache dimensions for backward pass
@@ -276,6 +284,17 @@ func (c *Conv2D) Forward(input []float32) []float32 {
 // grad: gradient of loss w.r.t. activated output (shape: [outChannels, outH, outW] flattened)
 // Returns: gradient of loss w.r.t. input
 func (c *Conv2D) Backward(grad []float32) []float32 {
+	numSaved := len(c.savedInputOffsets)
+	if numSaved == 0 {
+		return nil
+	}
+
+	// Use last saved input
+	ts := numSaved - 1
+	offset := c.savedInputOffsets[ts]
+	inSize := c.inChannels * c.inputHeight * c.inputWidth
+	savedInput := c.arena[offset : offset+inSize]
+
 	// Output dimensions
 	outH, outW := c.computeOutputSize(c.inputHeight, c.inputWidth)
 	outSize := outH * outW
@@ -335,7 +354,7 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 									weightIdx := khWeightBase + kw
 
 									// Accumulate weight gradient
-									c.gradWeights[weightIdx] += gradAfterAct * c.savedInput[inputIdx]
+									c.gradWeights[weightIdx] += gradAfterAct * savedInput[inputIdx]
 
 									// Accumulate input gradient
 									gradInput[inputIdx] += gradAfterAct * c.weights[weightIdx]
@@ -347,6 +366,9 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 			}
 		}
 	}
+
+	// Pop the last saved input offset
+	c.savedInputOffsets = c.savedInputOffsets[:ts]
 
 	return gradInput
 }
@@ -429,25 +451,26 @@ func (c *Conv2D) Clone() Layer {
 func (c *Conv2D) LightweightClone(params []float32, grads []float32) Layer {
 	weightSize := c.outChannels * c.inChannels * c.kernelSize * c.kernelSize
 	newC := &Conv2D{
-		inChannels:     c.inChannels,
-		outChannels:    c.outChannels,
-		kernelSize:     c.kernelSize,
-		stride:         c.stride,
-		padding:        c.padding,
-		setInputHeight: c.setInputHeight,
-		setInputWidth:  c.setInputWidth,
-		activation:     c.activation,
-		params:         params,
-		weights:        params[:weightSize],
-		biases:         params[weightSize:],
-		grads:          grads,
-		gradWeights:    grads[:weightSize],
-		gradBiases:     grads[weightSize:],
-		outputBuf:      make([]float32, 0),
-		gradInBuf:      make([]float32, 0),
-		savedInput:     make([]float32, 0),
-		training:       c.training,
-		device:         c.device,
+		inChannels:        c.inChannels,
+		outChannels:       c.outChannels,
+		kernelSize:        c.kernelSize,
+		stride:            c.stride,
+		padding:           c.padding,
+		setInputHeight:    c.setInputHeight,
+		setInputWidth:     c.setInputWidth,
+		activation:        c.activation,
+		params:            params,
+		weights:           params[:weightSize],
+		biases:            params[weightSize:],
+		grads:             grads,
+		gradWeights:       grads[:weightSize],
+		gradBiases:        grads[weightSize:],
+		outputBuf:         make([]float32, 0),
+		gradInBuf:         make([]float32, 0),
+		savedInput:        make([]float32, 0),
+		savedInputOffsets: make([]int, 0, 128),
+		training:          c.training,
+		device:            c.device,
 	}
 	return newC
 }
@@ -484,7 +507,7 @@ func (c *Conv2D) NamedParams() []NamedParam {
 
 // Reset clears any cached state (for compatibility with other layer types).
 func (c *Conv2D) Reset() {
-	c.savedInput = nil
+	c.savedInputOffsets = c.savedInputOffsets[:0]
 }
 
 // OutputBuf returns the raw output buffer for advanced use.

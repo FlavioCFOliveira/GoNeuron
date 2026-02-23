@@ -90,8 +90,7 @@ func (c CrossEntropy) Forward(yPred, yTrue []float32) float32 {
 	return sum / float32(n)
 }
 
-// Backward computes gradient for cross entropy with softmax.
-// For cross entropy + softmax, gradient simplifies to (y_pred - y_true).
+// Backward computes gradient for cross entropy: dL/dy_pred = -y_true / (y_pred + eps)
 func (c CrossEntropy) Backward(yPred, yTrue []float32) []float32 {
 	n := len(yPred)
 	if n != len(yTrue) {
@@ -99,8 +98,13 @@ func (c CrossEntropy) Backward(yPred, yTrue []float32) []float32 {
 	}
 
 	grad := make([]float32, n)
+	const eps = 1e-10
 	for i := 0; i < n; i++ {
-		grad[i] = yPred[i] - yTrue[i]
+		pred := yPred[i]
+		if pred < eps {
+			pred = eps
+		}
+		grad[i] = -yTrue[i] / (pred * float32(n))
 	}
 	return grad
 }
@@ -112,8 +116,13 @@ func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float32) {
 		panic("CrossEntropy: slices must have same length")
 	}
 
+	const eps = 1e-10
 	for i := 0; i < n; i++ {
-		grad[i] = yPred[i] - yTrue[i]
+		pred := yPred[i]
+		if pred < eps {
+			pred = eps
+		}
+		grad[i] = -yTrue[i] / (pred * float32(n))
 	}
 }
 
@@ -334,7 +343,7 @@ func (b BCEWithLogitsLoss) Forward(yPred, yTrue []float32) float32 {
 		if x >= 0 {
 			sum += float32(math.Log(1+math.Exp(float64(-x)))) + x - x*y
 		} else {
-			sum += -x + float32(math.Log(1+math.Exp(float64(x)))) - x*y
+			sum += float32(math.Log(1+math.Exp(float64(x)))) - x*y
 		}
 	}
 	return sum / float32(n)

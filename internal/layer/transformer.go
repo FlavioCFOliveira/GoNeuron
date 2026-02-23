@@ -147,6 +147,46 @@ func (p *PositionalEncoding) LightweightClone(params []float32, grads []float32)
 }
 func (p *PositionalEncoding) AccumulateBackward(grad []float32) []float32 { return p.Backward(grad) }
 
+type ActivationType int
+
+const (
+	ActReLU ActivationType = iota
+	ActSwiGLU
+)
+
+type NormType int
+
+const (
+	NormLN NormType = iota
+	NormRMS
+)
+
+// applyRoPE applies Rotary Positional Embeddings in-place.
+func applyRoPE(x []float32, seqLen, numHeads, headDim int, conjugate bool) {
+	for t := 0; t < seqLen; t++ {
+		for h := 0; h < numHeads; h++ {
+			for i := 0; i < headDim/2; i++ {
+				theta := float32(math.Pow(10000, -float64(2*i)/float64(headDim)))
+				mTheta := float32(t) * theta
+				c := float32(math.Cos(float64(mTheta)))
+				s := float32(math.Sin(float64(mTheta)))
+				if conjugate {
+					s = -s
+				}
+
+				idx1 := t*numHeads*headDim + h*headDim + i
+				idx2 := t*numHeads*headDim + h*headDim + i + headDim/2
+
+				v1 := x[idx1]
+				v2 := x[idx2]
+
+				x[idx1] = v1*c - v2*s
+				x[idx2] = v1*s + v2*c
+			}
+		}
+	}
+}
+
 // MultiHeadAttention implements scaled dot-product multi-head attention.
 type MultiHeadAttention struct {
 	dim      int
@@ -154,6 +194,7 @@ type MultiHeadAttention struct {
 	headDim  int
 	seqLen   int
 	Causal   bool
+	UseRoPE  bool
 
 	// Query, Key, Value projections
 	wQ, wK, wV *Dense
@@ -282,6 +323,12 @@ func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, off
 		copy(m.qBuf[start:end], q)
 		copy(m.kBuf[start:end], k)
 		copy(m.vBuf[start:end], v)
+	}
+
+	// 1.5 Apply RoPE if enabled
+	if m.UseRoPE {
+		applyRoPE(m.qBuf, seqLen, m.numHeads, m.headDim, false)
+		applyRoPE(m.kBuf, seqLen, m.numHeads, m.headDim, false)
 	}
 
 	// 2. Scaled Dot-Product Attention for each head
@@ -442,6 +489,12 @@ func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
 		}
 	}
 
+	// 2.5 Apply RoPE backward if enabled
+	if m.UseRoPE {
+		applyRoPE(gradQ, seqLen, m.numHeads, m.headDim, true)
+		applyRoPE(gradK, seqLen, m.numHeads, m.headDim, true)
+	}
+
 	// 3. Backprop through wQ, wK, wV
 	for t := 0; t < seqLen; t++ {
 		start := t * dim
@@ -588,9 +641,9 @@ func (m *MultiHeadAttention) AccumulateBackward(grad []float32) []float32 { retu
 
 type TransformerBlock struct {
 	mha   *MultiHeadAttention
-	norm1 *LayerNorm
-	norm2 *LayerNorm
-	ff1   *Dense
+	norm1 Layer
+	norm2 Layer
+	ff1   Layer
 	ff2   *Dense
 
 	dim    int
@@ -614,25 +667,50 @@ type TransformerBlock struct {
 	params []float32
 	grads  []float32
 
+	actType  ActivationType
+	normType NormType
+	useRoPE  bool
+
 	training bool
 }
 
 func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *TransformerBlock {
+	return NewTransformerBlockExt(dim, numHeads, seqLen, ffDim, causal, ActReLU, NormLN, false)
+}
+
+func NewTransformerBlockExt(dim, numHeads, seqLen, ffDim int, causal bool, actType ActivationType, normType NormType, useRoPE bool) *TransformerBlock {
 	mha := NewMultiHeadAttention(dim, numHeads, seqLen, causal)
-	norm1 := NewLayerNorm(dim, 1e-5, true)
-	norm2 := NewLayerNorm(dim, 1e-5, true)
-	ff1 := NewDense(dim, ffDim, activations.ReLU{})
+	mha.UseRoPE = useRoPE
+
+	var norm1, norm2 Layer
+	if normType == NormRMS {
+		norm1 = NewRMSNorm(dim, 1e-5)
+		norm2 = NewRMSNorm(dim, 1e-5)
+	} else {
+		norm1 = NewLayerNorm(dim, 1e-5, true)
+		norm2 = NewLayerNorm(dim, 1e-5, true)
+	}
+
+	var ff1 Layer
+	if actType == ActSwiGLU {
+		ff1 = NewSwiGLU(dim, ffDim)
+	} else {
+		ff1 = NewDense(dim, ffDim, activations.ReLU{})
+	}
 	ff2 := NewDense(ffDim, dim, activations.Linear{})
 
 	t := &TransformerBlock{
-		mha:    mha,
-		norm1:  norm1,
-		norm2:  norm2,
-		ff1:    ff1,
-		ff2:    ff2,
-		dim:    dim,
-		seqLen: seqLen,
-		ffDim:  ffDim,
+		mha:      mha,
+		norm1:    norm1,
+		norm2:    norm2,
+		ff1:      ff1,
+		ff2:      ff2,
+		dim:      dim,
+		seqLen:   seqLen,
+		ffDim:    ffDim,
+		actType:  actType,
+		normType: normType,
+		useRoPE:  useRoPE,
 	}
 
 	if dim != -1 {
@@ -653,14 +731,14 @@ func (t *TransformerBlock) Build(inSize int) {
 	if t.mha.InSize() <= 0 {
 		t.mha.Build(inSize)
 	}
-	if t.norm1.InSize() <= 0 {
-		t.norm1.Build(dim)
+	if b, ok := t.norm1.(DeferredLayer); ok && b.InSize() <= 0 {
+		b.Build(dim)
 	}
-	if t.norm2.InSize() <= 0 {
-		t.norm2.Build(dim)
+	if b, ok := t.norm2.(DeferredLayer); ok && b.InSize() <= 0 {
+		b.Build(dim)
 	}
-	if t.ff1.InSize() <= 0 {
-		t.ff1.Build(dim)
+	if b, ok := t.ff1.(DeferredLayer); ok && b.InSize() <= 0 {
+		b.Build(dim)
 	}
 	if t.ff2.InSize() <= 0 {
 		t.ff2.Build(t.ffDim)
@@ -736,7 +814,11 @@ func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offse
 	// LayerNorm 1
 	var norm1Out []float32
 	if arena != nil && offset != nil {
-		norm1Out = t.norm1.ForwardWithArena(t.res1Buf, arena, offset)
+		if al, ok := t.norm1.(ArenaLayer); ok {
+			norm1Out = al.ForwardWithArena(t.res1Buf, arena, offset)
+		} else {
+			norm1Out = t.norm1.Forward(t.res1Buf)
+		}
 	} else {
 		norm1Out = t.norm1.Forward(t.res1Buf)
 	}
@@ -748,7 +830,11 @@ func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offse
 		end := start + t.dim
 		var mid []float32
 		if arena != nil && offset != nil {
-			mid = t.ff1.ForwardWithArena(t.norm1OutBuf[start:end], arena, offset)
+			if al, ok := t.ff1.(ArenaLayer); ok {
+				mid = al.ForwardWithArena(t.norm1OutBuf[start:end], arena, offset)
+			} else {
+				mid = t.ff1.Forward(t.norm1OutBuf[start:end])
+			}
 		} else {
 			mid = t.ff1.Forward(t.norm1OutBuf[start:end])
 		}
@@ -770,7 +856,11 @@ func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offse
 	// LayerNorm 2
 	var output []float32
 	if arena != nil && offset != nil {
-		output = t.norm2.ForwardWithArena(t.res2Buf, arena, offset)
+		if al, ok := t.norm2.(ArenaLayer); ok {
+			output = al.ForwardWithArena(t.res2Buf, arena, offset)
+		} else {
+			output = t.norm2.Forward(t.res2Buf)
+		}
 	} else {
 		output = t.norm2.Forward(t.res2Buf)
 	}
@@ -917,14 +1007,20 @@ func (t *TransformerBlock) NamedParams() []NamedParam {
 	for _, p := range t.mha.NamedParams() {
 		params = append(params, NamedParam{Name: "mha_" + p.Name, Shape: p.Shape, Data: p.Data})
 	}
-	for _, p := range t.norm1.NamedParams() {
-		params = append(params, NamedParam{Name: "norm1_" + p.Name, Shape: p.Shape, Data: p.Data})
+	if np, ok := t.norm1.(NamedParamProvider); ok {
+		for _, p := range np.NamedParams() {
+			params = append(params, NamedParam{Name: "norm1_" + p.Name, Shape: p.Shape, Data: p.Data})
+		}
 	}
-	for _, p := range t.norm2.NamedParams() {
-		params = append(params, NamedParam{Name: "norm2_" + p.Name, Shape: p.Shape, Data: p.Data})
+	if np, ok := t.norm2.(NamedParamProvider); ok {
+		for _, p := range np.NamedParams() {
+			params = append(params, NamedParam{Name: "norm2_" + p.Name, Shape: p.Shape, Data: p.Data})
+		}
 	}
-	for _, p := range t.ff1.NamedParams() {
-		params = append(params, NamedParam{Name: "ff1_" + p.Name, Shape: p.Shape, Data: p.Data})
+	if np, ok := t.ff1.(NamedParamProvider); ok {
+		for _, p := range np.NamedParams() {
+			params = append(params, NamedParam{Name: "ff1_" + p.Name, Shape: p.Shape, Data: p.Data})
+		}
 	}
 	for _, p := range t.ff2.NamedParams() {
 		params = append(params, NamedParam{Name: "ff2_" + p.Name, Shape: p.Shape, Data: p.Data})
@@ -947,7 +1043,7 @@ func (t *TransformerBlock) ClearGradients() {
 	t.ff2.ClearGradients()
 }
 func (t *TransformerBlock) Clone() Layer {
-	return NewTransformerBlock(t.dim, t.mha.numHeads, t.seqLen, t.ff1.OutSize(), t.mha.Causal)
+	return NewTransformerBlockExt(t.dim, t.mha.numHeads, t.seqLen, t.ffDim, t.mha.Causal, t.actType, t.normType, t.useRoPE)
 }
 
 func (t *TransformerBlock) LightweightClone(params []float32, grads []float32) Layer {
@@ -966,6 +1062,10 @@ func (t *TransformerBlock) LightweightClone(params []float32, grads []float32) L
 	newT := &TransformerBlock{
 		dim:               t.dim,
 		seqLen:            t.seqLen,
+		ffDim:             t.ffDim,
+		actType:           t.actType,
+		normType:          t.normType,
+		useRoPE:           t.useRoPE,
 		outputBuf:         make([]float32, t.seqLen*t.dim),
 		res1Buf:           make([]float32, t.seqLen*t.dim),
 		norm1OutBuf:       make([]float32, t.seqLen*t.dim),
@@ -987,15 +1087,15 @@ func (t *TransformerBlock) LightweightClone(params []float32, grads []float32) L
 	offset += sizeMHA
 	gradOffset += gradSizeMHA
 
-	newT.norm1 = t.norm1.LightweightClone(params[offset:offset+sizeNorm1], grads[gradOffset:gradOffset+gradSizeNorm1]).(*LayerNorm)
+	newT.norm1 = t.norm1.LightweightClone(params[offset:offset+sizeNorm1], grads[gradOffset:gradOffset+gradSizeNorm1])
 	offset += sizeNorm1
 	gradOffset += gradSizeNorm1
 
-	newT.norm2 = t.norm2.LightweightClone(params[offset:offset+sizeNorm2], grads[gradOffset:gradOffset+gradSizeNorm2]).(*LayerNorm)
+	newT.norm2 = t.norm2.LightweightClone(params[offset:offset+sizeNorm2], grads[gradOffset:gradOffset+gradSizeNorm2])
 	offset += sizeNorm2
 	gradOffset += gradSizeNorm2
 
-	newT.ff1 = t.ff1.LightweightClone(params[offset:offset+sizeFF1], grads[gradOffset:gradOffset+gradSizeFF1]).(*Dense)
+	newT.ff1 = t.ff1.LightweightClone(params[offset:offset+sizeFF1], grads[gradOffset:gradOffset+gradSizeFF1])
 	offset += sizeFF1
 	gradOffset += gradSizeFF1
 

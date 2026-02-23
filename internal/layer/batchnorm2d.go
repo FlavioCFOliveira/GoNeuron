@@ -37,6 +37,11 @@ type BatchNorm2D struct {
 	savedVar     []float32
 	savedStd     []float32
 
+	savedInputOffsets []int
+	savedMeanOffsets  []int
+	savedStdOffsets   []int
+	arena             []float32
+
 	inputHeight     int
 	inputWidth      int
 	numelPerChannel int
@@ -46,12 +51,15 @@ type BatchNorm2D struct {
 // NewBatchNorm2D creates a new 2D batch normalization layer.
 func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool) *BatchNorm2D {
 	l := &BatchNorm2D{
-		numFeatures: numFeatures,
-		eps:         eps,
-		momentum:    momentum,
-		affine:      affine,
-		training:    true,
-		device:      &CPUDevice{},
+		numFeatures:       numFeatures,
+		eps:               eps,
+		momentum:          momentum,
+		affine:            affine,
+		training:          true,
+		device:            &CPUDevice{},
+		savedInputOffsets: make([]int, 0, 16),
+		savedMeanOffsets:  make([]int, 0, 16),
+		savedStdOffsets:   make([]int, 0, 16),
 	}
 
 	if numFeatures != -1 {
@@ -133,20 +141,36 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 	// Save input for backward pass
 	if b.training {
 		if arena != nil && offset != nil {
-			if len(*arena) < *offset+total {
-				newArena := make([]float32, (*offset+total)*2)
+			b.arena = *arena
+			totalRequired := total + b.numFeatures*2
+			if len(*arena) < *offset+totalRequired {
+				newArena := make([]float32, (*offset+totalRequired)*2)
 				copy(newArena, *arena)
 				*arena = newArena
+				b.arena = *arena
 			}
-			saved := (*arena)[*offset : *offset+total]
-			copy(saved, x)
-			b.savedInput = saved
+			b.savedInputOffsets = append(b.savedInputOffsets, *offset)
+			copy((*arena)[*offset:*offset+total], x)
 			*offset += total
+
+			b.savedMeanOffsets = append(b.savedMeanOffsets, *offset)
+			b.savedMean = (*arena)[*offset : *offset+b.numFeatures]
+			*offset += b.numFeatures
+
+			b.savedStdOffsets = append(b.savedStdOffsets, *offset)
+			b.savedStd = (*arena)[*offset : *offset+b.numFeatures]
+			*offset += b.numFeatures
 		} else {
 			if cap(b.savedInput) < total {
 				b.savedInput = make([]float32, total)
 			}
+			b.savedInput = b.savedInput[:total]
 			copy(b.savedInput, x)
+
+			b.savedInputOffsets = append(b.savedInputOffsets[:0], 0)
+			b.savedMeanOffsets = append(b.savedMeanOffsets[:0], -1)
+			b.savedStdOffsets = append(b.savedStdOffsets[:0], -1)
+			b.arena = b.savedInput
 		}
 	}
 
@@ -241,24 +265,46 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 		return b.gradInBuf
 	}
 
+	numSaved := len(b.savedInputOffsets)
+	if numSaved == 0 {
+		return nil
+	}
+
+	ts := numSaved - 1
+	inOff := b.savedInputOffsets[ts]
+	meanOff := b.savedMeanOffsets[ts]
+	stdOff := b.savedStdOffsets[ts]
+
+	total := len(grad)
+	savedInput := b.arena[inOff : inOff+total]
+
 	numel := b.numelPerChannel
 	numFeatures := b.numFeatures
 
+	var savedMean, savedStd []float32
+	if meanOff == -1 {
+		savedMean = b.savedMean
+		savedStd = b.savedStd
+	} else {
+		savedMean = b.arena[meanOff : meanOff+numFeatures]
+		savedStd = b.arena[stdOff : stdOff+numFeatures]
+	}
+
 	// Ensure gradInBuf is sized correctly
-	if len(b.gradInBuf) != len(grad) {
+	if len(b.gradInBuf) < len(grad) {
 		b.gradInBuf = make([]float32, len(grad))
 	}
 
 	for f := 0; f < numFeatures; f++ {
-		mean := b.savedMean[f]
-		std := b.savedStd[f]
+		mean := savedMean[f]
+		std := savedStd[f]
 
 		// Compute sum of gradients and sum of gradients * (x - mean)
 		sumGrad := float32(0.0)
 		sumGradXMean := float32(0.0)
 		for s := 0; s < numel; s++ {
 			idx := f*numel + s
-			diff := b.savedInput[idx] - mean
+			diff := savedInput[idx] - mean
 			sumGrad += grad[idx]
 			sumGradXMean += grad[idx] * diff
 		}
@@ -266,29 +312,36 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 		// Compute gradient for each input
 		for s := 0; s < numel; s++ {
 			idx := f*numel + s
-			diff := b.savedInput[idx] - mean
+			diff := savedInput[idx] - mean
 
 			gradInput := grad[idx]
+			g := float32(1.0)
 			if b.affine {
-				gradInput *= b.gamma[f]
+				g = b.gamma[f]
+				gradInput *= g
 			}
-			gradInput = gradInput/std - sumGrad/float32(numel)/std - diff*sumGradXMean/float32(numel)/std/std/std
+			gradInput = gradInput/std - (sumGrad*g)/float32(numel)/std - diff*(sumGradXMean*g)/float32(numel)/std/std/std
 
-			b.gradInBuf[idx] = gradInput // This is gradient w.r.t. input, no need to accumulate across samples in the SAME pass
+			b.gradInBuf[idx] = gradInput
 		}
 
 		// Accumulate parameter gradients
 		if b.affine {
 			for s := 0; s < numel; s++ {
 				idx := f*numel + s
-				normalized := (b.savedInput[idx] - mean) / std
+				normalized := (savedInput[idx] - mean) / std
 				b.gradGammaBuf[f] += grad[idx] * normalized
 				b.gradBetaBuf[f] += grad[idx]
 			}
 		}
 	}
 
-	return b.gradInBuf
+	// Pop offsets
+	b.savedInputOffsets = b.savedInputOffsets[:ts]
+	b.savedMeanOffsets = b.savedMeanOffsets[:ts]
+	b.savedStdOffsets = b.savedStdOffsets[:ts]
+
+	return b.gradInBuf[:len(grad)]
 }
 
 func (b *BatchNorm2D) Params() []float32 {
@@ -388,7 +441,9 @@ func (b *BatchNorm2D) NamedParams() []NamedParam {
 
 // Reset resets the batch normalization layer.
 func (b *BatchNorm2D) Reset() {
-	b.savedInput = nil
+	b.savedInputOffsets = b.savedInputOffsets[:0]
+	b.savedMeanOffsets = b.savedMeanOffsets[:0]
+	b.savedStdOffsets = b.savedStdOffsets[:0]
 }
 
 // ClearGradients zeroes out the accumulated gradients.
@@ -436,11 +491,14 @@ func (b *BatchNorm2D) LightweightClone(params []float32, grads []float32) Layer 
 		gradBetaBuf:     gradBeta,
 		outputBuf:       make([]float32, 0),
 		gradInBuf:       make([]float32, 0),
-		savedMean:       make([]float32, b.numFeatures),
-		savedVar:        make([]float32, b.numFeatures),
-		savedStd:        make([]float32, b.numFeatures),
-		device:          b.device,
-		numelPerChannel: b.numelPerChannel,
+		savedMean:         make([]float32, b.numFeatures),
+		savedVar:          make([]float32, b.numFeatures),
+		savedStd:          make([]float32, b.numFeatures),
+		savedInputOffsets: make([]int, 0, 128),
+		savedMeanOffsets:  make([]int, 0, 128),
+		savedStdOffsets:   make([]int, 0, 128),
+		device:            b.device,
+		numelPerChannel:   b.numelPerChannel,
 	}
 	return newB
 }

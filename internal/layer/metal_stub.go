@@ -2,12 +2,14 @@
 
 package layer
 
+import "unsafe"
+
 // Activation types for fused kernels (stubs)
 const (
-	ActivationNone    = 0
-	ActivationSigmoid = 1
-	ActivationTanh    = 2
-	ActivationReLU    = 3
+	MetalActivationNone    = 0
+	MetalActivationSigmoid = 1
+	MetalActivationTanh    = 2
+	MetalActivationReLU    = 3
 )
 
 // MetalDevice is a stub for non-macOS platforms.
@@ -23,18 +25,23 @@ func (d *MetalDevice) IsAvailable() bool {
 	return false
 }
 
+func (d *MetalDevice) Close() {}
+
 type MetalBuffer struct {
-	ptr unsafe.Pointer
+	ptr    unsafe.Pointer
+	device *MetalDevice
+	length int
 }
 
-func (d *MetalDevice) CreateBuffer(data []float32) *MetalBuffer { return nil }
-func (d *MetalDevice) CreateEmptyBuffer(length int) *MetalBuffer { return nil }
-func (b *MetalBuffer) Update(data []float32) {}
-func (b *MetalBuffer) Read(data []float32) {}
-func (b *MetalBuffer) Free() {}
-func (d *MetalDevice) MatMulPersistent(A, B, C *MetalBuffer, M, N, K int, beta float32) {}
-func (d *MetalDevice) LSTMStepPersistent(preAct, cPrev, cNew, hNew, iGate, fGate, gGate, oGate *MetalBuffer, outSize int) {}
-func (d *MetalDevice) Wait() {}
+func (d *MetalDevice) CreateBuffer(data []float32) *MetalBuffer                              { return nil }
+func (d *MetalDevice) CreateEmptyBuffer(length int) *MetalBuffer                            { return nil }
+func (b *MetalBuffer) Update(data []float32)                                                {}
+func (b *MetalBuffer) Read(data []float32)                                                  {}
+func (b *MetalBuffer) Free()                                                                {}
+func (d *MetalDevice) MatMulPersistent(A, B, C *MetalBuffer, M, N, K int, beta float32)     {}
+func (d *MetalDevice) MatMulFusedPersistent(A, B, Bias, C *MetalBuffer, M, N, K, act int)   {}
+func (d *MetalDevice) LSTMStepPersistent(preAct, cPrev, cNew, hNew, i, f, g, o *MetalBuffer, outSize int) {}
+func (d *MetalDevice) Wait()                                                                {}
 
 func (d *MetalDevice) MatMul(A, B, C []float32, M, N, K int) {
 	// No-op on non-macOS

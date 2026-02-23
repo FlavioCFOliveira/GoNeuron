@@ -83,6 +83,19 @@ type NamedParamProvider interface {
 	NamedParams() []NamedParam
 }
 
+func getActivationType(act activations.Activation) int {
+	switch act.(type) {
+	case activations.Sigmoid, *activations.Sigmoid:
+		return MetalActivationSigmoid
+	case activations.Tanh, *activations.Tanh:
+		return MetalActivationTanh
+	case activations.ReLU, *activations.ReLU:
+		return MetalActivationReLU
+	default:
+		return MetalActivationNone
+	}
+}
+
 // Dense is a fully connected layer optimized for performance.
 type Dense struct {
 	params    []float32 // Contiguous weights + biases
@@ -206,13 +219,21 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []f
 	preAct := d.preActBuf
 	output := d.outputBuf
 
+	metalUsed := false
 	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
 		d.bufIn.Update(x)
-		metal.MatMulPersistent(d.bufWeights, d.bufIn, d.bufOut, outSize, 1, inSize, 0.0)
-		d.bufOut.Read(preAct)
-		for i := 0; i < outSize; i++ {
-			preAct[i] += biases[i]
+		actType := MetalActivationNone
+		if !d.training {
+			actType = getActivationType(d.act)
 		}
+		metal.MatMulFusedPersistent(d.bufWeights, d.bufIn, d.bufBiases, d.bufOut, outSize, 1, inSize, actType)
+		if actType != MetalActivationNone {
+			d.bufOut.Read(output)
+			copy(preAct, output)
+		} else {
+			d.bufOut.Read(preAct)
+		}
+		metalUsed = true
 	} else {
 		for o := 0; o < outSize; o++ {
 			sum := biases[o]
@@ -240,69 +261,27 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []f
 		d.savePreAct(preAct)
 	}
 
-	if batchAct, ok := d.act.(activations.BatchActivation); ok {
-		copy(output, preAct)
-		batchAct.ActivateBatch(output)
-		if cap(d.savedOutput) < outSize {
-			d.savedOutput = make([]float32, outSize)
-		}
-		copy(d.savedOutput[:outSize], output[:outSize])
-	} else {
-		for o := 0; o < outSize; o++ {
-			output[o] = d.act.Activate(preAct[o])
+	if !metalUsed || d.training {
+		if batchAct, ok := d.act.(activations.BatchActivation); ok {
+			copy(output, preAct)
+			batchAct.ActivateBatch(output)
+		} else {
+			for o := 0; o < outSize; o++ {
+				output[o] = d.act.Activate(preAct[o])
+			}
 		}
 	}
+
+	if cap(d.savedOutput) < outSize {
+		d.savedOutput = make([]float32, outSize)
+	}
+	copy(d.savedOutput[:outSize], output[:outSize])
 
 	return output[:outSize]
 }
 
 func (d *Dense) Forward(x []float32) []float32 {
-	copy(d.inputBuf, x)
-	d.saveInput(x)
-
-	outSize := d.outSize
-	inSize := d.inSize
-	weights := d.weights
-	biases := d.biases
-	input := d.inputBuf
-	preAct := d.preActBuf
-	output := d.outputBuf
-
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
-		d.bufIn.Update(x)
-		metal.MatMulPersistent(d.bufWeights, d.bufIn, d.bufOut, outSize, 1, inSize, 0.0)
-		// We add biases manually or could implement persistent matmul with bias
-		d.bufOut.Read(preAct)
-		for i := 0; i < outSize; i++ {
-			preAct[i] += biases[i]
-		}
-	} else {
-		for o := 0; o < outSize; o++ {
-			sum := biases[o]
-			wBase := o * inSize
-			for i := 0; i < inSize; i++ {
-				sum += weights[wBase+i] * input[i]
-			}
-			preAct[o] = sum
-		}
-	}
-
-	d.savePreAct(preAct)
-
-	if batchAct, ok := d.act.(activations.BatchActivation); ok {
-		copy(output, preAct)
-		batchAct.ActivateBatch(output)
-		if cap(d.savedOutput) < outSize {
-			d.savedOutput = make([]float32, outSize)
-		}
-		copy(d.savedOutput[:outSize], output[:outSize])
-	} else {
-		for o := 0; o < outSize; o++ {
-			output[o] = d.act.Activate(preAct[o])
-		}
-	}
-
-	return output[:outSize]
+	return d.ForwardWithArena(x, nil, nil)
 }
 
 func (d *Dense) Backward(grad []float32) []float32 {
@@ -327,7 +306,7 @@ func (d *Dense) Backward(grad []float32) []float32 {
 					sum += grad[i] * output[i] * (delta - outK)
 				}
 				dz[k] = sum
-				gradB[k] = sum
+				gradB[k] += sum
 			}
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
 			for k := 0; k < outSize; k++ {
@@ -339,7 +318,7 @@ func (d *Dense) Backward(grad []float32) []float32 {
 					sum += grad[i] * (delta - softmaxK)
 				}
 				dz[k] = sum
-				gradB[k] = sum
+				gradB[k] += sum
 			}
 		}
 	} else {

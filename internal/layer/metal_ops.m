@@ -7,6 +7,7 @@ typedef struct {
     id<MTLCommandQueue> commandQueue;
     id<MTLComputePipelineState> lstmPipelineState;
     id<MTLComputePipelineState> activationPipelineState;
+    id<MTLComputePipelineState> biasActivationPipelineState;
 } MetalContext;
 
 typedef enum {
@@ -49,20 +50,27 @@ static NSString *const metal_src = @""
 "    g_gate[gid] = g;\n"
 "    o_gate[gid] = o;\n"
 "}\n"
-"kernel void apply_activation(\n"
+"kernel void bias_activation(\n"
 "    device float* data [[buffer(0)]],\n"
-"    constant uint& length [[buffer(1)]],\n"
-"    constant int& type [[buffer(2)]],\n"
+"    device const float* bias [[buffer(1)]],\n"
+"    constant uint& M [[buffer(2)]],\n"
+"    constant uint& N [[buffer(3)]],\n"
+"    constant int& type [[buffer(4)]],\n"
+"    constant bool& hasBias [[buffer(5)]],\n"
 "    uint gid [[thread_position_in_grid]]\n"
 ") {\n"
-"    if (gid >= length) return;\n"
+"    if (gid >= M * N) return;\n"
+"    uint col = gid % N;\n"
 "    float x = data[gid];\n"
+"    if (hasBias) x += bias[col];\n"
 "    if (type == 1) { // Sigmoid\n"
 "        data[gid] = 1.0f / (1.0f + exp(-x));\n"
 "    } else if (type == 2) { // Tanh\n"
 "        data[gid] = tanh(x);\n"
 "    } else if (type == 3) { // ReLU\n"
 "        data[gid] = x > 0.0f ? x : 0.0f;\n"
+"    } else {\n"
+"        data[gid] = x;\n"
 "    }\n"
 "}\n";
 
@@ -75,6 +83,7 @@ void* initMetalDevice() {
     ctx->commandQueue = [device newCommandQueue];
     ctx->lstmPipelineState = nil;
     ctx->activationPipelineState = nil;
+    ctx->biasActivationPipelineState = nil;
 
     NSError *error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:metal_src options:nil error:&error];
@@ -83,9 +92,11 @@ void* initMetalDevice() {
         if (lstmFunc) {
             ctx->lstmPipelineState = [device newComputePipelineStateWithFunction:lstmFunc error:&error];
         }
-        id<MTLFunction> actFunc = [library newFunctionWithName:@"apply_activation"];
+        id<MTLFunction> actFunc = [library newFunctionWithName:@"bias_activation"];
         if (actFunc) {
-            ctx->activationPipelineState = [device newComputePipelineStateWithFunction:actFunc error:&error];
+            ctx->biasActivationPipelineState = [device newComputePipelineStateWithFunction:actFunc error:&error];
+            // Backward compatibility
+            ctx->activationPipelineState = ctx->biasActivationPipelineState;
         }
     }
 
@@ -119,12 +130,18 @@ void* createEmptyMetalBuffer(void* ptr, int length) {
 void updateMetalBuffer(void* bufferPtr, float* data, int length) {
     if (!bufferPtr) return;
     id<MTLBuffer> buffer = (__bridge id<MTLBuffer>)bufferPtr;
+    // Size validation
+    NSUInteger maxLen = [buffer length] / sizeof(float);
+    if (length > (int)maxLen) length = (int)maxLen;
     memcpy([buffer contents], data, length * sizeof(float));
 }
 
 void readMetalBuffer(void* bufferPtr, float* data, int length) {
     if (!bufferPtr) return;
     id<MTLBuffer> buffer = (__bridge id<MTLBuffer>)bufferPtr;
+    // Size validation
+    NSUInteger maxLen = [buffer length] / sizeof(float);
+    if (length > (int)maxLen) length = (int)maxLen;
     memcpy(data, [buffer contents], length * sizeof(float));
 }
 
@@ -132,6 +149,63 @@ void freeMetalBuffer(void* bufferPtr) {
     if (!bufferPtr) return;
     id<MTLBuffer> buffer = (__bridge_transfer id<MTLBuffer>)bufferPtr;
     buffer = nil;
+}
+
+void matMulFusedPersistent(void* ptr, void* bufA, void* bufB, void* bufBias, void* bufC, int M, int N, int K, int activation) {
+    if (!ptr) return;
+    MetalContext* ctx = (MetalContext*)ptr;
+
+    @autoreleasepool {
+        id<MTLBuffer> bufferA = (__bridge id<MTLBuffer>)bufA;
+        id<MTLBuffer> bufferB = (__bridge id<MTLBuffer>)bufB;
+        id<MTLBuffer> bufferBias = (__bridge id<MTLBuffer>)bufBias;
+        id<MTLBuffer> bufferC = (__bridge id<MTLBuffer>)bufC;
+
+        MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:K rowBytes:K * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
+
+        MPSMatrix *matrixA = [[MPSMatrix alloc] initWithBuffer:bufferA descriptor:descA];
+        MPSMatrix *matrixB = [[MPSMatrix alloc] initWithBuffer:bufferB descriptor:descB];
+        MPSMatrix *matrixC = [[MPSMatrix alloc] initWithBuffer:bufferC descriptor:descC];
+
+        MPSMatrixMultiplication *kernel = [[MPSMatrixMultiplication alloc] initWithDevice:ctx->device
+                                                                            transposeLeft:NO
+                                                                           transposeRight:NO
+                                                                               resultRows:M
+                                                                            resultColumns:N
+                                                                          interiorColumns:K
+                                                                                    alpha:1.0
+                                                                                     beta:0.0];
+
+        id<MTLCommandBuffer> commandBuffer = [ctx->commandQueue commandBuffer];
+        [kernel encodeToCommandBuffer:commandBuffer leftMatrix:matrixA rightMatrix:matrixB resultMatrix:matrixC];
+
+        if ((bufferBias || activation != ActivationNone) && ctx->biasActivationPipelineState) {
+            id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+            [encoder setComputePipelineState:ctx->biasActivationPipelineState];
+            [encoder setBuffer:bufferC offset:0 atIndex:0];
+            [encoder setBuffer:bufferBias ? bufferBias : bufferC offset:0 atIndex:1];
+            uint mVal = (uint)M;
+            uint nVal = (uint)N;
+            bool hasBias = bufferBias != nil;
+            [encoder setBytes:&mVal length:sizeof(uint) atIndex:2];
+            [encoder setBytes:&nVal length:sizeof(uint) atIndex:3];
+            [encoder setBytes:&activation length:sizeof(int) atIndex:4];
+            [encoder setBytes:&hasBias length:sizeof(bool) atIndex:5];
+
+            uint total = M * N;
+            MTLSize gridSize = MTLSizeMake(total, 1, 1);
+            NSUInteger threadGroupSize = ctx->biasActivationPipelineState.maxTotalThreadsPerThreadgroup;
+            if (threadGroupSize > total) threadGroupSize = total;
+            MTLSize threadGroupSizeMTL = MTLSizeMake(threadGroupSize, 1, 1);
+
+            [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSizeMTL];
+            [encoder endEncoding];
+        }
+
+        [commandBuffer commit];
+    }
 }
 
 void matMulMPSPersistent(void* ptr, void* bufA, void* bufB, void* bufC, int M, int N, int K, float beta) {
@@ -262,16 +336,10 @@ void matMulFused(void* ptr, float* A, float* B, float* Bias, float* C, int M, in
 
         id<MTLBuffer> bufferA = [ctx->device newBufferWithBytes:A length:sizeA * sizeof(float) options:MTLResourceStorageModeShared];
         id<MTLBuffer> bufferB = [ctx->device newBufferWithBytes:B length:sizeB * sizeof(float) options:MTLResourceStorageModeShared];
-        id<MTLBuffer> bufferC;
-
-        // If Bias is provided, initialize C with it.
-        // Note: For matrix multiplication C = A*B, if Bias is a vector [M], we need to broadcast it.
-        // For simplicity in this first version, we assume Bias is either NULL or already a matrix of size MxN (or we handle it as beta*C where C is pre-filled).
-        // In LSTM, gates are vectors, so N=1 usually.
+        id<MTLBuffer> bufferC = [ctx->device newBufferWithLength:sizeC * sizeof(float) options:MTLResourceStorageModeShared];
+        id<MTLBuffer> bufferBias = nil;
         if (Bias) {
-            bufferC = [ctx->device newBufferWithBytes:Bias length:sizeC * sizeof(float) options:MTLResourceStorageModeShared];
-        } else {
-            bufferC = [ctx->device newBufferWithBytes:C length:sizeC * sizeof(float) options:MTLResourceStorageModeShared];
+            bufferBias = [ctx->device newBufferWithBytes:Bias length:N * sizeof(float) options:MTLResourceStorageModeShared];
         }
 
         MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:K rowBytes:K * sizeof(float) dataType:MPSDataTypeFloat32];
@@ -282,7 +350,6 @@ void matMulFused(void* ptr, float* A, float* B, float* Bias, float* C, int M, in
         MPSMatrix *matrixB = [[MPSMatrix alloc] initWithBuffer:bufferB descriptor:descB];
         MPSMatrix *matrixC = [[MPSMatrix alloc] initWithBuffer:bufferC descriptor:descC];
 
-        // C = 1.0 * A * B + (Bias ? 1.0 : 0.0) * C
         MPSMatrixMultiplication *kernel = [[MPSMatrixMultiplication alloc] initWithDevice:ctx->device
                                                                             transposeLeft:NO
                                                                            transposeRight:NO
@@ -290,21 +357,26 @@ void matMulFused(void* ptr, float* A, float* B, float* Bias, float* C, int M, in
                                                                             resultColumns:N
                                                                           interiorColumns:K
                                                                                     alpha:1.0
-                                                                                     beta:Bias ? 1.0 : 0.0];
+                                                                                     beta:0.0];
 
         id<MTLCommandBuffer> commandBuffer = [ctx->commandQueue commandBuffer];
         [kernel encodeToCommandBuffer:commandBuffer leftMatrix:matrixA rightMatrix:matrixB resultMatrix:matrixC];
 
-        if (activation != ActivationNone && ctx->activationPipelineState) {
+        if ((bufferBias || activation != ActivationNone) && ctx->biasActivationPipelineState) {
             id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-            [encoder setComputePipelineState:ctx->activationPipelineState];
+            [encoder setComputePipelineState:ctx->biasActivationPipelineState];
             [encoder setBuffer:bufferC offset:0 atIndex:0];
-            [encoder setBytes:&sizeC length:sizeof(int) atIndex:1];
-            [encoder setBytes:&activation length:sizeof(int) atIndex:2];
+            [encoder setBuffer:bufferBias ? bufferBias : bufferC offset:0 atIndex:1];
+            bool hasBias = bufferBias != nil;
+            [encoder setBytes:&M length:sizeof(int) atIndex:2];
+            [encoder setBytes:&N length:sizeof(int) atIndex:3];
+            [encoder setBytes:&activation length:sizeof(int) atIndex:4];
+            [encoder setBytes:&hasBias length:sizeof(bool) atIndex:5];
 
-            MTLSize gridSize = MTLSizeMake(sizeC, 1, 1);
-            NSUInteger threadGroupSize = ctx->activationPipelineState.maxTotalThreadsPerThreadgroup;
-            if (threadGroupSize > sizeC) threadGroupSize = sizeC;
+            int totalElements = M * N;
+            MTLSize gridSize = MTLSizeMake(totalElements, 1, 1);
+            NSUInteger threadGroupSize = ctx->biasActivationPipelineState.maxTotalThreadsPerThreadgroup;
+            if (threadGroupSize > totalElements) threadGroupSize = totalElements;
             MTLSize threadGroupSizeMTL = MTLSizeMake(threadGroupSize, 1, 1);
 
             [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSizeMTL];
@@ -314,7 +386,6 @@ void matMulFused(void* ptr, float* A, float* B, float* Bias, float* C, int M, in
         [commandBuffer commit];
         [commandBuffer waitUntilCompleted];
 
-        // Copy results back
         memcpy(C, [bufferC contents], sizeC * sizeof(float));
     }
 }
@@ -322,20 +393,26 @@ void matMulFused(void* ptr, float* A, float* B, float* Bias, float* C, int M, in
 void applyActivationMPS(void* ptr, float* data, int length, int activation) {
     if (!ptr || activation == ActivationNone) return;
     MetalContext* ctx = (MetalContext*)ptr;
-    if (!ctx->activationPipelineState) return;
+    if (!ctx->biasActivationPipelineState) return;
 
     @autoreleasepool {
         id<MTLBuffer> buffer = [ctx->device newBufferWithBytes:data length:length * sizeof(float) options:MTLResourceStorageModeShared];
 
         id<MTLCommandBuffer> commandBuffer = [ctx->commandQueue commandBuffer];
         id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-        [encoder setComputePipelineState:ctx->activationPipelineState];
+        [encoder setComputePipelineState:ctx->biasActivationPipelineState];
         [encoder setBuffer:buffer offset:0 atIndex:0];
-        [encoder setBytes:&length length:sizeof(int) atIndex:1];
-        [encoder setBytes:&activation length:sizeof(int) atIndex:2];
+        [encoder setBuffer:buffer offset:0 atIndex:1]; // Dummy bias
+        int M = 1;
+        int N = length;
+        bool hasBias = false;
+        [encoder setBytes:&M length:sizeof(int) atIndex:2];
+        [encoder setBytes:&N length:sizeof(int) atIndex:3];
+        [encoder setBytes:&activation length:sizeof(int) atIndex:4];
+        [encoder setBytes:&hasBias length:sizeof(bool) atIndex:5];
 
         MTLSize gridSize = MTLSizeMake(length, 1, 1);
-        NSUInteger threadGroupSize = ctx->activationPipelineState.maxTotalThreadsPerThreadgroup;
+        NSUInteger threadGroupSize = ctx->biasActivationPipelineState.maxTotalThreadsPerThreadgroup;
         if (threadGroupSize > length) threadGroupSize = length;
         MTLSize threadGroupSizeMTL = MTLSizeMake(threadGroupSize, 1, 1);
 

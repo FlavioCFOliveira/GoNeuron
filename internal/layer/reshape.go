@@ -62,7 +62,10 @@ func (f *Flatten) SetTraining(training bool) {
 
 func (f *Flatten) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	total := len(x)
-	f.inputShape = []int{1, total}
+	if cap(f.inputShape) < 2 {
+		f.inputShape = make([]int, 0, 2)
+	}
+	f.inputShape = append(f.inputShape[:0], 1, total)
 
 	flattened := total
 	if f.outSize == 0 || len(f.outputBuf) < flattened {
@@ -92,9 +95,11 @@ func (f *Flatten) AccumulateBackward(grad []float32) []float32 {
 	return grad
 }
 
+var emptyParams = make([]float32, 0)
+
 // Params returns layer parameters (empty for Flatten).
 func (f *Flatten) Params() []float32 {
-	return make([]float32, 0)
+	return emptyParams
 }
 
 // SetParams sets layer parameters (no-op for Flatten).
@@ -104,7 +109,7 @@ func (f *Flatten) SetParams(params []float32) {
 
 // Gradients returns layer gradients (empty for Flatten).
 func (f *Flatten) Gradients() []float32 {
-	return make([]float32, 0)
+	return emptyParams
 }
 
 // SetGradients sets layer gradients (no-op for Flatten).
@@ -125,7 +130,7 @@ func (f *Flatten) OutSize() int {
 
 // Reset resets the flatten layer.
 func (f *Flatten) Reset() {
-	f.inputShape = make([]int, 0)
+	f.inputShape = f.inputShape[:0]
 }
 
 // ClearGradients zeroes out the accumulated gradients (no-op for Flatten).

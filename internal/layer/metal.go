@@ -17,6 +17,8 @@ void updateMetalBuffer(void* buffer, float* data, int length);
 void readMetalBuffer(void* buffer, float* data, int length);
 void freeMetalBuffer(void* buffer);
 void matMulMPSPersistent(void* device, void* bufA, void* bufB, void* bufC, int M, int N, int K, float beta);
+void matMulFusedPersistent(void* device, void* bufA, void* bufB, void* bufBias, void* bufC, int M, int N, int K, int activation);
+void matMulFusedPersistent(void* device, void* bufA, void* bufB, void* bufBias, void* bufC, int M, int N, int K, int activation);
 void lstmStepFusedPersistent(void* device, void* bufPreAct, void* bufCPrev, void* bufCNew, void* bufHNew, void* bufI, void* bufF, void* bufG, void* bufO, int outSize);
 void waitForMetal(void* device);
 void matMulMPS(void* device, float* A, float* B, float* C, int M, int N, int K);
@@ -32,10 +34,10 @@ import (
 
 // Activation types for fused kernels
 const (
-	ActivationNone    = 0
-	ActivationSigmoid = 1
-	ActivationTanh    = 2
-	ActivationReLU    = 3
+	MetalActivationNone    = 0
+	MetalActivationSigmoid = 1
+	MetalActivationTanh    = 2
+	MetalActivationReLU    = 3
 )
 
 // MetalDevice handles computations on Apple Silicon GPU via Metal Performance Shaders.
@@ -68,32 +70,56 @@ func (d *MetalDevice) Close() {
 
 // MetalBuffer represents a buffer on the GPU.
 type MetalBuffer struct {
-	ptr unsafe.Pointer
+	ptr    unsafe.Pointer
+	device *MetalDevice
+	length int
 }
 
 func (d *MetalDevice) CreateBuffer(data []float32) *MetalBuffer {
 	if d.ptr == nil || len(data) == 0 {
 		return nil
 	}
-	return &MetalBuffer{ptr: C.createMetalBuffer(d.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(len(data)))}
+	return &MetalBuffer{
+		ptr:    C.createMetalBuffer(d.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(len(data))),
+		device: d,
+		length: len(data),
+	}
 }
 
 func (d *MetalDevice) CreateEmptyBuffer(length int) *MetalBuffer {
 	if d.ptr == nil || length <= 0 {
 		return nil
 	}
-	return &MetalBuffer{ptr: C.createEmptyMetalBuffer(d.ptr, C.int(length))}
+	return &MetalBuffer{
+		ptr:    C.createEmptyMetalBuffer(d.ptr, C.int(length)),
+		device: d,
+		length: length,
+	}
 }
 
 func (b *MetalBuffer) Update(data []float32) {
 	if b.ptr != nil && len(data) > 0 {
-		C.updateMetalBuffer(b.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(len(data)))
+		// Bounds checking
+		writeLen := len(data)
+		if writeLen > b.length {
+			writeLen = b.length
+		}
+		C.updateMetalBuffer(b.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(writeLen))
 	}
 }
 
 func (b *MetalBuffer) Read(data []float32) {
 	if b.ptr != nil && len(data) > 0 {
-		C.readMetalBuffer(b.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(len(data)))
+		// Synchronize before reading
+		if b.device != nil {
+			b.device.Wait()
+		}
+		// Bounds checking
+		readLen := len(data)
+		if readLen > b.length {
+			readLen = b.length
+		}
+		C.readMetalBuffer(b.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(readLen))
 	}
 }
 
@@ -107,6 +133,16 @@ func (b *MetalBuffer) Free() {
 func (d *MetalDevice) MatMulPersistent(A, B, bufC *MetalBuffer, M, N, K int, beta float32) {
 	if d.ptr != nil && A != nil && B != nil && bufC != nil {
 		C.matMulMPSPersistent(d.ptr, A.ptr, B.ptr, bufC.ptr, C.int(M), C.int(N), C.int(K), C.float(beta))
+	}
+}
+
+func (d *MetalDevice) MatMulFusedPersistent(A, B, Bias, bufC *MetalBuffer, M, N, K int, activation int) {
+	if d.ptr != nil && A != nil && B != nil && bufC != nil {
+		var biasPtr unsafe.Pointer
+		if Bias != nil {
+			biasPtr = Bias.ptr
+		}
+		C.matMulFusedPersistent(d.ptr, A.ptr, B.ptr, biasPtr, bufC.ptr, C.int(M), C.int(N), C.int(K), C.int(activation))
 	}
 }
 

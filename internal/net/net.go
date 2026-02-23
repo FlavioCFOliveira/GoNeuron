@@ -52,6 +52,10 @@ type Network struct {
 	// Worker Pool for parallel training
 	workerPool   []*Network
 	batchLossBuf []float32
+
+	// Temporary buffers for specialized training to avoid allocations
+	tripletPredBuf []float32
+	tripletYBuf    []float32
 }
 
 // New creates a new neural network with the given layers.
@@ -402,33 +406,38 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin floa
 
 	// Concatenate predictions for TripletMarginLoss
 	embDim := len(aPred)
-	tripletPred := make([]float32, embDim*3)
+	tripletLen := embDim * 3
+	if cap(n.tripletPredBuf) < tripletLen {
+		n.tripletPredBuf = make([]float32, tripletLen)
+	}
+	tripletPred := n.tripletPredBuf[:tripletLen]
+
 	copy(tripletPred[0:embDim], aPred)
 	copy(tripletPred[embDim:2*embDim], pPred)
 	copy(tripletPred[2*embDim:3*embDim], nPred)
 
 	// 2. Compute loss
 	// Note: yTrue is not used for TripletMarginLoss, but must have same length as tripletPred
-	dummyY := make([]float32, len(tripletPred))
+	if cap(n.tripletYBuf) < tripletLen {
+		n.tripletYBuf = make([]float32, tripletLen)
+	}
+	dummyY := n.tripletYBuf[:tripletLen]
 	lVal := n.loss.Forward(tripletPred, dummyY)
 
 	// 3. Compute loss gradient
-	if cap(n.lossGradBuf) < len(tripletPred) {
-		n.lossGradBuf = make([]float32, len(tripletPred))
+	if cap(n.lossGradBuf) < tripletLen {
+		n.lossGradBuf = make([]float32, tripletLen)
 	}
-	grad := n.lossGradBuf[:len(tripletPred)]
+	grad := n.lossGradBuf[:tripletLen]
 
 	if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
 		backwardInPlace.BackwardInPlace(tripletPred, dummyY, grad)
 	} else {
-		grad = n.loss.Backward(tripletPred, dummyY)
+		tmpGrad := n.loss.Backward(tripletPred, dummyY)
+		copy(grad, tmpGrad)
 	}
 
 	// 4. Backward passes (accumulating gradients)
-	// The order of Backward calls matters for layers with saved state (like Dense with savedInputs)
-	// We need to pass the corresponding part of the loss gradient to each pass.
-	// Since we use AccumulateBackward, we must be careful about how layers handle multiple passes.
-
 	// Anchor gradient
 	_ = n.accumulateBackward(grad[0:embDim])
 	// Positive gradient
@@ -734,12 +743,36 @@ func Load(filename string) (*Network, loss.Loss, error) {
 	}
 	defer file.Close()
 
+	// 1. Read and validate magic number
+	magic := make([]byte, 4)
+	if _, err := io.ReadFull(file, magic); err != nil {
+		return nil, nil, fmt.Errorf("failed to read magic number: %w", err)
+	}
+	if string(magic) != "GONN" {
+		return nil, nil, fmt.Errorf("invalid magic number: expected GONN, got %s", string(magic))
+	}
+
+	// 2. Read and validate version
+	var version int32
+	if err := binary.Read(file, binary.LittleEndian, &version); err != nil {
+		return nil, nil, fmt.Errorf("failed to read version: %w", err)
+	}
+	if version != 1 {
+		return nil, nil, fmt.Errorf("unsupported version: %d", version)
+	}
+
 	decoder := gob.NewDecoder(file)
 
 	// Read number of layers
 	var numLayers int32
 	if err := decoder.Decode(&numLayers); err != nil {
 		return nil, nil, fmt.Errorf("failed to read layer count: %w", err)
+	}
+
+	// Security check for layer count
+	const maxLayers = 1000
+	if numLayers < 0 || numLayers > maxLayers {
+		return nil, nil, fmt.Errorf("invalid number of layers: %d (max %d)", numLayers, maxLayers)
 	}
 
 	// Read loss type
@@ -754,20 +787,33 @@ func Load(filename string) (*Network, loss.Loss, error) {
 		return nil, nil, fmt.Errorf("failed to read optimizer type: %w", err)
 	}
 
-	// Read layer configurations
+	// Read layer configurations and calculate total parameters
 	layerConfigs := make([]LayerConfig, numLayers)
+	expectedTotalParams := 0
 	for i := 0; i < int(numLayers); i++ {
 		var cfg LayerConfig
 		if err := decoder.Decode(&cfg); err != nil {
 			return nil, nil, fmt.Errorf("failed to read layer %d: %w", i, err)
 		}
 		layerConfigs[i] = cfg
+		expectedTotalParams += len(cfg.Params)
+	}
+
+	// Security check for total parameters (limit to 1GB = 256M float32)
+	const maxParams = 256 * 1024 * 1024
+	if expectedTotalParams > maxParams {
+		return nil, nil, fmt.Errorf("total parameters exceed limit: %d (max %d)", expectedTotalParams, maxParams)
 	}
 
 	// Read parameters for all layers
 	var params []float32
 	if err := decoder.Decode(&params); err != nil {
 		return nil, nil, fmt.Errorf("failed to read parameters: %w", err)
+	}
+
+	// Validate parameter count
+	if len(params) != expectedTotalParams {
+		return nil, nil, fmt.Errorf("parameter count mismatch: expected %d, got %d", expectedTotalParams, len(params))
 	}
 
 	// Reconstruct layers
@@ -824,6 +870,14 @@ func Load(filename string) (*Network, loss.Loss, error) {
 
 // Encode writes the network to an io.Writer using gob encoding.
 func (n *Network) Encode(w io.Writer) error {
+	// 1. Write magic and version
+	if _, err := w.Write([]byte("GONN")); err != nil {
+		return fmt.Errorf("failed to write magic: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, int32(1)); err != nil {
+		return fmt.Errorf("failed to write version: %w", err)
+	}
+
 	encoder := gob.NewEncoder(w)
 
 	// Write number of layers

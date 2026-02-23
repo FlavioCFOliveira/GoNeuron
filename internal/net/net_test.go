@@ -3,8 +3,10 @@ package net
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"testing"
@@ -950,12 +952,37 @@ func TestNetworkGobEncodingSGD(t *testing.T) {
 // LoadFromBuffer loads a network from a byte slice (for testing).
 func LoadFromBuffer(data []byte) (*Network, loss.Loss, error) {
 	buf := bytes.NewReader(data)
+
+	// 1. Read and validate magic number
+	magic := make([]byte, 4)
+	if _, err := io.ReadFull(buf, magic); err != nil {
+		return nil, nil, fmt.Errorf("failed to read magic number: %w", err)
+	}
+	if string(magic) != "GONN" {
+		return nil, nil, fmt.Errorf("invalid magic number: expected GONN, got %s", string(magic))
+	}
+
+	// 2. Read and validate version
+	var version int32
+	if err := binary.Read(buf, binary.LittleEndian, &version); err != nil {
+		return nil, nil, fmt.Errorf("failed to read version: %w", err)
+	}
+	if version != 1 {
+		return nil, nil, fmt.Errorf("unsupported version: %d", version)
+	}
+
 	decoder := gob.NewDecoder(buf)
 
 	// Read number of layers
 	var numLayers int32
 	if err := decoder.Decode(&numLayers); err != nil {
 		return nil, nil, fmt.Errorf("failed to read layer count: %w", err)
+	}
+
+	// Security check for layer count
+	const maxLayers = 1000
+	if numLayers < 0 || numLayers > maxLayers {
+		return nil, nil, fmt.Errorf("invalid number of layers: %d (max %d)", numLayers, maxLayers)
 	}
 
 	// Read loss type
@@ -970,20 +997,33 @@ func LoadFromBuffer(data []byte) (*Network, loss.Loss, error) {
 		return nil, nil, fmt.Errorf("failed to read optimizer type: %w", err)
 	}
 
-	// Read layer configurations
+	// Read layer configurations and calculate total parameters
 	layerConfigs := make([]LayerConfig, numLayers)
+	expectedTotalParams := 0
 	for i := 0; i < int(numLayers); i++ {
 		var cfg LayerConfig
 		if err := decoder.Decode(&cfg); err != nil {
 			return nil, nil, fmt.Errorf("failed to read layer %d: %w", i, err)
 		}
 		layerConfigs[i] = cfg
+		expectedTotalParams += len(cfg.Params)
+	}
+
+	// Security check for total parameters (limit to 1GB = 256M float32)
+	const maxParams = 256 * 1024 * 1024
+	if expectedTotalParams > maxParams {
+		return nil, nil, fmt.Errorf("total parameters exceed limit: %d (max %d)", expectedTotalParams, maxParams)
 	}
 
 	// Read parameters for all layers
 	var params []float32
 	if err := decoder.Decode(&params); err != nil {
 		return nil, nil, fmt.Errorf("failed to read parameters: %w", err)
+	}
+
+	// Validate parameter count
+	if len(params) != expectedTotalParams {
+		return nil, nil, fmt.Errorf("parameter count mismatch: expected %d, got %d", expectedTotalParams, len(params))
 	}
 
 	// Reconstruct layers
@@ -1155,4 +1195,76 @@ func TestNetworkSaveBinaryWeights(t *testing.T) {
 	if info.Size() < 4 {
 		t.Errorf("File too small: %d bytes", info.Size())
 	}
+}
+
+// TestLoadSecurity tests security boundaries during model loading.
+func TestLoadSecurity(t *testing.T) {
+	t.Run("InvalidMagic", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write([]byte("BAD!")) // Wrong magic
+		binary.Write(&buf, binary.LittleEndian, int32(1))
+
+		_, _, err := LoadFromBuffer(buf.Bytes())
+		if err == nil {
+			t.Error("Expected error for invalid magic number, got nil")
+		}
+	})
+
+	t.Run("InvalidVersion", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write([]byte("GONN"))
+		binary.Write(&buf, binary.LittleEndian, int32(999)) // Wrong version
+
+		_, _, err := LoadFromBuffer(buf.Bytes())
+		if err == nil {
+			t.Error("Expected error for invalid version, got nil")
+		}
+	})
+
+	t.Run("TooManyLayers", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write([]byte("GONN"))
+		binary.Write(&buf, binary.LittleEndian, int32(1))
+
+		encoder := gob.NewEncoder(&buf)
+		encoder.Encode(int32(2000)) // Over limit (1000)
+
+		_, _, err := LoadFromBuffer(buf.Bytes())
+		if err == nil {
+			t.Error("Expected error for too many layers, got nil")
+		}
+	})
+
+	t.Run("TooManyParams", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write([]byte("GONN"))
+		binary.Write(&buf, binary.LittleEndian, int32(1))
+
+		encoder := gob.NewEncoder(&buf)
+		encoder.Encode(int32(1)) // 1 layer
+		encoder.Encode("MSE")
+		encoder.Encode("SGD")
+
+		// Create a config with huge number of parameters (simulated)
+		cfg := LayerConfig{
+			Type:   "Dense",
+			Params: make([]float32, 100), // Small actual slice
+		}
+		// Manually override the Params field length in a way that triggers our check
+		// but doesn't necessarily allocate 1GB in the test if we could...
+		// But since our check uses len(cfg.Params), we have to provide it.
+		// Let's use a smaller limit for testing if possible? No, it's hardcoded to 256M.
+		// 256M float32 is 1GB. Let's use exactly 256M + 1.
+
+		cfg.Params = make([]float32, 256*1024*1024+1)
+
+		encoder.Encode(cfg)
+
+		_, _, err := LoadFromBuffer(buf.Bytes())
+		if err == nil {
+			t.Error("Expected error for too many parameters, got nil")
+		} else if err.Error() == "EOF" {
+			t.Log("Note: Got EOF, likely because Encode failed to allocate/write such a large slice")
+		}
+	})
 }

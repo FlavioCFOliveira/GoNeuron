@@ -30,6 +30,11 @@ type LayerNorm struct {
 	inputMeans []float32
 	inputStds  []float32
 
+	savedInputOffsets []int
+	savedMeanOffsets  []int
+	savedStdOffsets   []int
+	arena             []float32
+
 	training bool
 
 	device Device
@@ -42,6 +47,9 @@ func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *Lay
 		eps:               eps,
 		elementwiseAffine: elementwiseAffine,
 		device:            &CPUDevice{},
+		savedInputOffsets: make([]int, 0, 16),
+		savedMeanOffsets:  make([]int, 0, 16),
+		savedStdOffsets:   make([]int, 0, 16),
 	}
 
 	if normalizedShape != -1 {
@@ -88,11 +96,12 @@ func (l *LayerNorm) SetTraining(training bool) {
 func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
 	numSamples := len(x) / l.normalizedShape
 
-	if len(l.outputBuf) != len(x) {
+	if len(l.outputBuf) < len(x) {
 		l.outputBuf = make([]float32, len(x))
 	}
 
 	if arena != nil && offset != nil {
+		l.arena = *arena
 		// Save input, means and stds to arena
 		total := len(x)
 		required := total + numSamples*2
@@ -100,19 +109,22 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 			newArena := make([]float32, (*offset+required)*2)
 			copy(newArena, *arena)
 			*arena = newArena
+			l.arena = *arena
 		}
-		savedIn := (*arena)[*offset : *offset+total]
-		copy(savedIn, x)
-		l.savedInput = savedIn
+
+		l.savedInputOffsets = append(l.savedInputOffsets, *offset)
+		copy((*arena)[*offset:*offset+total], x)
 		*offset += total
 
+		l.savedMeanOffsets = append(l.savedMeanOffsets, *offset)
 		l.inputMeans = (*arena)[*offset : *offset+numSamples]
 		*offset += numSamples
 
+		l.savedStdOffsets = append(l.savedStdOffsets, *offset)
 		l.inputStds = (*arena)[*offset : *offset+numSamples]
 		*offset += numSamples
 	} else {
-		if len(l.inputMeans) != numSamples {
+		if len(l.inputMeans) < numSamples {
 			l.inputMeans = make([]float32, numSamples)
 			l.inputStds = make([]float32, numSamples)
 		}
@@ -121,6 +133,11 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		}
 		l.savedInput = l.savedInput[:len(x)]
 		copy(l.savedInput, x)
+
+		l.savedInputOffsets = append(l.savedInputOffsets[:0], 0)
+		l.savedMeanOffsets = append(l.savedMeanOffsets[:0], -1) // -1 indicates not in arena
+		l.savedStdOffsets = append(l.savedStdOffsets[:0], -1)
+		l.arena = l.savedInput
 	}
 
 	output := l.outputBuf
@@ -164,9 +181,29 @@ func (l *LayerNorm) Forward(x []float32) []float32 {
 
 
 func (l *LayerNorm) Backward(grad []float32) []float32 {
-	numSamples := len(grad) / l.normalizedShape
+	numSaved := len(l.savedInputOffsets)
+	if numSaved == 0 {
+		return nil
+	}
 
-	if len(l.gradInBuf) != len(grad) {
+	ts := numSaved - 1
+	inOff := l.savedInputOffsets[ts]
+	meanOff := l.savedMeanOffsets[ts]
+	stdOff := l.savedStdOffsets[ts]
+
+	numSamples := len(grad) / l.normalizedShape
+	savedInput := l.arena[inOff : inOff+len(grad)]
+
+	var inputMeans, inputStds []float32
+	if meanOff == -1 {
+		inputMeans = l.inputMeans
+		inputStds = l.inputStds
+	} else {
+		inputMeans = l.arena[meanOff : meanOff+numSamples]
+		inputStds = l.arena[stdOff : stdOff+numSamples]
+	}
+
+	if len(l.gradInBuf) < len(grad) {
 		l.gradInBuf = make([]float32, len(grad))
 	}
 
@@ -174,8 +211,8 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 		start := s * l.normalizedShape
 		end := start + l.normalizedShape
 
-		mean := l.inputMeans[s]
-		std := l.inputStds[s]
+		mean := inputMeans[s]
+		std := inputStds[s]
 
 		gammaProd := l.gradBuf
 		for i := start; i < end; i++ {
@@ -189,13 +226,13 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 		sumGrad := float32(0.0)
 		sumGradXMean := float32(0.0)
 		for i := start; i < end; i++ {
-			diff := (l.savedInput[i] - mean)
+			diff := (savedInput[i] - mean)
 			sumGrad += gammaProd[i-start]
 			sumGradXMean += gammaProd[i-start] * diff
 		}
 
 		for i := start; i < end; i++ {
-			diff := (l.savedInput[i] - mean)
+			diff := (savedInput[i] - mean)
 			gradInput := (gammaProd[i-start] - sumGrad/float32(l.normalizedShape)) / std
 			gradInput -= (diff * sumGradXMean) / (float32(l.normalizedShape) * std * std)
 			l.gradInBuf[i] = gradInput
@@ -203,14 +240,19 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 
 		if l.elementwiseAffine {
 			for i := start; i < end; i++ {
-				normalized := (l.savedInput[i] - mean) / std
+				normalized := (savedInput[i] - mean) / std
 				l.gradGammaBuf[i-start] += grad[i] * normalized
 				l.gradBetaBuf[i-start] += grad[i]
 			}
 		}
 	}
 
-	return l.gradInBuf
+	// Pop offsets
+	l.savedInputOffsets = l.savedInputOffsets[:ts]
+	l.savedMeanOffsets = l.savedMeanOffsets[:ts]
+	l.savedStdOffsets = l.savedStdOffsets[:ts]
+
+	return l.gradInBuf[:len(grad)]
 }
 
 func (l *LayerNorm) Params() []float32 {
@@ -221,7 +263,7 @@ func (l *LayerNorm) SetParams(params []float32) {
 	if len(params) == 0 {
 		return
 	}
-	if &l.params[0] != &params[0] {
+	if len(l.params) > 0 && &l.params[0] != &params[0] {
 		if len(params) == len(l.params) {
 			l.params = params
 			l.updateViews()
@@ -246,7 +288,7 @@ func (l *LayerNorm) SetGradients(gradients []float32) {
 	if len(gradients) == 0 {
 		return
 	}
-	if &l.grads[0] != &gradients[0] {
+	if len(l.grads) > 0 && &l.grads[0] != &gradients[0] {
 		if len(gradients) == len(l.grads) {
 			l.grads = gradients
 			l.updateGradViews()
@@ -294,9 +336,9 @@ func (l *LayerNorm) NamedParams() []NamedParam {
 
 // Reset resets the layer normalization layer.
 func (l *LayerNorm) Reset() {
-	l.savedInput = nil
-	l.inputMeans = nil
-	l.inputStds = nil
+	l.savedInputOffsets = l.savedInputOffsets[:0]
+	l.savedMeanOffsets = l.savedMeanOffsets[:0]
+	l.savedStdOffsets = l.savedStdOffsets[:0]
 }
 
 // ClearGradients zeroes out the accumulated gradients.
@@ -338,6 +380,9 @@ func (l *LayerNorm) LightweightClone(params []float32, grads []float32) Layer {
 		outputBuf:         make([]float32, l.normalizedShape),
 		gradInBuf:         make([]float32, l.normalizedShape),
 		gradBuf:           make([]float32, l.normalizedShape),
+		savedInputOffsets: make([]int, 0, 128),
+		savedMeanOffsets:  make([]int, 0, 128),
+		savedStdOffsets:   make([]int, 0, 128),
 		training:          l.training,
 		device:            l.device,
 	}
