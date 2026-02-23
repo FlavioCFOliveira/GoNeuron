@@ -8,12 +8,12 @@ A pure Go neural network library with no external dependencies. Built for perfor
 ## Features
 
 - **Pure Go** - No external BLAS or C dependencies
-- **Multiple Layer Types** - Dense, Conv2D, LSTM, GRU, MaxPool2D, AvgPool2D, Dropout, BatchNorm2D, LayerNorm, Embedding, Flatten
-- **Activation Functions** - ReLU, Sigmoid, Tanh, LeakyReLU, Softmax
-- **Loss Functions** - MSE, CrossEntropy, Huber
-- **Optimizers** - SGD, Adam
-- **Performance Optimized** - Zero-allocation patterns, contiguous memory, parallel batch processing
+- **Multiple Layer Types** - Dense, Conv2D, LSTM, GRU, MaxPool2D, AvgPool2D, Dropout, BatchNorm2D, LayerNorm, Embedding, Flatten, PositionalEncoding, MultiHeadAttention, TransformerBlock, GlobalAveragePooling1D
+- **Activation Functions** - ReLU, Sigmoid, Tanh, LeakyReLU, Softmax, LogSoftmax
+- **Loss Functions** - MSE, CrossEntropy, Huber, NLLLoss, BCELoss
+- **Performance Optimized** - Zero-allocation patterns, contiguous memory, parallel batch processing, Metal/MPS hardware acceleration (macOS)
 - **Model Persistence** - Save and load trained models
+- **Advanced Examples** - CIFAR-10 CNN, MNIST GAN, Mini-Transformer for NLP
 
 ## Installation
 
@@ -50,8 +50,8 @@ func main() {
     )
 
     // Training data (XOR problem)
-    trainX := [][]float64{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-    trainY := [][]float64{{0}, {1}, {1}, {0}}
+    trainX := [][]float32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+    trainY := [][]float32{{0}, {1}, {1}, {0}}
 
     // Train for 5000 epochs
     for epoch := 0; epoch < 5000; epoch++ {
@@ -63,7 +63,7 @@ func main() {
             totalLoss := 0.0
             for i := range trainX {
                 pred := network.Forward(trainX[i])
-                totalLoss += network.Loss.Forward(pred, trainY[i])
+                totalLoss += float64(network.Loss.Forward(pred, trainY[i]))
             }
             fmt.Printf("Epoch %d, Loss: %.6f\n", epoch, totalLoss/float64(len(trainX)))
         }
@@ -215,6 +215,39 @@ network := net.New(
 )
 ```
 
+### 8. Using Transformer for NLP
+
+```go
+const (
+    dModel   = 32
+    numHeads = 4
+    ffDim    = 64
+    maxLen   = 10
+    vocabSize = 1000
+)
+
+layers := []layer.Layer{
+    layer.NewEmbedding(vocabSize, dModel),
+    layer.NewPositionalEncoding(maxLen, dModel),
+    layer.NewTransformerBlock(dModel, numHeads, maxLen, ffDim),
+    layer.NewGlobalAveragePooling1D(maxLen, dModel),
+    layer.NewDense(dModel, 2, activations.LogSoftmax{}),
+}
+
+network := net.New(layers, loss.NLLLoss{}, opt.NewAdam(0.001))
+```
+
+## Examples Directory
+
+The `examples/` directory contains complete, runnable implementations:
+
+- **cifar10**: Deep CNN for 10-class image classification.
+- **gan_mnist**: Generative Adversarial Network for handwritten digit generation.
+- **mini_transformer**: Transformer-based sentiment analysis.
+- **mnist**: Basic handwritten digit classification.
+- **stock_prediction**: Time-series forecasting using LSTM/GRU.
+- **xor**: Simple neural network solving the XOR problem.
+
 ## Architecture
 
 ```
@@ -229,8 +262,9 @@ internal/
 ## Performance
 
 - **Zero-allocation patterns** - Pre-allocated buffers in layer constructors
-- **Contiguous memory** - Weights stored as row-major []float64 for cache efficiency
+- **Contiguous memory** - Weights stored as row-major []float32 for cache efficiency
 - **Parallel processing** - Automatic parallelization for batch training (>= 16 samples)
+- **Hardware Acceleration** - Metal/MPS support for Apple Silicon (macOS)
 
 ## API Reference
 
@@ -238,9 +272,9 @@ internal/
 
 ```go
 net.New(layers []Layer, loss Loss, optimizer Optimizer) *Network
-network.Forward(x []float64) []float64
-network.Train(x []float64, y []float64) float64  // Returns loss
-network.TrainBatch(X [][]float64, Y [][]float64) float64
+network.Forward(x []float32) []float32
+network.Train(x []float32, y []float32) float32  // Returns loss
+network.TrainBatch(X [][]float32, Y [][]float32) float32
 network.Save(filename string) error
 network.Load(filename string) (*Network, Loss, error)
 ```
@@ -262,7 +296,6 @@ opt.NewAdam(lr float64) *Adam  // Default: beta1=0.9, beta2=0.999, eps=1e-8
 
 ## Limitations
 
-- No GPU acceleration (CPU only)
 - Deterministic initialization (fixed seed=42)
 
 ## License

@@ -11,13 +11,18 @@ A neural network library written in Go with a modular architecture:
 ```
 internal/
 ├── net/        # Core Network interface and training logic
-├── layer/      # Layer implementations (Dense, Conv2D, LSTM)
-├── activations/# Activation functions (ReLU, Sigmoid, Tanh, LeakyReLU)
-├── loss/       # Loss functions (MSE, CrossEntropy, Huber)
-└── opt/        # Optimizers (SGD, Adam - placeholder implementation)
+├── layer/      # Layer implementations (Dense, Conv2D, LSTM, Transformer, etc.)
+├── activations/# Activation functions (ReLU, Sigmoid, Tanh, LeakyReLU, LogSoftmax)
+├── loss/       # Loss functions (MSE, CrossEntropy, Huber, NLLLoss, BCELoss)
+└── opt/        # Optimizers (SGD, Adam)
 ```
 
 ## Performance Optimizations
+
+### Hardware Acceleration
+1. **Metal/MPS support**: Optimized backends for Apple Silicon (macOS)
+2. **Kernel Fusing**: Combining operations (MatMul + Bias + Activation) into single GPU kernels
+3. **Persistent Buffers**: Reusing GPU buffers to minimize synchronization overhead
 
 ### Memory Optimization (Zero Allocation Patterns)
 1. **Pre-allocated buffers**: All intermediate values are allocated once in layer constructors
@@ -41,11 +46,13 @@ for o := 0; o < outSize; o++ {
 ```
 
 ### Important Implementation Details
-1. **Dense layer**: Uses nested loops instead of external matrix libraries for cache efficiency
-2. **Activation derivatives**:
+1. **Dense layer**: Uses nested loops or Metal MatMul for performance. Accumulates gradients (`gradB += ...`) instead of overwriting.
+2. **BatchNorm2D**: Uses NCHW (Channel-major) layout for consistency with Conv2D.
+3. **Activation derivatives**:
    - ReLU.Derivative(0) = 0 (x must be > 0 for gradient)
    - LeakyReLU.Derivative(0) = Alpha (not 0.5)
-3. **Huber loss**: Gradient is `y_pred - y_true` for small errors, `delta * sign(diff)` for large
+4. **Huber loss**: Gradient is `y_pred - y_true` for small errors, `delta * sign(diff)` for large
+5. **Transformer**: Implemented using modular `TransformerBlock`, `MultiHeadAttention`, and `PositionalEncoding`.
 
 ## Common Commands
 
