@@ -31,6 +31,12 @@ type RMSNorm struct {
 
 	training bool
 	device   Device
+
+	// Metal buffers
+	bufIn     *MetalBuffer
+	bufOut    *MetalBuffer
+	bufGamma  *MetalBuffer
+	bufGradIn *MetalBuffer
 }
 
 // NewRMSNorm creates a new RMS normalization layer.
@@ -52,6 +58,9 @@ func NewRMSNorm(normalizedShape int, eps float32) *RMSNorm {
 
 // Build initializes the layer with the given input size.
 func (r *RMSNorm) Build(normalizedShape int) {
+	if normalizedShape <= 0 {
+		return
+	}
 	r.normalizedShape = normalizedShape
 	r.params = make([]float32, normalizedShape)
 	r.gamma = r.params
@@ -64,11 +73,42 @@ func (r *RMSNorm) Build(normalizedShape int) {
 
 	r.outputBuf = make([]float32, normalizedShape)
 	r.gradInBuf = make([]float32, normalizedShape)
+
+	if md, ok := r.device.(*MetalDevice); ok && md.IsAvailable() {
+		r.bufGamma = md.CreateBuffer(r.gamma)
+		r.bufOut = md.CreateEmptyBuffer(normalizedShape)
+		r.bufIn = md.CreateEmptyBuffer(normalizedShape)
+		r.bufGradIn = md.CreateEmptyBuffer(normalizedShape)
+	}
 }
 
 // SetDevice sets the computation device.
 func (r *RMSNorm) SetDevice(device Device) {
 	r.device = device
+	if md, ok := device.(*MetalDevice); ok && md.IsAvailable() && r.normalizedShape > 0 {
+		if r.bufGamma == nil {
+			r.bufGamma = md.CreateBuffer(r.gamma)
+		}
+		if r.bufOut == nil {
+			r.bufOut = md.CreateEmptyBuffer(r.normalizedShape)
+		}
+		if r.bufIn == nil {
+			r.bufIn = md.CreateEmptyBuffer(r.normalizedShape)
+		}
+		if r.bufGradIn == nil {
+			r.bufGradIn = md.CreateEmptyBuffer(r.normalizedShape)
+		}
+	}
+}
+
+func (r *RMSNorm) syncGPU() {
+	if md, ok := r.device.(*MetalDevice); ok && md.IsAvailable() {
+		if r.bufGamma == nil {
+			r.bufGamma = md.CreateBuffer(r.gamma)
+		} else {
+			r.bufGamma.Update(r.gamma)
+		}
+	}
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -105,16 +145,40 @@ func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) [
 		if len(r.rmsBuf) < numSamples {
 			r.rmsBuf = make([]float32, numSamples)
 		}
-		// If no external arena, we don't save input here for simple Forward calls
-		// but typically Forward calls ForwardWithArena(x, nil, nil)
-		// We'll need a way to save input if we want Backward to work after Forward.
-		// For now, let's follow LayerNorm pattern which uses an internal arena-like buffer if needed.
-		r.arena = x // Temporary fallback
-		r.savedInputOffsets = append(r.savedInputOffsets[:0], -2) // -2 indicates x itself
-		r.savedRMSOffsets = append(r.savedRMSOffsets[:0], -1)   // -1 indicates internal rmsBuf
+		if cap(r.arena) < len(x) {
+			r.arena = make([]float32, len(x))
+		}
+		r.arena = r.arena[:len(x)]
+		copy(r.arena, x)
+		r.savedInputOffsets = append(r.savedInputOffsets[:0], 0)
+		r.savedRMSOffsets = append(r.savedRMSOffsets[:0], -1) // -1 indicates internal rmsBuf
 	}
 
 	output := r.outputBuf
+	if md, ok := r.device.(*MetalDevice); ok && md.IsAvailable() {
+		total := len(x)
+		if r.bufIn == nil || r.bufIn.length < total {
+			if r.bufIn != nil {
+				r.bufIn.Free()
+			}
+			r.bufIn = md.CreateBuffer(x)
+		} else {
+			r.bufIn.Update(x)
+		}
+		if r.bufOut == nil || r.bufOut.length < total {
+			if r.bufOut != nil {
+				r.bufOut.Free()
+			}
+			r.bufOut = md.CreateEmptyBuffer(total)
+		}
+		md.RMSNormForwardPersistent(r.bufIn, r.bufOut, r.bufGamma, numSamples, r.normalizedShape, r.eps)
+		if len(output) < total {
+			r.outputBuf = make([]float32, total)
+			output = r.outputBuf
+		}
+		r.bufOut.Read(output[:total])
+	}
+
 	for s := 0; s < numSamples; s++ {
 		start := s * r.normalizedShape
 		end := start + r.normalizedShape
@@ -125,6 +189,10 @@ func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) [
 		}
 		rms := float32(math.Sqrt(float64(sumSq/float32(r.normalizedShape) + r.eps)))
 		r.rmsBuf[s] = rms
+
+		if md, ok := r.device.(*MetalDevice); ok && md.IsAvailable() {
+			continue
+		}
 
 		for i := start; i < end; i++ {
 			output[i] = (x[i] / rms) * r.gamma[i-start]
@@ -149,12 +217,7 @@ func (r *RMSNorm) Backward(grad []float32) []float32 {
 	rmsOff := r.savedRMSOffsets[ts]
 
 	numSamples := len(grad) / r.normalizedShape
-	var savedInput []float32
-	if inOff == -2 {
-		savedInput = r.arena // x itself in Forward
-	} else {
-		savedInput = r.arena[inOff : inOff+len(grad)]
-	}
+	savedInput := r.arena[inOff : inOff+len(grad)]
 
 	var rmsBuf []float32
 	if rmsOff == -1 {
@@ -166,26 +229,60 @@ func (r *RMSNorm) Backward(grad []float32) []float32 {
 	if len(r.gradInBuf) < len(grad) {
 		r.gradInBuf = make([]float32, len(grad))
 	}
+	gradIn := r.gradInBuf[:len(grad)]
+
+	if md, ok := r.device.(*MetalDevice); ok && md.IsAvailable() {
+		total := len(grad)
+		if r.bufIn == nil || r.bufIn.length < total {
+			if r.bufIn != nil {
+				r.bufIn.Free()
+			}
+			r.bufIn = md.CreateBuffer(savedInput)
+		} else {
+			r.bufIn.Update(savedInput)
+		}
+		if r.bufOut == nil || r.bufOut.length < total {
+			if r.bufOut != nil {
+				r.bufOut.Free()
+			}
+			r.bufOut = md.CreateBuffer(grad)
+		} else {
+			r.bufOut.Update(grad)
+		}
+		if r.bufGradIn == nil || r.bufGradIn.length < total {
+			if r.bufGradIn != nil {
+				r.bufGradIn.Free()
+			}
+			r.bufGradIn = md.CreateEmptyBuffer(total)
+		}
+		md.RMSNormBackwardPersistent(r.bufOut, r.bufIn, r.bufGradIn, r.bufGamma, numSamples, r.normalizedShape, r.eps)
+		r.bufGradIn.Read(gradIn)
+	} else {
+		for s := 0; s < numSamples; s++ {
+			start := s * r.normalizedShape
+			end := start + r.normalizedShape
+
+			rms := rmsBuf[s]
+			invRMS := 1.0 / rms
+
+			// dL/dx_i = (gamma_i / RMS) * (grad_i - (x_i * sum(grad_j * gamma_j * x_j)) / (n * RMS^2))
+			sumGradXGammaX := float32(0.0)
+			for i := start; i < end; i++ {
+				sumGradXGammaX += grad[i] * r.gamma[i-start] * savedInput[i]
+			}
+
+			factor := sumGradXGammaX / (float32(r.normalizedShape) * rms * rms)
+			for i := start; i < end; i++ {
+				gradIn[i] = (r.gamma[i-start] * invRMS) * (grad[i] - savedInput[i]*factor)
+			}
+		}
+	}
 
 	for s := 0; s < numSamples; s++ {
 		start := s * r.normalizedShape
 		end := start + r.normalizedShape
-
 		rms := rmsBuf[s]
 		invRMS := 1.0 / rms
-
-		// dL/dx_i = (gamma_i / RMS) * (grad_i - (x_i * sum(grad_j * gamma_j * x_j)) / (n * RMS^2))
-		sumGradXGammaX := float32(0.0)
-		for i := start; i < end; i++ {
-			sumGradXGammaX += grad[i] * r.gamma[i-start] * savedInput[i]
-		}
-
-		factor := sumGradXGammaX / (float32(r.normalizedShape) * rms * rms)
-		for i := start; i < end; i++ {
-			r.gradInBuf[i] = (r.gamma[i-start] * invRMS) * (grad[i] - savedInput[i]*factor)
-		}
-
-		// Update gamma gradients
 		for i := start; i < end; i++ {
 			r.gradGammaBuf[i-start] += grad[i] * (savedInput[i] * invRMS)
 		}
@@ -197,6 +294,46 @@ func (r *RMSNorm) Backward(grad []float32) []float32 {
 	return r.gradInBuf[:len(grad)]
 }
 
+func (r *RMSNorm) ForwardBatch(x []float32, batchSize int) []float32 {
+	return r.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (r *RMSNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return r.ForwardWithArena(x, arena, offset)
+	}
+	inSize := r.normalizedShape
+	outSize := r.normalizedShape
+	if len(r.outputBuf) < batchSize*outSize {
+		r.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := r.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(r.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return r.outputBuf[:batchSize*outSize]
+}
+
+func (r *RMSNorm) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return r.Backward(grad)
+	}
+	inSize := r.normalizedShape
+	outSize := r.normalizedShape
+	if len(r.gradInBuf) < batchSize*inSize {
+		r.gradInBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := r.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(r.gradInBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return r.gradInBuf[:batchSize*inSize]
+}
+
+func (r *RMSNorm) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return r.BackwardBatch(grad, batchSize)
+}
+
 func (r *RMSNorm) Params() []float32 {
 	return r.params
 }
@@ -205,7 +342,7 @@ func (r *RMSNorm) SetParams(params []float32) {
 	if len(params) == 0 {
 		return
 	}
-	if &r.params[0] != &params[0] {
+	if len(r.params) > 0 && &r.params[0] != &params[0] {
 		if len(params) == len(r.params) {
 			r.params = params
 			r.gamma = params
@@ -213,6 +350,7 @@ func (r *RMSNorm) SetParams(params []float32) {
 			copy(r.params, params)
 		}
 	}
+	r.syncGPU()
 }
 
 func (r *RMSNorm) Gradients() []float32 {
@@ -284,6 +422,14 @@ func (r *RMSNorm) LightweightClone(params []float32, grads []float32) Layer {
 		training:          r.training,
 		device:            r.device,
 	}
+
+	if md, ok := r.device.(*MetalDevice); ok && md.IsAvailable() && r.normalizedShape > 0 {
+		newR.bufGamma = md.CreateBuffer(newR.gamma)
+		newR.bufOut = md.CreateEmptyBuffer(r.normalizedShape)
+		newR.bufIn = md.CreateEmptyBuffer(r.normalizedShape)
+		newR.bufGradIn = md.CreateEmptyBuffer(r.normalizedShape)
+	}
+
 	return newR
 }
 

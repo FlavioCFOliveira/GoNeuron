@@ -46,6 +46,19 @@ type BatchNorm2D struct {
 	inputWidth      int
 	numelPerChannel int
 	device          Device
+
+	// Metal buffers
+	bufIn          *MetalBuffer
+	bufOut         *MetalBuffer
+	bufRunningMean *MetalBuffer
+	bufRunningVar  *MetalBuffer
+	bufSavedMean   *MetalBuffer
+	bufSavedStd    *MetalBuffer
+	bufGamma       *MetalBuffer
+	bufBeta        *MetalBuffer
+	bufGradIn      *MetalBuffer
+	bufGradGamma   *MetalBuffer
+	bufGradBeta    *MetalBuffer
 }
 
 // NewBatchNorm2D creates a new 2D batch normalization layer.
@@ -71,6 +84,9 @@ func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool)
 
 // Build initializes the layer with the given input size (channels).
 func (b *BatchNorm2D) Build(numFeatures int) {
+	if numFeatures <= 0 {
+		return
+	}
 	b.numFeatures = numFeatures
 	if b.affine {
 		b.params = make([]float32, numFeatures*2)
@@ -99,6 +115,21 @@ func (b *BatchNorm2D) Build(numFeatures int) {
 	b.savedMean = make([]float32, numFeatures)
 	b.savedVar = make([]float32, numFeatures)
 	b.savedStd = make([]float32, numFeatures)
+
+	// Metal initialization if device is GPU
+	if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() {
+		b.bufRunningMean = md.CreateBuffer(b.runningMean)
+		b.bufRunningVar = md.CreateBuffer(b.runningVar)
+		if b.affine {
+			b.bufGamma = md.CreateBuffer(b.gamma)
+			b.bufBeta = md.CreateBuffer(b.beta)
+			b.bufGradGamma = md.CreateEmptyBuffer(numFeatures)
+			b.bufGradBeta = md.CreateEmptyBuffer(numFeatures)
+		}
+		b.bufSavedMean = md.CreateEmptyBuffer(numFeatures)
+		b.bufSavedStd = md.CreateEmptyBuffer(numFeatures)
+		b.bufGradIn = md.CreateEmptyBuffer(numFeatures) // Placeholder, will be resized
+	}
 }
 
 // SetInputDimensions sets the spatial dimensions for the layer.
@@ -116,6 +147,37 @@ func (b *BatchNorm2D) GetOutputDimensions() (int, int) {
 // SetDevice sets the computation device.
 func (b *BatchNorm2D) SetDevice(device Device) {
 	b.device = device
+	if md, ok := device.(*MetalDevice); ok && md.IsAvailable() && b.numFeatures > 0 {
+		if b.bufRunningMean == nil {
+			b.bufRunningMean = md.CreateBuffer(b.runningMean)
+		}
+		if b.bufRunningVar == nil {
+			b.bufRunningVar = md.CreateBuffer(b.runningVar)
+		}
+		if b.affine {
+			if b.bufGamma == nil {
+				b.bufGamma = md.CreateBuffer(b.gamma)
+			}
+			if b.bufBeta == nil {
+				b.bufBeta = md.CreateBuffer(b.beta)
+			}
+			if b.bufGradGamma == nil {
+				b.bufGradGamma = md.CreateEmptyBuffer(b.numFeatures)
+			}
+			if b.bufGradBeta == nil {
+				b.bufGradBeta = md.CreateEmptyBuffer(b.numFeatures)
+			}
+		}
+		if b.bufSavedMean == nil {
+			b.bufSavedMean = md.CreateEmptyBuffer(b.numFeatures)
+		}
+		if b.bufSavedStd == nil {
+			b.bufSavedStd = md.CreateEmptyBuffer(b.numFeatures)
+		}
+		if b.bufGradIn == nil {
+			b.bufGradIn = md.CreateEmptyBuffer(b.numFeatures)
+		}
+	}
 }
 
 func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
@@ -123,23 +185,22 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 		return make([]float32, 0)
 	}
 
-	// Infer dimensions
 	total := len(x)
-	spatialSize := total / (b.numFeatures)
+	batchSize := 1
+	spatialSize := total / b.numFeatures
+	if b.inputHeight > 0 && b.inputWidth > 0 {
+		spatialSize = b.inputHeight * b.inputWidth
+		batchSize = total / (b.numFeatures * spatialSize)
+	}
 	b.numelPerChannel = spatialSize
 
-	// Ensure output buffer is sized correctly
-	if len(b.outputBuf) != total {
+	if len(b.outputBuf) < total {
 		b.outputBuf = make([]float32, total)
 	}
-	if len(b.gradInBuf) != total {
-		b.gradInBuf = make([]float32, total)
-	}
+	output := b.outputBuf[:total]
 
-	output := b.outputBuf
-
-	// Save input for backward pass
 	if b.training {
+		// Save state for backward pass
 		if arena != nil && offset != nil {
 			b.arena = *arena
 			totalRequired := total + b.numFeatures*2
@@ -166,187 +227,295 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 			}
 			b.savedInput = b.savedInput[:total]
 			copy(b.savedInput, x)
-
 			b.savedInputOffsets = append(b.savedInputOffsets[:0], 0)
 			b.savedMeanOffsets = append(b.savedMeanOffsets[:0], -1)
 			b.savedStdOffsets = append(b.savedStdOffsets[:0], -1)
 			b.arena = b.savedInput
 		}
-	}
 
-	numel := b.numelPerChannel
-	numFeatures := b.numFeatures
-
-	if b.training {
-		for f := 0; f < numFeatures; f++ {
-			// Compute batch mean
-			sum := float32(0.0)
-			for s := 0; s < numel; s++ {
-				idx := f*numel + s
-				sum += x[idx]
+		// Compute mean and variance
+		if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() {
+			if b.bufIn == nil || b.bufIn.length < total {
+				if b.bufIn != nil {
+					b.bufIn.Free()
+				}
+				b.bufIn = md.CreateBuffer(x)
+			} else {
+				b.bufIn.Update(x)
 			}
-			mean := sum / float32(numel)
-			b.savedMean[f] = mean
-			b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
-
-			// Compute batch variance
-			sumSquares := float32(0.0)
-			for s := 0; s < numel; s++ {
-				idx := f*numel + s
-				diff := x[idx] - mean
-				sumSquares += diff * diff
+			md.BatchNorm2DStatsPersistent(b.bufIn, b.bufSavedMean, b.bufSavedStd, batchSize, b.numFeatures, spatialSize, b.eps)
+			b.bufSavedMean.Read(b.savedMean)
+			b.bufSavedStd.Read(b.savedVar) // varBuf in kernel, we store it in savedVar
+			for f := 0; f < b.numFeatures; f++ {
+				mean := b.savedMean[f]
+				variance := b.savedVar[f]
+				b.savedStd[f] = float32(math.Sqrt(float64(variance + b.eps)))
+				b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
+				b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
 			}
-			variance := sumSquares / float32(numel)
-			std := float32(math.Sqrt(float64(variance + b.eps)))
-			b.savedVar[f] = variance
-			b.savedStd[f] = std
-			b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
+		} else {
+			for f := 0; f < b.numFeatures; f++ {
+				sum := float32(0.0)
+				for i := 0; i < batchSize; i++ {
+					base := i * b.numFeatures * spatialSize + f * spatialSize
+					for s := 0; s < spatialSize; s++ {
+						sum += x[base+s]
+					}
+				}
+				mean := sum / float32(batchSize*spatialSize)
+				b.savedMean[f] = mean
+				b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
 
-			// Normalize and apply affine transformation
-			for s := 0; s < numel; s++ {
-				idx := f*numel + s
-				normalized := (x[idx] - mean) / std
-				if b.affine {
-					output[idx] = b.gamma[f]*normalized + b.beta[f]
-				} else {
-					output[idx] = normalized
+				sumSq := float32(0.0)
+				for i := 0; i < batchSize; i++ {
+					base := i * b.numFeatures * spatialSize + f * spatialSize
+					for s := 0; s < spatialSize; s++ {
+						diff := x[base+s] - mean
+						sumSq += diff * diff
+					}
+				}
+				variance := sumSq / float32(batchSize*spatialSize)
+				std := float32(math.Sqrt(float64(variance + b.eps)))
+				b.savedVar[f] = variance
+				b.savedStd[f] = std
+				b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
+			}
+		}
+
+		if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() {
+			if b.bufOut == nil || b.bufOut.length < total {
+				if b.bufOut != nil {
+					b.bufOut.Free()
+				}
+				b.bufOut = md.CreateEmptyBuffer(total)
+			}
+			b.bufSavedMean.Update(b.savedMean)
+			b.bufSavedStd.Update(b.savedStd)
+			b.bufRunningMean.Update(b.runningMean)
+			b.bufRunningVar.Update(b.runningVar)
+
+			md.BatchNorm2DForwardPersistent(b.bufIn, b.bufOut, b.bufRunningMean, b.bufRunningVar, b.bufSavedMean, b.bufSavedStd, b.bufGamma, b.bufBeta, batchSize, b.numFeatures, spatialSize, b.eps, b.momentum, true, b.affine)
+			b.bufOut.Read(output)
+			return output
+		}
+
+		// CPU normalization
+		for i := 0; i < batchSize; i++ {
+			for f := 0; f < b.numFeatures; f++ {
+				base := i * b.numFeatures * spatialSize + f * spatialSize
+				mean := b.savedMean[f]
+				std := b.savedStd[f]
+				for s := 0; s < spatialSize; s++ {
+					norm := (x[base+s] - mean) / std
+					if b.affine {
+						output[base+s] = b.gamma[f]*norm + b.beta[f]
+					} else {
+						output[base+s] = norm
+					}
 				}
 			}
 		}
 	} else {
-		// Inference mode: use running statistics
-		for f := 0; f < numFeatures; f++ {
-			mean := b.runningMean[f]
-			variance := b.runningVar[f]
-			std := float32(math.Sqrt(float64(variance + b.eps)))
+		// Inference mode
+		if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() {
+			if b.bufIn == nil || b.bufIn.length < total {
+				if b.bufIn != nil {
+					b.bufIn.Free()
+				}
+				b.bufIn = md.CreateBuffer(x)
+			} else {
+				b.bufIn.Update(x)
+			}
+			if b.bufOut == nil || b.bufOut.length < total {
+				if b.bufOut != nil {
+					b.bufOut.Free()
+				}
+				b.bufOut = md.CreateEmptyBuffer(total)
+			}
+			md.BatchNorm2DForwardPersistent(b.bufIn, b.bufOut, b.bufRunningMean, b.bufRunningVar, b.bufSavedMean, b.bufSavedStd, b.bufGamma, b.bufBeta, batchSize, b.numFeatures, spatialSize, b.eps, b.momentum, false, b.affine)
+			b.bufOut.Read(output)
+			return output
+		}
 
-			for s := 0; s < numel; s++ {
-				idx := f*numel + s
-				normalized := (x[idx] - mean) / std
-				if b.affine {
-					output[idx] = b.gamma[f]*normalized + b.beta[f]
-				} else {
-					output[idx] = normalized
+		for i := 0; i < batchSize; i++ {
+			for f := 0; f < b.numFeatures; f++ {
+				base := i * b.numFeatures * spatialSize + f * spatialSize
+				mean := b.runningMean[f]
+				std := float32(math.Sqrt(float64(b.runningVar[f] + b.eps)))
+				for s := 0; s < spatialSize; s++ {
+					norm := (x[base+s] - mean) / std
+					if b.affine {
+						output[base+s] = b.gamma[f]*norm + b.beta[f]
+					} else {
+						output[base+s] = norm
+					}
 				}
 			}
 		}
 	}
-
 	return output
 }
 
-// Forward performs a forward pass through the batch normalization layer.
 func (b *BatchNorm2D) Forward(x []float32) []float32 {
 	return b.ForwardWithArena(x, nil, nil)
 }
 
+func (b *BatchNorm2D) ForwardBatch(x []float32, batchSize int) []float32 {
+	return b.ForwardWithArena(x, nil, nil)
+}
 
-// Backward performs backpropagation through the batch normalization layer.
+func (b *BatchNorm2D) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	return b.ForwardWithArena(x, arena, offset)
+}
+
 func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 	if !b.training {
-		// Gradient in inference mode: simple scaling
-		numel := b.numelPerChannel
-		numFeatures := b.numFeatures
-		if len(b.gradInBuf) != len(grad) {
-			b.gradInBuf = make([]float32, len(grad))
+		total := len(grad)
+		if len(b.gradInBuf) < total {
+			b.gradInBuf = make([]float32, total)
 		}
-		for f := 0; f < numFeatures; f++ {
-			variance := b.runningVar[f]
-			std := float32(math.Sqrt(float64(variance + b.eps)))
-			for s := 0; s < numel; s++ {
-				idx := f*numel + s
-				g := grad[idx]
-				if b.affine {
-					g *= b.gamma[f]
+		gradIn := b.gradInBuf[:total]
+		batchSize := 1
+		spatialSize := total / b.numFeatures
+		if b.inputHeight > 0 && b.inputWidth > 0 {
+			spatialSize = b.inputHeight * b.inputWidth
+			batchSize = total / (b.numFeatures * spatialSize)
+		}
+		for i := 0; i < batchSize; i++ {
+			for f := 0; f < b.numFeatures; f++ {
+				base := i * b.numFeatures * spatialSize + f * spatialSize
+				std := float32(math.Sqrt(float64(b.runningVar[f] + b.eps)))
+				for s := 0; s < spatialSize; s++ {
+					g := grad[base+s]
+					if b.affine {
+						g *= b.gamma[f]
+					}
+					gradIn[base+s] = g / std
 				}
-				b.gradInBuf[idx] = g / std
 			}
 		}
-		return b.gradInBuf
+		return gradIn
 	}
 
 	numSaved := len(b.savedInputOffsets)
 	if numSaved == 0 {
 		return nil
 	}
-
 	ts := numSaved - 1
 	inOff := b.savedInputOffsets[ts]
 	meanOff := b.savedMeanOffsets[ts]
 	stdOff := b.savedStdOffsets[ts]
-
 	total := len(grad)
 	savedInput := b.arena[inOff : inOff+total]
-
-	numel := b.numelPerChannel
-	numFeatures := b.numFeatures
+	batchSize := 1
+	spatialSize := total / b.numFeatures
+	if b.inputHeight > 0 && b.inputWidth > 0 {
+		spatialSize = b.inputHeight * b.inputWidth
+		batchSize = total / (b.numFeatures * spatialSize)
+	}
 
 	var savedMean, savedStd []float32
 	if meanOff == -1 {
 		savedMean = b.savedMean
 		savedStd = b.savedStd
 	} else {
-		savedMean = b.arena[meanOff : meanOff+numFeatures]
-		savedStd = b.arena[stdOff : stdOff+numFeatures]
+		savedMean = b.arena[meanOff : meanOff+b.numFeatures]
+		savedStd = b.arena[stdOff : stdOff+b.numFeatures]
 	}
 
-	// Ensure gradInBuf is sized correctly
-	if len(b.gradInBuf) < len(grad) {
-		b.gradInBuf = make([]float32, len(grad))
+	if len(b.gradInBuf) < total {
+		b.gradInBuf = make([]float32, total)
+	}
+	gradIn := b.gradInBuf[:total]
+
+	if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() {
+		if b.bufIn == nil || b.bufIn.length < total {
+			if b.bufIn != nil {
+				b.bufIn.Free()
+			}
+			b.bufIn = md.CreateBuffer(savedInput)
+		} else {
+			b.bufIn.Update(savedInput)
+		}
+		if b.bufOut == nil || b.bufOut.length < total {
+			if b.bufOut != nil {
+				b.bufOut.Free()
+			}
+			b.bufOut = md.CreateBuffer(grad)
+		} else {
+			b.bufOut.Update(grad)
+		}
+		if b.bufGradIn == nil || b.bufGradIn.length < total {
+			if b.bufGradIn != nil {
+				b.bufGradIn.Free()
+			}
+			b.bufGradIn = md.CreateEmptyBuffer(total)
+		}
+		b.bufSavedMean.Update(savedMean)
+		b.bufSavedStd.Update(savedStd)
+
+		md.BatchNorm2DBackwardPersistent(b.bufOut, b.bufIn, b.bufGradIn, b.bufSavedMean, b.bufSavedStd, b.bufGamma, b.bufGradGamma, b.bufGradBeta, batchSize, b.numFeatures, spatialSize, b.eps, b.momentum, b.affine)
+		b.bufGradIn.Read(gradIn)
+		if b.affine {
+			b.bufGradGamma.Read(b.gradGammaBuf)
+			b.bufGradBeta.Read(b.gradBetaBuf)
+		}
+		b.savedInputOffsets = b.savedInputOffsets[:ts]
+		b.savedMeanOffsets = b.savedMeanOffsets[:ts]
+		b.savedStdOffsets = b.savedStdOffsets[:ts]
+		return gradIn
 	}
 
-	for f := 0; f < numFeatures; f++ {
+	// CPU backward
+	m := float32(batchSize * spatialSize)
+	for f := 0; f < b.numFeatures; f++ {
 		mean := savedMean[f]
 		std := savedStd[f]
-
-		// Compute sum of gradients and sum of gradients * (x - mean)
 		sumGrad := float32(0.0)
 		sumGradXMean := float32(0.0)
-		for s := 0; s < numel; s++ {
-			idx := f*numel + s
-			diff := savedInput[idx] - mean
-			sumGrad += grad[idx]
-			sumGradXMean += grad[idx] * diff
-		}
-
-		// Compute gradient for each input
-		for s := 0; s < numel; s++ {
-			idx := f*numel + s
-			diff := savedInput[idx] - mean
-
-			gradInput := grad[idx]
-			g := float32(1.0)
-			if b.affine {
-				g = b.gamma[f]
-				gradInput *= g
+		for i := 0; i < batchSize; i++ {
+			base := i * b.numFeatures * spatialSize + f * spatialSize
+			for s := 0; s < spatialSize; s++ {
+				diff := savedInput[base+s] - mean
+				sumGrad += grad[base+s]
+				sumGradXMean += grad[base+s] * diff
 			}
-			gradInput = gradInput/std - (sumGrad*g)/float32(numel)/std - diff*(sumGradXMean*g)/float32(numel)/std/std/std
-
-			b.gradInBuf[idx] = gradInput
 		}
 
-		// Accumulate parameter gradients
+		g := float32(1.0)
 		if b.affine {
-			for s := 0; s < numel; s++ {
-				idx := f*numel + s
-				normalized := (savedInput[idx] - mean) / std
-				b.gradGammaBuf[f] += grad[idx] * normalized
-				b.gradBetaBuf[f] += grad[idx]
+			g = b.gamma[f]
+		}
+
+		for i := 0; i < batchSize; i++ {
+			base := i * b.numFeatures * spatialSize + f * spatialSize
+			for s := 0; s < spatialSize; s++ {
+				diff := savedInput[base+s] - mean
+				norm := diff / std
+				gi := grad[base+s] * g
+				gradIn[base+s] = (gi/std - (sumGrad*g)/m/std - diff*(sumGradXMean*g)/m/(std*std*std))
+				if b.affine {
+					b.gradGammaBuf[f] += grad[base+s] * norm
+					b.gradBetaBuf[f] += grad[base+s]
+				}
 			}
 		}
 	}
-
-	// Pop offsets
 	b.savedInputOffsets = b.savedInputOffsets[:ts]
 	b.savedMeanOffsets = b.savedMeanOffsets[:ts]
 	b.savedStdOffsets = b.savedStdOffsets[:ts]
-
-	return b.gradInBuf[:len(grad)]
+	return gradIn
 }
 
-func (b *BatchNorm2D) Params() []float32 {
-	return b.params
+func (b *BatchNorm2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+	return b.Backward(grad)
 }
+
+func (b *BatchNorm2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return b.Backward(grad)
+}
+
+func (b *BatchNorm2D) Params() []float32 { return b.params }
 
 func (b *BatchNorm2D) SetParams(params []float32) {
 	if len(params) == 0 {
@@ -360,6 +529,22 @@ func (b *BatchNorm2D) SetParams(params []float32) {
 			copy(b.params, params)
 		}
 	}
+	b.syncGPU()
+}
+
+func (b *BatchNorm2D) syncGPU() {
+	if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() && b.affine {
+		if b.bufGamma == nil {
+			b.bufGamma = md.CreateBuffer(b.gamma)
+		} else {
+			b.bufGamma.Update(b.gamma)
+		}
+		if b.bufBeta == nil {
+			b.bufBeta = md.CreateBuffer(b.beta)
+		} else {
+			b.bufBeta.Update(b.beta)
+		}
+	}
 }
 
 func (b *BatchNorm2D) updateViews() {
@@ -369,9 +554,7 @@ func (b *BatchNorm2D) updateViews() {
 	}
 }
 
-func (b *BatchNorm2D) Gradients() []float32 {
-	return b.grads
-}
+func (b *BatchNorm2D) Gradients() []float32 { return b.grads }
 
 func (b *BatchNorm2D) SetGradients(gradients []float32) {
 	if len(gradients) == 0 {
@@ -394,12 +577,7 @@ func (b *BatchNorm2D) updateGradViews() {
 	}
 }
 
-// InSize returns the input size.
-func (b *BatchNorm2D) InSize() int {
-	return b.numFeatures
-}
-
-// OutSize returns the output size.
+func (b *BatchNorm2D) InSize() int { return b.numFeatures }
 func (b *BatchNorm2D) OutSize() int {
 	if b.numelPerChannel > 0 {
 		return b.numFeatures * b.numelPerChannel
@@ -409,51 +587,30 @@ func (b *BatchNorm2D) OutSize() int {
 
 func (b *BatchNorm2D) NamedParams() []NamedParam {
 	params := []NamedParam{
-		{
-			Name:  "running_mean",
-			Shape: []int{b.numFeatures},
-			Data:  b.runningMean,
-		},
-		{
-			Name:  "running_var",
-			Shape: []int{b.numFeatures},
-			Data:  b.runningVar,
-		},
+		{Name: "running_mean", Shape: []int{b.numFeatures}, Data: b.runningMean},
+		{Name: "running_var", Shape: []int{b.numFeatures}, Data: b.runningVar},
 	}
-
 	if b.affine {
 		params = append(params,
-			NamedParam{
-				Name:  "gamma",
-				Shape: []int{b.numFeatures},
-				Data:  b.gamma,
-			},
-			NamedParam{
-				Name:  "beta",
-				Shape: []int{b.numFeatures},
-				Data:  b.beta,
-			},
+			NamedParam{Name: "gamma", Shape: []int{b.numFeatures}, Data: b.gamma},
+			NamedParam{Name: "beta", Shape: []int{b.numFeatures}, Data: b.beta},
 		)
 	}
-
 	return params
 }
 
-// Reset resets the batch normalization layer.
 func (b *BatchNorm2D) Reset() {
 	b.savedInputOffsets = b.savedInputOffsets[:0]
 	b.savedMeanOffsets = b.savedMeanOffsets[:0]
 	b.savedStdOffsets = b.savedStdOffsets[:0]
 }
 
-// ClearGradients zeroes out the accumulated gradients.
 func (b *BatchNorm2D) ClearGradients() {
 	for i := range b.grads {
 		b.grads[i] = 0
 	}
 }
 
-// Clone creates a deep copy of the batch normalization layer.
 func (b *BatchNorm2D) Clone() Layer {
 	newB := NewBatchNorm2D(b.numFeatures, b.eps, b.momentum, b.affine)
 	newB.training = b.training
@@ -466,91 +623,46 @@ func (b *BatchNorm2D) Clone() Layer {
 	return newB
 }
 
-func (b *BatchNorm2D) LightweightClone(params []float32, grads []float32) Layer {
+func (b *BatchNorm2D) LightweightClone(params, grads []float32) Layer {
 	var gamma, beta, gradGamma, gradBeta []float32
 	if b.affine {
-		gamma = params[:b.numFeatures]
-		beta = params[b.numFeatures:]
-		gradGamma = grads[:b.numFeatures]
-		gradBeta = grads[b.numFeatures:]
+		gamma, beta = params[:b.numFeatures], params[b.numFeatures:]
+		gradGamma, gradBeta = grads[:b.numFeatures], grads[b.numFeatures:]
+	}
+	newB := &BatchNorm2D{
+		numFeatures: b.numFeatures, eps: b.eps, momentum: b.momentum, affine: b.affine,
+		training: b.training, params: params, gamma: gamma, beta: beta,
+		runningMean: b.runningMean, runningVar: b.runningVar,
+		grads: grads, gradGammaBuf: gradGamma, gradBetaBuf: gradBeta,
+		outputBuf: make([]float32, 0), gradInBuf: make([]float32, 0),
+		savedMean: make([]float32, b.numFeatures), savedVar: make([]float32, b.numFeatures), savedStd: make([]float32, b.numFeatures),
+		savedInputOffsets: make([]int, 0, 128), savedMeanOffsets: make([]int, 0, 128), savedStdOffsets: make([]int, 0, 128),
+		device: b.device, numelPerChannel: b.numelPerChannel,
 	}
 
-	newB := &BatchNorm2D{
-		numFeatures:     b.numFeatures,
-		eps:             b.eps,
-		momentum:        b.momentum,
-		affine:          b.affine,
-		training:        b.training,
-		params:          params,
-		gamma:           gamma,
-		beta:            beta,
-		runningMean:     b.runningMean, // shared statistics
-		runningVar:      b.runningVar,  // shared statistics
-		grads:           grads,
-		gradGammaBuf:    gradGamma,
-		gradBetaBuf:     gradBeta,
-		outputBuf:       make([]float32, 0),
-		gradInBuf:       make([]float32, 0),
-		savedMean:         make([]float32, b.numFeatures),
-		savedVar:          make([]float32, b.numFeatures),
-		savedStd:          make([]float32, b.numFeatures),
-		savedInputOffsets: make([]int, 0, 128),
-		savedMeanOffsets:  make([]int, 0, 128),
-		savedStdOffsets:   make([]int, 0, 128),
-		device:            b.device,
-		numelPerChannel:   b.numelPerChannel,
+	if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() && b.numFeatures > 0 {
+		newB.bufRunningMean = md.CreateBuffer(newB.runningMean)
+		newB.bufRunningVar = md.CreateBuffer(newB.runningVar)
+		if b.affine {
+			newB.bufGamma = md.CreateBuffer(newB.gamma)
+			newB.bufBeta = md.CreateBuffer(newB.beta)
+			newB.bufGradGamma = md.CreateEmptyBuffer(b.numFeatures)
+			newB.bufGradBeta = md.CreateEmptyBuffer(b.numFeatures)
+		}
+		newB.bufSavedMean = md.CreateEmptyBuffer(b.numFeatures)
+		newB.bufSavedStd = md.CreateEmptyBuffer(b.numFeatures)
+		newB.bufGradIn = md.CreateEmptyBuffer(b.numFeatures)
 	}
+
 	return newB
 }
 
-// GetGamma returns the gamma parameters (for affine layers).
-func (b *BatchNorm2D) GetGamma() []float32 {
-	if !b.affine {
-		return nil
-	}
-	return b.gamma
-}
-
-// GetBeta returns the beta parameters (for affine layers).
-func (b *BatchNorm2D) GetBeta() []float32 {
-	if !b.affine {
-		return nil
-	}
-	return b.beta
-}
-
-// GetRunningMean returns the running mean statistics.
-func (b *BatchNorm2D) GetRunningMean() []float32 {
-	return b.runningMean
-}
-
-// GetRunningVar returns the running variance statistics.
-func (b *BatchNorm2D) GetRunningVar() []float32 {
-	return b.runningVar
-}
-
-// AccumulateBackward performs backpropagation and accumulates gradients.
-// For BatchNorm2D, gradients are already accumulated in Backward, so this just calls Backward.
-func (b *BatchNorm2D) AccumulateBackward(grad []float32) []float32 {
-	return b.Backward(grad)
-}
-
-// GetEps returns the epsilon value for numerical stability.
-func (b *BatchNorm2D) GetEps() float32 {
-	return b.eps
-}
-
-// GetMomentum returns the momentum value.
-func (b *BatchNorm2D) GetMomentum() float32 {
-	return b.momentum
-}
-
-// SetTraining sets whether the layer should be in training or inference mode.
-func (b *BatchNorm2D) SetTraining(training bool) {
-	b.training = training
-}
-
-// IsTraining returns whether the layer is in training mode.
-func (b *BatchNorm2D) IsTraining() bool {
-	return b.training
-}
+func (b *BatchNorm2D) GetGamma() []float32          { if !b.affine { return nil }; return b.gamma }
+func (b *BatchNorm2D) GetBeta() []float32           { if !b.affine { return nil }; return b.beta }
+func (b *BatchNorm2D) GetRunningMean() []float32    { return b.runningMean }
+func (b *BatchNorm2D) GetRunningVar() []float32     { return b.runningVar }
+func (b *BatchNorm2D) AccumulateBackward(grad []float32) []float32 { return b.Backward(grad) }
+func (b *BatchNorm2D) GetEps() float32              { return b.eps }
+func (b *BatchNorm2D) GetMomentum() float32         { return b.momentum }
+func (b *BatchNorm2D) SetTraining(training bool)    { b.training = training }
+func (b *BatchNorm2D) IsTraining() bool             { return b.training }

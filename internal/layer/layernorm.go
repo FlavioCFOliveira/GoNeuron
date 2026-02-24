@@ -38,6 +38,13 @@ type LayerNorm struct {
 	training bool
 
 	device Device
+
+	// Metal buffers
+	bufIn     *MetalBuffer
+	bufOut    *MetalBuffer
+	bufGamma  *MetalBuffer
+	bufBeta   *MetalBuffer
+	bufGradIn *MetalBuffer
 }
 
 // NewLayerNorm creates a new layer normalization layer.
@@ -61,6 +68,9 @@ func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *Lay
 
 // Build initializes the layer with the given input size.
 func (l *LayerNorm) Build(normalizedShape int) {
+	if normalizedShape <= 0 {
+		return
+	}
 	l.normalizedShape = normalizedShape
 	if l.elementwiseAffine {
 		l.params = make([]float32, normalizedShape*2)
@@ -81,11 +91,56 @@ func (l *LayerNorm) Build(normalizedShape int) {
 	l.outputBuf = make([]float32, normalizedShape)
 	l.gradInBuf = make([]float32, normalizedShape)
 	l.gradBuf = make([]float32, normalizedShape)
+
+	// Metal initialization if device is GPU
+	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() && l.normalizedShape > 0 {
+		if l.elementwiseAffine {
+			l.bufGamma = md.CreateBuffer(l.gamma)
+			l.bufBeta = md.CreateBuffer(l.beta)
+		}
+		l.bufIn = md.CreateEmptyBuffer(normalizedShape)
+		l.bufOut = md.CreateEmptyBuffer(normalizedShape)
+		l.bufGradIn = md.CreateEmptyBuffer(normalizedShape)
+	}
 }
 
 // SetDevice sets the computation device.
 func (l *LayerNorm) SetDevice(device Device) {
 	l.device = device
+	if md, ok := device.(*MetalDevice); ok && md.IsAvailable() && l.normalizedShape > 0 {
+		if l.elementwiseAffine {
+			if l.bufGamma == nil {
+				l.bufGamma = md.CreateBuffer(l.gamma)
+			}
+			if l.bufBeta == nil {
+				l.bufBeta = md.CreateBuffer(l.beta)
+			}
+		}
+		if l.bufIn == nil {
+			l.bufIn = md.CreateEmptyBuffer(l.normalizedShape)
+		}
+		if l.bufOut == nil {
+			l.bufOut = md.CreateEmptyBuffer(l.normalizedShape)
+		}
+		if l.bufGradIn == nil {
+			l.bufGradIn = md.CreateEmptyBuffer(l.normalizedShape)
+		}
+	}
+}
+
+func (l *LayerNorm) syncGPU() {
+	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() && l.elementwiseAffine {
+		if l.bufGamma == nil {
+			l.bufGamma = md.CreateBuffer(l.gamma)
+		} else {
+			l.bufGamma.Update(l.gamma)
+		}
+		if l.bufBeta == nil {
+			l.bufBeta = md.CreateBuffer(l.beta)
+		} else {
+			l.bufBeta.Update(l.beta)
+		}
+	}
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -141,6 +196,31 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 	}
 
 	output := l.outputBuf
+	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() {
+		total := len(x)
+		if l.bufIn == nil || l.bufIn.length < total {
+			if l.bufIn != nil {
+				l.bufIn.Free()
+			}
+			l.bufIn = md.CreateBuffer(x)
+		} else {
+			l.bufIn.Update(x)
+		}
+		if l.bufOut == nil || l.bufOut.length < total {
+			if l.bufOut != nil {
+				l.bufOut.Free()
+			}
+			l.bufOut = md.CreateEmptyBuffer(total)
+		}
+		md.LayerNormForwardPersistent(l.bufIn, l.bufOut, l.bufGamma, l.bufBeta, numSamples, l.normalizedShape, l.eps)
+		if len(output) < total {
+			l.outputBuf = make([]float32, total)
+			output = l.outputBuf
+		}
+		l.bufOut.Read(output[:total])
+		// We still need to compute means and stds for backward if training
+	}
+
 	for s := 0; s < numSamples; s++ {
 		start := s * l.normalizedShape
 		end := start + l.normalizedShape
@@ -161,6 +241,11 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		std := float32(math.Sqrt(float64(variance + l.eps)))
 		l.inputStds[s] = std
 
+		if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() {
+			// Skip actual computation if Metal was used
+			continue
+		}
+
 		for i := start; i < end; i++ {
 			normalized := (x[i] - mean) / std
 			if l.elementwiseAffine {
@@ -171,7 +256,7 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		}
 	}
 
-	return output
+	return output[:len(x)]
 }
 
 // Forward performs a forward pass through the layer normalization layer.
@@ -179,6 +264,25 @@ func (l *LayerNorm) Forward(x []float32) []float32 {
 	return l.ForwardWithArena(x, nil, nil)
 }
 
+func (l *LayerNorm) ForwardBatch(x []float32, batchSize int) []float32 {
+	return l.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (l *LayerNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return l.ForwardWithArena(x, arena, offset)
+	}
+	inSize := l.normalizedShape
+	outSize := l.normalizedShape
+	if len(l.outputBuf) < batchSize*outSize {
+		l.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := l.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(l.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return l.outputBuf[:batchSize*outSize]
+}
 
 func (l *LayerNorm) Backward(grad []float32) []float32 {
 	numSaved := len(l.savedInputOffsets)
@@ -206,39 +310,73 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 	if len(l.gradInBuf) < len(grad) {
 		l.gradInBuf = make([]float32, len(grad))
 	}
+	gradIn := l.gradInBuf[:len(grad)]
 
-	for s := 0; s < numSamples; s++ {
-		start := s * l.normalizedShape
-		end := start + l.normalizedShape
+	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() {
+		total := len(grad)
+		if l.bufIn == nil || l.bufIn.length < total {
+			if l.bufIn != nil {
+				l.bufIn.Free()
+			}
+			l.bufIn = md.CreateBuffer(savedInput)
+		} else {
+			l.bufIn.Update(savedInput)
+		}
+		if l.bufOut == nil || l.bufOut.length < total {
+			if l.bufOut != nil {
+				l.bufOut.Free()
+			}
+			l.bufOut = md.CreateBuffer(grad)
+		} else {
+			l.bufOut.Update(grad)
+		}
+		if l.bufGradIn == nil || l.bufGradIn.length < total {
+			if l.bufGradIn != nil {
+				l.bufGradIn.Free()
+			}
+			l.bufGradIn = md.CreateEmptyBuffer(total)
+		}
+		md.LayerNormBackwardPersistent(l.bufOut, l.bufIn, l.bufGradIn, l.bufGamma, numSamples, l.normalizedShape, l.eps)
+		l.bufGradIn.Read(gradIn)
+	} else {
+		for s := 0; s < numSamples; s++ {
+			start := s * l.normalizedShape
+			end := start + l.normalizedShape
 
-		mean := inputMeans[s]
-		std := inputStds[s]
+			mean := inputMeans[s]
+			std := inputStds[s]
 
-		gammaProd := l.gradBuf
-		for i := start; i < end; i++ {
-			if l.elementwiseAffine {
-				gammaProd[i-start] = grad[i] * l.gamma[i-start]
-			} else {
-				gammaProd[i-start] = grad[i]
+			gammaProd := l.gradBuf
+			for i := start; i < end; i++ {
+				if l.elementwiseAffine {
+					gammaProd[i-start] = grad[i] * l.gamma[i-start]
+				} else {
+					gammaProd[i-start] = grad[i]
+				}
+			}
+
+			sumGrad := float32(0.0)
+			sumGradXMean := float32(0.0)
+			for i := start; i < end; i++ {
+				diff := (savedInput[i] - mean)
+				sumGrad += gammaProd[i-start]
+				sumGradXMean += gammaProd[i-start] * diff
+			}
+
+			for i := start; i < end; i++ {
+				diff := (savedInput[i] - mean)
+				gradIn[i] = (gammaProd[i-start] - sumGrad/float32(l.normalizedShape)) / std
+				gradIn[i] -= (diff * sumGradXMean) / (float32(l.normalizedShape) * std * std)
 			}
 		}
+	}
 
-		sumGrad := float32(0.0)
-		sumGradXMean := float32(0.0)
-		for i := start; i < end; i++ {
-			diff := (savedInput[i] - mean)
-			sumGrad += gammaProd[i-start]
-			sumGradXMean += gammaProd[i-start] * diff
-		}
-
-		for i := start; i < end; i++ {
-			diff := (savedInput[i] - mean)
-			gradInput := (gammaProd[i-start] - sumGrad/float32(l.normalizedShape)) / std
-			gradInput -= (diff * sumGradXMean) / (float32(l.normalizedShape) * std * std)
-			l.gradInBuf[i] = gradInput
-		}
-
-		if l.elementwiseAffine {
+	if l.elementwiseAffine {
+		for s := 0; s < numSamples; s++ {
+			start := s * l.normalizedShape
+			end := start + l.normalizedShape
+			mean := inputMeans[s]
+			std := inputStds[s]
 			for i := start; i < end; i++ {
 				normalized := (savedInput[i] - mean) / std
 				l.gradGammaBuf[i-start] += grad[i] * normalized
@@ -253,6 +391,26 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 	l.savedStdOffsets = l.savedStdOffsets[:ts]
 
 	return l.gradInBuf[:len(grad)]
+}
+
+func (l *LayerNorm) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return l.Backward(grad)
+	}
+	inSize := l.normalizedShape
+	outSize := l.normalizedShape
+	if len(l.gradInBuf) < batchSize*inSize {
+		l.gradInBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := l.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(l.gradInBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return l.gradInBuf[:batchSize*inSize]
+}
+
+func (l *LayerNorm) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return l.BackwardBatch(grad, batchSize)
 }
 
 func (l *LayerNorm) Params() []float32 {
@@ -271,6 +429,7 @@ func (l *LayerNorm) SetParams(params []float32) {
 			copy(l.params, params)
 		}
 	}
+	l.syncGPU()
 }
 
 func (l *LayerNorm) updateViews() {
@@ -386,6 +545,17 @@ func (l *LayerNorm) LightweightClone(params []float32, grads []float32) Layer {
 		training:          l.training,
 		device:            l.device,
 	}
+
+	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() && l.normalizedShape > 0 {
+		if l.elementwiseAffine {
+			newL.bufGamma = md.CreateBuffer(newL.gamma)
+			newL.bufBeta = md.CreateBuffer(newL.beta)
+		}
+		newL.bufIn = md.CreateEmptyBuffer(l.normalizedShape)
+		newL.bufOut = md.CreateEmptyBuffer(l.normalizedShape)
+		newL.bufGradIn = md.CreateEmptyBuffer(l.normalizedShape)
+	}
+
 	return newL
 }
 

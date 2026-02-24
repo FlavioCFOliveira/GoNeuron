@@ -4,6 +4,7 @@ package layer
 import (
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
@@ -45,11 +46,20 @@ type Conv2D struct {
 	// Saved input for backward pass
 	savedInput        []float32
 	savedInputOffsets []int
-	arena             []float32
+	arenaPtr          *[]float32
 
 	training bool
 
 	device Device
+
+	// Metal state
+	metalState unsafe.Pointer
+	bufInput   *MetalBuffer
+	bufOutput  *MetalBuffer
+	bufGradOut *MetalBuffer
+	bufGradIn  *MetalBuffer
+	bufGradW   *MetalBuffer
+	bufGradB   *MetalBuffer
 }
 
 // NewConv2D creates a new 2D convolutional layer.
@@ -76,6 +86,9 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 
 // Build initializes the layer with the given input size (channels).
 func (c *Conv2D) Build(inChannels int) {
+	if inChannels <= 0 {
+		return
+	}
 	c.inChannels = inChannels
 	weightSize := c.outChannels * inChannels * c.kernelSize * c.kernelSize
 	biasSize := c.outChannels
@@ -100,11 +113,35 @@ func (c *Conv2D) Build(inChannels int) {
 	c.outputBuf = make([]float32, 0)
 	c.gradInBuf = make([]float32, 0)
 	c.savedInput = make([]float32, 0)
+
+	// GPU initialization if needed
+	if c.device.Type() == GPU {
+		if md, ok := c.device.(*MetalDevice); ok && md.IsAvailable() {
+			c.metalState = md.CreateConv2DState(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.weights, c.biases)
+			c.bufGradW = md.CreateEmptyBuffer(len(c.weights))
+			c.bufGradB = md.CreateEmptyBuffer(len(c.biases))
+			c.bufInput = md.CreateEmptyBuffer(c.inChannels * c.kernelSize * c.kernelSize)
+			c.bufOutput = md.CreateEmptyBuffer(c.outChannels)
+			c.bufGradOut = md.CreateEmptyBuffer(c.outChannels)
+			c.bufGradIn = md.CreateEmptyBuffer(c.inChannels * c.kernelSize * c.kernelSize)
+		}
+	}
 }
 
 // SetDevice sets the computation device for the convolutional layer.
 func (c *Conv2D) SetDevice(device Device) {
 	c.device = device
+	if device.Type() == GPU && c.metalState == nil && len(c.params) > 0 {
+		if md, ok := device.(*MetalDevice); ok && md.IsAvailable() {
+			c.metalState = md.CreateConv2DState(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.weights, c.biases)
+			c.bufGradW = md.CreateEmptyBuffer(len(c.weights))
+			c.bufGradB = md.CreateEmptyBuffer(len(c.biases))
+			c.bufInput = md.CreateEmptyBuffer(c.inChannels * c.kernelSize * c.kernelSize)
+			c.bufOutput = md.CreateEmptyBuffer(c.outChannels)
+			c.bufGradOut = md.CreateEmptyBuffer(c.outChannels)
+			c.bufGradIn = md.CreateEmptyBuffer(c.inChannels * c.kernelSize * c.kernelSize)
+		}
+	}
 }
 
 // computeOutputSize calculates the output spatial dimensions
@@ -127,6 +164,24 @@ func (c *Conv2D) SetInputDimensions(height, width int) {
 // SetTraining sets whether the layer is in training mode.
 func (c *Conv2D) SetTraining(training bool) {
 	c.training = training
+}
+
+func (c *Conv2D) initMetal(batchSize, inH, inW, outH, outW int) {
+	if c.metalState != nil {
+		return
+	}
+	mDevice, ok := c.device.(*MetalDevice)
+	if !ok {
+		return
+	}
+
+	c.metalState = mDevice.CreateConv2DState(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.weights, c.biases)
+	c.bufInput = mDevice.CreateEmptyBuffer(batchSize * c.inChannels * inH * inW)
+	c.bufOutput = mDevice.CreateEmptyBuffer(batchSize * c.outChannels * outH * outW)
+	c.bufGradOut = mDevice.CreateEmptyBuffer(batchSize * c.outChannels * outH * outW)
+	c.bufGradIn = mDevice.CreateEmptyBuffer(batchSize * c.inChannels * inH * inW)
+	c.bufGradW = mDevice.CreateEmptyBuffer(len(c.weights))
+	c.bufGradB = mDevice.CreateEmptyBuffer(len(c.biases))
 }
 
 func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
@@ -182,12 +237,11 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 
 	// Save input for backward pass
 	if arena != nil && offset != nil {
-		c.arena = *arena
+		c.arenaPtr = arena
 		if len(*arena) < *offset+len(input) {
 			newArena := make([]float32, (*offset+len(input))*2)
 			copy(newArena, *arena)
 			*arena = newArena
-			c.arena = *arena
 		}
 		saved := (*arena)[*offset : *offset+len(input)]
 		copy(saved, input)
@@ -200,7 +254,7 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		c.savedInput = c.savedInput[:len(input)]
 		copy(c.savedInput, input)
 		c.savedInputOffsets = append(c.savedInputOffsets[:0], 0)
-		c.arena = c.savedInput
+		c.arenaPtr = &c.savedInput
 	}
 
 	// Cache dimensions for backward pass
@@ -208,6 +262,45 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 	c.inputWidth = inputWidth
 
 	// Convolution logic
+	if md, ok := c.device.(*MetalDevice); ok && c.metalState != nil {
+		outH, outW := c.computeOutputSize(inputHeight, inputWidth)
+		requiredOutput := c.outChannels * outH * outW
+
+		// Ensure buffers
+		if c.bufInput == nil || c.bufInput.length < len(input) {
+			if c.bufInput != nil {
+				c.bufInput.Free()
+			}
+			c.bufInput = md.CreateBuffer(input)
+		} else {
+			c.bufInput.Update(input)
+		}
+
+		if c.bufOutput == nil || c.bufOutput.length < requiredOutput {
+			if c.bufOutput != nil {
+				c.bufOutput.Free()
+			}
+			c.bufOutput = md.CreateEmptyBuffer(requiredOutput)
+		}
+
+		md.Conv2DForward(c.metalState, c.bufInput, c.bufOutput, 1, inputHeight, inputWidth, outH, outW)
+
+		// Check if we need to apply activation (MPS kernel handles convolution but we might need fused activation)
+		// Actually, our current createConv2DState doesn't fuse activation yet, so we apply it manually or update createConv2DState.
+		// For now, let's read back and apply activation if needed, or better, update the Metal implementation to support activation.
+		// Wait, I didn't add activation to the Metal Conv2D kernel. I should do that.
+
+		c.bufOutput.Read(c.outputBuf[:requiredOutput])
+
+		// If activation is ReLU, we can use the fused kernel or just do it on CPU/GPU
+		// For simplicity now, let's do it on CPU as before if not fused.
+		for i := 0; i < requiredOutput; i++ {
+			c.outputBuf[i] = c.activation.Activate(c.outputBuf[i])
+		}
+
+		return c.outputBuf[:requiredOutput]
+	}
+
 	outSize := outH * outW
 	kernelSize := c.kernelSize
 	stride := c.stride
@@ -279,6 +372,31 @@ func (c *Conv2D) Forward(input []float32) []float32 {
 	return c.ForwardWithArena(input, nil, nil)
 }
 
+func (c *Conv2D) ForwardBatch(input []float32, batchSize int) []float32 {
+	return c.ForwardBatchWithArena(input, batchSize, nil, nil)
+}
+
+func (c *Conv2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return c.ForwardWithArena(input, arena, offset)
+	}
+	inSize := len(input) / batchSize
+	outSize := c.OutSize()
+	if outSize <= c.outChannels {
+		// Heuristic to infer output size if not already known
+		c.ForwardWithArena(input[:inSize], nil, nil)
+		outSize = c.OutSize()
+	}
+	if len(c.outputBuf) < batchSize*outSize {
+		c.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := c.ForwardWithArena(input[i*inSize:(i+1)*inSize], arena, offset)
+		copy(c.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return c.outputBuf[:batchSize*outSize]
+}
+
 
 // Backward performs backpropagation through the convolutional layer.
 // grad: gradient of loss w.r.t. activated output (shape: [outChannels, outH, outW] flattened)
@@ -293,7 +411,7 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 	ts := numSaved - 1
 	offset := c.savedInputOffsets[ts]
 	inSize := c.inChannels * c.inputHeight * c.inputWidth
-	savedInput := c.arena[offset : offset+inSize]
+	savedInput := (*c.arenaPtr)[offset : offset+inSize]
 
 	// Output dimensions
 	outH, outW := c.computeOutputSize(c.inputHeight, c.inputWidth)
@@ -309,6 +427,64 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 
 	// Use pre-allocated input gradient buffer
 	gradInput := c.gradInBuf[:inChannels*inputHeight*inputWidth]
+
+	if md, ok := c.device.(*MetalDevice); ok && c.metalState != nil {
+		// Ensure weight gradient buffers exist
+		if c.bufGradW == nil {
+			c.bufGradW = md.CreateEmptyBuffer(len(c.weights))
+		}
+		if c.bufGradB == nil {
+			c.bufGradB = md.CreateEmptyBuffer(len(c.biases))
+		}
+
+		if c.bufGradOut == nil || c.bufGradOut.length < len(grad) {
+			if c.bufGradOut != nil {
+				c.bufGradOut.Free()
+			}
+			c.bufGradOut = md.CreateBuffer(grad)
+		} else {
+			c.bufGradOut.Update(grad)
+		}
+
+		if c.bufGradIn == nil || c.bufGradIn.length < len(gradInput) {
+			if c.bufGradIn != nil {
+				c.bufGradIn.Free()
+			}
+			c.bufGradIn = md.CreateEmptyBuffer(len(gradInput))
+		}
+
+		// We need to handle activation derivative if not fused
+		// dL/dz = dL/d(output) * activation'(z)
+		// Since we didn't fuse, we do it here
+		gradCopy := make([]float32, len(grad))
+		copy(gradCopy, grad)
+		for i := range gradCopy {
+			gradCopy[i] *= c.activation.Derivative(c.preActBuf[i])
+		}
+		c.bufGradOut.Update(gradCopy)
+
+		md.Conv2DBackward(c.metalState, c.bufInput, c.bufGradOut, c.bufGradIn, c.bufGradW, c.bufGradB, 1, inputHeight, inputWidth, outH, outW)
+
+		c.bufGradIn.Read(gradInput)
+
+		// Accumulate gradients back to Go
+		tempGradW := make([]float32, len(c.gradWeights))
+		tempGradB := make([]float32, len(c.gradBiases))
+		c.bufGradW.Read(tempGradW)
+		c.bufGradB.Read(tempGradB)
+
+		for i := range c.gradWeights {
+			c.gradWeights[i] += tempGradW[i]
+		}
+		for i := range c.gradBiases {
+			c.gradBiases[i] += tempGradB[i]
+		}
+
+		// Pop the last saved input offset
+		c.savedInputOffsets = c.savedInputOffsets[:ts]
+
+		return gradInput
+	}
 
 	// Clear input gradient buffer
 	for i := range gradInput {
@@ -391,6 +567,13 @@ func (c *Conv2D) SetParams(params []float32) {
 			copy(c.params, params)
 		}
 	}
+	c.syncGPU()
+}
+
+func (c *Conv2D) syncGPU() {
+	if md, ok := c.device.(*MetalDevice); ok && c.metalState != nil {
+		md.Conv2DReloadWeights(c.metalState)
+	}
 }
 
 func (c *Conv2D) updateViews() {
@@ -429,6 +612,26 @@ func (c *Conv2D) updateGradViews() {
 // For Conv2D, gradients are already accumulated in Backward, so this just calls Backward.
 func (c *Conv2D) AccumulateBackward(grad []float32) []float32 {
 	return c.Backward(grad)
+}
+
+func (c *Conv2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return c.Backward(grad)
+	}
+	inSize := c.InSize()
+	outSize := c.OutSize()
+	if len(c.gradInBuf) < batchSize*inSize {
+		c.gradInBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := c.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(c.gradInBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return c.gradInBuf[:batchSize*inSize]
+}
+
+func (c *Conv2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return c.BackwardBatch(grad, batchSize)
 }
 
 // ClearGradients zeroes out the accumulated gradients.
@@ -471,7 +674,21 @@ func (c *Conv2D) LightweightClone(params []float32, grads []float32) Layer {
 		savedInputOffsets: make([]int, 0, 128),
 		training:          c.training,
 		device:            c.device,
+		metalState:       c.metalState, // Shared state as it points to shared weights
 	}
+
+	if md, ok := c.device.(*MetalDevice); ok && md.IsAvailable() && len(c.params) > 0 {
+		if newC.metalState == nil {
+			newC.metalState = md.CreateConv2DState(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, newC.weights, newC.biases)
+		}
+		newC.bufGradW = md.CreateEmptyBuffer(len(newC.weights))
+		newC.bufGradB = md.CreateEmptyBuffer(len(newC.biases))
+		newC.bufInput = md.CreateEmptyBuffer(c.inChannels * c.kernelSize * c.kernelSize)
+		newC.bufOutput = md.CreateEmptyBuffer(c.outChannels)
+		newC.bufGradOut = md.CreateEmptyBuffer(c.outChannels)
+		newC.bufGradIn = md.CreateEmptyBuffer(c.inChannels * c.kernelSize * c.kernelSize)
+	}
+
 	return newC
 }
 
