@@ -11,8 +11,9 @@ A pure Go neural network library with no external dependencies. Built for high p
 - **Pure Go** - No external BLAS or C dependencies.
 - **Hardware Acceleration** - Native Metal/MPS support for Apple Silicon (macOS).
 - **Multiple Layer Types** - Dense, Conv2D, LSTM, GRU, Bidirectional, Transformer, Attention, and more.
-- **Zero-Allocation Core** - Performance optimized with pre-allocated contiguous memory and arena-based state saving (0 allocs/op in training loops).
-- **High-Performance Parallelism** - Built-in worker pool for parallel batch training with minimal overhead.
+- **Zero-Allocation Core** - Performance optimized with pre-allocated contiguous memory and arena-based state saving.
+- **Metal 2.0 Acceleration** - Full backend support for Conv2D, Pooling, Normalization, and Transformer blocks on Apple Silicon.
+- **High-Performance Parallelism** - Built-in worker pool with thread pinning (LockOSThread) for stable GPU batch training.
 
 ## Installation
 

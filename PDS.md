@@ -42,18 +42,25 @@ Um pacote que re-exporta componentes internos para facilitar o acesso:
 - [x] **Activation Arena**: Sistema de offsets para buffers de ativação (`savedInputs`), atingindo 0 alocações no loop de treino sequencial.
 - [x] **Worker Pool**: Treino paralelo com trabalhadores pré-alocados para minimizar overhead de clonagem.
 
-### Fase 6: Próximos Passos
-- [ ] **Kernel Fusing**: Combinar operações de MatMul + Bias + Activation em kernels Metal/CUDA únicos para reduzir latência de despacho.
+### Fase 6: Otimização Avançada e Estabilidade (Concluído)
+- [x] **Kernel Fusing**: Combinar operações de MatMul + Bias + Activation em kernels Metal únicos.
+- [x] **GELU Support**: Implementação de ativação GELU acelerada em GPU.
+- [x] **Stability Fixes**: Resolução de erros de CGO (`semasleep`) através de gestão de threads (`LockOSThread`).
+- [x] **Metal Persistent Buffers**: Ciclo de vida completo para buffers de gradientes no GPU.
+
+### Fase 7: Próximos Passos
 - [ ] **Asynchronous Transfers**: Otimizar a transferência de dados entre CPU e GPU.
-
-### Fase 6: Validação e Diagnóstico
-- [ ] **Lazy Shape Inference**: Permitir que uma camada detecte automaticamente o `InSize` com base na saída da camada anterior.
-- [ ] **Data Loaders**: Criar uma interface amigável para carregar datasets CSV, Imagens e Sequências.
-- [ ] **Visualização de Métricas**: Exportação de métricas de treino para formatos compatíveis com ferramentas de visualização (ex: CSV ou JSON para gráficos).
-
-### Fase 6: Expansão de Arquiteturas
 - [ ] **Functional API**: Permitir arquiteturas não lineares (ResNet, Inception) através de uma API de grafos.
-- [ ] **Novas Camadas**: Suporte nativo para Attention Mecanisms mais avançados e camadas de Normalização adicionais.
+- [ ] **Lazy Shape Inference**: Suporte a inferência de formas em tempo de execução para todas as camadas.
+
+### Fase 8: Validação e Diagnóstico
+- [x] **Data Loaders**: Implementação de interface para carregar datasets CSV e IDX (MNIST).
+- [x] **Metrics Logging**: Sistema de logging e callbacks para monitorização de treino.
+- [ ] **Visualização de Métricas**: Exportação de métricas para JSON/CSV.
+
+### Fase 9: Expansão de Arquiteturas
+- [x] **Transformer Blocks**: Blocos modulares com RoPE e SwiGLU.
+- [ ] **Attention Mecanisms**: Suporte a Cross-Attention e Sliding Window.
 
 ## 6. Exemplo de Utilização (Padrão PDS)
 ```go
