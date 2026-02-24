@@ -198,13 +198,47 @@ model.SetDevice(device)
 For a detailed technical overview of the implementation and roadmap, see the [Software Development Plan (PDS)](PDS.md).
 
 ## Examples
-Explore the `examples/` directory for full implementations:
-- `mnist`: CNN for digit classification.
-- `mini_transformer`: Sentiment analysis.
-- `gan_mnist`: Image generation.
-- `stock_prediction`: Financial time-series forecasting.
-- `portuguese_embeddings`: NLP specific to PT-PT.
-- `GGUF_EXAMPLES.md`: Tutorials for model export and interoperability.
+
+Explore the `examples/` directory for full implementations categorized by domain:
+
+### 🚀 Getting Started
+- `simple_xor`: Minimalist entry point for the high-level API.
+- `xor`: Classic non-linear classification benchmark.
+- `slp_iris`: Multi-class classification of the Iris dataset.
+- `regression_synthetic`: Robust regression using Huber loss.
+- `rbf_sine`: Function approximation using Radial Basis Function (RBF) networks.
+
+### 🖼️ Computer Vision (CV)
+- `mnist`: High-performance CNN for digit classification with **Metal acceleration**.
+- `cifar10`: Deep CNN with **Batch Normalization** for color image classification.
+- `sequential_mnist`: Processing images as sequences using LSTMs.
+- `gan_mnist` & `mnist_gan`: Generative Adversarial Networks for digit synthesis.
+
+### ✍️ Natural Language Processing (NLP)
+- `portuguese_gpt`: Autoregressive Transformer for Portuguese text generation.
+- `portuguese_qa`: Generative Question Answering based on historical context.
+- `mini_transformer`: Sentiment analysis using a compact Transformer block.
+- `sentiment_imdb`: BiLSTM + Global Attention for movie review classification.
+- `poetry_generator`: Character-level poetry synthesis (Luís de Camões style).
+- `dialogue_bot`: Interactive character-level Transformer chat bot.
+- `code_generator`: Learning Go syntax and structural logic.
+- `portuguese_embeddings`: Unsupervised learning of Portuguese semantic vectors.
+
+### 📈 Time Series & Finance
+- `stock_prediction`: Financial forecasting using LSTMs and GRUs.
+- `stock_prediction_attention`: Enhanced stock forecasting with temporal attention.
+- `stock_prediction_cnn_lstm`: Hybrid spatial-temporal feature extraction.
+- `time_series_forecast`: Multivariate, multi-step time series forecasting.
+
+### ⚙️ Advanced Features & Interoperability
+- `gguf_export`: Model serialization for the **GGUF v3** (llama.cpp) ecosystem.
+- `export_tutorial`: Step-by-step guide to F32/F16 model export.
+- `load_and_export`: Converting native `.gob` checkpoints to GGUF format.
+- `moe_math`: Conditional computation using **Mixture of Experts (MoE)**.
+- `autoencoder_synthetic`: Self-supervised dimensionality reduction.
+- `lazy_inference`: Automatic layer shape inference from data.
+- `benchmark_hardware`: Cross-backend (CPU vs. GPU) performance profiling.
+- `validation_report`: Numerical consistency audit between hardware devices.
 
 ## License
 MIT License
