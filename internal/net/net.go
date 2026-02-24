@@ -53,6 +53,8 @@ type Network struct {
 	workerPool   []*Network
 	batchLossBuf []float32
 
+	device layer.Device
+
 	// Temporary buffers for specialized training to avoid allocations
 	tripletPredBuf []float32
 	tripletYBuf    []float32
@@ -64,6 +66,7 @@ func New(layers []layer.Layer, loss loss.Loss, optimizer opt.Optimizer) *Network
 		layers: layers,
 		loss:   loss,
 		opt:    optimizer,
+		device: &layer.CPUDevice{},
 	}
 	n.initBuffers()
 	return n
@@ -151,6 +154,7 @@ func (n *Network) LightweightClone() *Network {
 
 // SetDevice sets the computation device for the entire network.
 func (n *Network) SetDevice(device layer.Device) {
+	n.device = device
 	for _, l := range n.layers {
 		l.SetDevice(device)
 	}
@@ -189,9 +193,7 @@ func (n *Network) Forward(x []float32) []float32 {
 	curr := x
 	for i := range n.layers {
 		// Check if layer supports Arena saving
-		if saver, ok := n.layers[i].(interface {
-			ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32
-		}); ok {
+		if saver, ok := n.layers[i].(layer.ArenaLayer); ok {
 			curr = saver.ForwardWithArena(curr, &n.arena, &n.arenaIndex)
 		} else {
 			curr = n.layers[i].Forward(curr)
@@ -490,6 +492,16 @@ func (n *Network) accumulateBackward(grad []float32) []float32 {
 func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) float32 {
 	batchSize := len(batchX)
 	numWorkers := runtime.NumCPU()
+
+	isGPU := n.device != nil && n.device.Type() == layer.GPU
+	if isGPU {
+		// Reduce workers for GPU to avoid excessive CGO context switching and signals
+		// 4 workers is usually enough to saturate the command queue without overwhelming the driver
+		if numWorkers > 4 {
+			numWorkers = 4
+		}
+	}
+
 	if batchSize < numWorkers {
 		numWorkers = batchSize
 	}
@@ -523,6 +535,12 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 		wg.Add(1)
 		go func(worker *Network, s, e int) {
 			defer wg.Done()
+
+			if isGPU {
+				// Lock OS thread for GPU workers to improve stability with CGO/Metal
+				runtime.LockOSThread()
+				defer runtime.UnlockOSThread()
+			}
 
 			for i := s; i < e; i++ {
 				// Reset internal state for layers that support it
@@ -1170,9 +1188,11 @@ func ExtractLayerConfig(l layer.Layer) LayerConfig {
 		cfg.Padding = v.GetPadding()
 	case *layer.AvgPool2D:
 		cfg.Type = "AvgPool2D"
+		cfg.InChannels = v.GetInChannels()
 		cfg.KernelSize = v.GetKernelSize()
 		cfg.Stride = v.GetStride()
 		cfg.Padding = v.GetPadding()
+
 	case *layer.Embedding:
 		cfg.Type = "Embedding"
 		cfg.InSize = v.InSize() // num_embeddings
@@ -1217,8 +1237,7 @@ func (c *LayerConfig) CreateLayer() (layer.Layer, error) {
 	case "MaxPool2D":
 		l = layer.NewMaxPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
 	case "AvgPool2D":
-		// Note: AvgPool2D currently assumes 1 channel or handles internally
-		l = layer.NewAvgPool2D(c.KernelSize, c.Stride, c.Padding)
+		l = layer.NewAvgPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
 	case "Embedding":
 		l = layer.NewEmbedding(c.InSize, c.OutSize)
 	case "Flatten":
