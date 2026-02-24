@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
@@ -1089,6 +1090,184 @@ func (n *Network) SaveBinaryWeights(filename string) error {
 		// Data
 		if err := binary.Write(file, binary.LittleEndian, t.data); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// SaveGGUF saves the network parameters in GGUF v3 format (F32).
+func (n *Network) SaveGGUF(filename string) error {
+	return n.SaveGGUFExt(filename, GGMLTypeF32)
+}
+
+// SaveGGUFExt saves the network parameters in GGUF v3 format with specified type.
+func (n *Network) SaveGGUFExt(filename string, tensorType GGMLType) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	gw := NewGGUFWriter(file)
+
+	// 1. Collect all tensors
+	type tensor struct {
+		name  string
+		shape []uint64
+		data  []float32
+	}
+	var tensors []tensor
+
+	for i, l := range n.layers {
+		prefix := fmt.Sprintf("blk.%d.", i)
+		if provider, ok := l.(layer.NamedParamProvider); ok {
+			named := provider.NamedParams()
+			for _, p := range named {
+				shape64 := make([]uint64, len(p.Shape))
+				for j, v := range p.Shape {
+					shape64[j] = uint64(v)
+				}
+				name := p.Name
+				// Map to standard GGUF names where possible
+				name = strings.ReplaceAll(name, "weights", "weight")
+				name = strings.ReplaceAll(name, "biases", "bias")
+				name = strings.ReplaceAll(name, "gamma", "weight")
+				name = strings.ReplaceAll(name, "beta", "bias")
+
+				// Transformer-specific mappings
+				name = strings.ReplaceAll(name, "mha_wQ_", "attn_q.")
+				name = strings.ReplaceAll(name, "mha_wK_", "attn_k.")
+				name = strings.ReplaceAll(name, "mha_wV_", "attn_v.")
+				name = strings.ReplaceAll(name, "mha_wOut_", "attn_output.")
+				name = strings.ReplaceAll(name, "ff1_", "ffn_up.")
+				name = strings.ReplaceAll(name, "ff2_", "ffn_down.")
+				name = strings.ReplaceAll(name, "norm1_", "attn_norm.")
+				name = strings.ReplaceAll(name, "norm2_", "ffn_norm.")
+
+				tensors = append(tensors, tensor{
+					name:  prefix + name,
+					shape: shape64,
+					data:  p.Data,
+				})
+			}
+		} else {
+			params := l.Params()
+			if len(params) > 0 {
+				tensors = append(tensors, tensor{
+					name:  prefix + "weight",
+					shape: []uint64{uint64(len(params))},
+					data:  params,
+				})
+			}
+		}
+	}
+
+	// 2. Prepare metadata
+	kvPairs := []struct {
+		key   string
+		t     GGUFType
+		value interface{}
+	}{
+		{"general.architecture", GGUFTypeString, "goneuron"},
+		{"general.name", GGUFTypeString, "GoNeuron Model"},
+		{"general.alignment", GGUFTypeUint32, uint32(32)},
+		{"goneuron.layer_count", GGUFTypeUint32, uint32(len(n.layers))},
+		{"goneuron.loss_type", GGUFTypeString, fmt.Sprintf("%T", n.loss)},
+	}
+
+	// 3. Calculate offsets and total size
+	alignment := uint64(32)
+	headerSize := uint64(4 + 4 + 8 + 8) // magic, version, tensor_count, kv_count
+
+	// Calculate KV pairs size
+	kvSize := uint64(0)
+	for _, kv := range kvPairs {
+		kvSize += 8 + uint64(len(kv.key)) // key string
+		kvSize += 4                      // val type
+		switch kv.t {
+		case GGUFTypeString:
+			kvSize += 8 + uint64(len(kv.value.(string)))
+		case GGUFTypeUint32:
+			kvSize += 4
+		}
+	}
+
+	// Calculate Tensor Info size
+	tensorInfoSize := uint64(0)
+	for _, t := range tensors {
+		tensorInfoSize += 8 + uint64(len(t.name)) // name string
+		tensorInfoSize += 4                       // rank
+		tensorInfoSize += 8 * uint64(len(t.shape)) // shape
+		tensorInfoSize += 4                       // type
+		tensorInfoSize += 8                       // offset
+	}
+
+	totalHeaderSize := headerSize + kvSize + tensorInfoSize
+	// Tensor data starts after aligned header
+	dataOffsetStart := (totalHeaderSize + alignment - 1) & ^(alignment - 1)
+
+	// 4. Write Header
+	if err := gw.WriteHeader(uint64(len(kvPairs)), uint64(len(tensors))); err != nil {
+		return err
+	}
+
+	// 5. Write KV Pairs
+	for _, kv := range kvPairs {
+		if err := gw.WriteKV(kv.key, kv.t, kv.value); err != nil {
+			return err
+		}
+	}
+
+	// 6. Write Tensor Info
+	currentOffset := uint64(0)
+	for _, t := range tensors {
+		if err := gw.WriteTensorInfo(t.name, t.shape, tensorType, currentOffset); err != nil {
+			return err
+		}
+
+		typeSize := uint64(4) // F32
+		if tensorType == GGMLTypeF16 {
+			typeSize = 2
+		}
+		tensorDataSize := uint64(len(t.data)) * typeSize
+		// Align next tensor offset
+		currentOffset += tensorDataSize
+		currentOffset = (currentOffset + alignment - 1) & ^(alignment - 1)
+	}
+
+	// Padding to align tensor data start
+	pos, _ := file.Seek(0, io.SeekCurrent)
+	paddingSize := dataOffsetStart - uint64(pos)
+	if paddingSize > 0 {
+		if _, err := file.Write(make([]byte, paddingSize)); err != nil {
+			return err
+		}
+	}
+
+	// 7. Write Tensor Data
+	for _, t := range tensors {
+		// Ensure current position is aligned
+		pos, _ := file.Seek(0, io.SeekCurrent)
+		pad := (alignment - (uint64(pos) % alignment)) % alignment
+		if pad > 0 {
+			if _, err := file.Write(make([]byte, pad)); err != nil {
+				return err
+			}
+		}
+
+		if tensorType == GGMLTypeF32 {
+			if err := binary.Write(file, binary.LittleEndian, t.data); err != nil {
+				return err
+			}
+		} else if tensorType == GGMLTypeF16 {
+			f16Data := make([]uint16, len(t.data))
+			for j, f := range t.data {
+				f16Data[j] = Float32ToFloat16(f)
+			}
+			if err := binary.Write(file, binary.LittleEndian, f16Data); err != nil {
+				return err
+			}
 		}
 	}
 

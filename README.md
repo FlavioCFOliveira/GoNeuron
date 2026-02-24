@@ -149,6 +149,19 @@ err := model.Save("model.gob")
 loadedModel, lossFn, err := goneuron.Load("model.gob")
 ```
 
+#### GGUF Serialization
+GoNeuron supports GGUF v3 serialization for interoperability with the broader LLM ecosystem (e.g., llama.cpp).
+
+```go
+import "github.com/FlavioCFOliveira/GoNeuron/internal/net"
+
+// Save as standard F32 GGUF
+err := model.SaveGGUF("model.gguf")
+
+// Save as compressed F16 GGUF
+err := model.SaveGGUFExt("model_f16.gguf", net.GGMLTypeF16)
+```
+
 ### 4. Advanced Components
 
 | Component | Description |

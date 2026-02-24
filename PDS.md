@@ -47,6 +47,7 @@ Um pacote que re-exporta componentes internos para facilitar o acesso:
 - [x] **GELU Support**: Implementação de ativação GELU acelerada em GPU.
 - [x] **Stability Fixes**: Resolução de erros de CGO (`semasleep`) através de gestão de threads (`LockOSThread`).
 - [x] **Metal Persistent Buffers**: Ciclo de vida completo para buffers de gradientes no GPU.
+- [x] **GGUF Serialization**: Suporte nativo para exportação de modelos em formato GGUF v3 (F32/F16).
 
 ### Fase 7: Próximos Passos
 - [ ] **Asynchronous Transfers**: Otimizar a transferência de dados entre CPU e GPU.

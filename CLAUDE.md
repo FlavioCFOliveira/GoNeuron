@@ -62,6 +62,7 @@ Use these agents for specific tasks within the GoNeuron ecosystem:
 - **`ml-training-validator`**: Verify model convergence and ensure mathematical consistency across different backends (CPU, Metal, CUDA).
 - **`ml-dataset-fetcher`**: Source and download datasets (MNIST, CIFAR, etc.) into example directories.
 - **`ml-architecture-expert`**: Design and implement complex neural network examples (e.g., Transformers, MoE) in the `examples/` folder.
+- **`gguf-compatibility-expert`**: Handle model serialization and interoperability with GGUF v3 formats.
 - **`technical-researcher`**: Research mathematical derivations, SOTA architectures, or GPU programming manuals.
 - **`security-architect`**: Audit low-level code (memory management, GPU kernels) for stability and safety.
 
@@ -106,6 +107,9 @@ go test -bench=. -benchmem ./...  # Run benchmarks with memory stats
 1. **SGD optimizer**: The `Step()` method in Network must use `SetParams` after computing step - `StepInPlace` modifies a copy if used directly on `Params()` return value
 2. **ReLU dying neurons**: ReLU activation can cause neurons to die (output 0, no gradient). Use Tanh for problems like XOR.
 3. **Huber gradient signs**: Gradient is `(y_pred - y_true)` for small errors, `delta * sign(y_pred - y_true)` for large
+
+### Model Serialization
+1. **GGUF Compatibility**: Binary files generated for model serialization and deserialization should be compatible with or easily convertible to GGUF formats to ensure interoperability with the broader LLM ecosystem.
 
 ### Test Notes
 - Tests verify mathematical correctness of forward/backward passes
