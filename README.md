@@ -204,6 +204,7 @@ Explore the `examples/` directory for full implementations:
 - `gan_mnist`: Image generation.
 - `stock_prediction`: Financial time-series forecasting.
 - `portuguese_embeddings`: NLP specific to PT-PT.
+- `GGUF_EXAMPLES.md`: Tutorials for model export and interoperability.
 
 ## License
 MIT License

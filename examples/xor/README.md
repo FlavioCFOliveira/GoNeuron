@@ -1,32 +1,35 @@
-# XOR Neural Network Example
+# XOR Classification Example
 
-This example demonstrates a simple 2-layer neural network solving the non-linearly separable XOR problem.
+This example demonstrates the solution to the classical XOR (Exclusive OR) problem using the GoNeuron high-level Sequential API. The XOR problem is a fundamental benchmark for neural networks as it requires a non-linear decision boundary that a single-layer perceptron cannot solve.
 
-## Architecture
+## Technical Objectives
 
-- **Input Layer**: 2 neurons (representing binary inputs A and B)
-- **Hidden Layer**: 4 neurons with **Tanh** activation
-- **Output Layer**: 1 neuron with **Sigmoid** activation
+1.  **Non-Linear Modeling**: Utilizing hidden layers with non-linear activation functions to solve non-linearly separable problems.
+2.  **API Proficiency**: Demonstrating the `goneuron` package for rapid model prototyping and training.
+3.  **Inference and Evaluation**: Performing post-training predictions and accuracy assessment.
 
-The network uses **Mean Squared Error (MSE)** loss and the **Adam** optimizer for efficient training.
+## Key Implementation Details
 
-## Why Tanh?
+### 1. Architectural Configuration
+```go
+model := goneuron.NewSequential(
+    goneuron.Dense(2, 8, goneuron.Tanh),
+    goneuron.Dense(8, 1, goneuron.Sigmoid),
+)
+```
+*   **Rationale**: The `Tanh` activation in the hidden layer is selected to avoid the vanishing gradient or "dead neuron" issues sometimes encountered with ReLU in very small-scale networks. The `Sigmoid` output layer maps the result to a probability range [0, 1].
 
-The XOR problem is non-linearly separable. Using a hidden layer with a non-linear activation function like Tanh allows the network to learn the required representation. Tanh is preferred over ReLU for this specific problem in our library to avoid the "dying ReLU" problem on such a small dataset.
+### 2. Training Orchestration
+```go
+model.Compile(goneuron.Adam(0.01), goneuron.MSE)
+model.Fit(inputs, targets, 500, 4, goneuron.Logger(100))
+```
+*   **Mechanism**: The `Adam` optimizer provides adaptive learning rates, ensuring stable convergence. The training loop utilizes the `Logger` callback to provide periodic feedback on the Mean Squared Error (MSE).
 
-## Running the example
+## Execution
 
-From the project root:
+To run the XOR classification:
 
 ```bash
-go run examples/xor/main.go
+go run main.go
 ```
-
-## Expected Output
-
-The network should converge within a few hundred epochs, resulting in predictions very close to the targets:
-
-- `[0, 0] -> ~0.0`
-- `[0, 1] -> ~1.0`
-- `[1, 0] -> ~1.0`
-- `[1, 1] -> ~0.0`
