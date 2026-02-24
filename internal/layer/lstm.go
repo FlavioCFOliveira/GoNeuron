@@ -67,10 +67,14 @@ type LSTM struct {
 	// Saved states for BPTT
 	savedCellOffsets   []int
 	savedHiddenOffsets []int
+	savedPreActOffsets []int
 	arenaPtr           *[]float32
 
 	// Current time step
 	timeStep int
+
+	// Persistent gradient through time for cell state
+	dcNextBuf []float32
 
 	// Device for computation
 	device Device
@@ -110,6 +114,7 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 
 		savedCellOffsets:   make([]int, 0, 16),
 		savedHiddenOffsets: make([]int, 0, 16),
+		savedPreActOffsets: make([]int, 0, 16),
 		timeStep:           0,
 	}
 
@@ -173,6 +178,7 @@ func (l *LSTM) Build(inSize int) {
 	l.dOutputBuf = make([]float32, outSize)
 
 	l.dcBuf = make([]float32, outSize)
+	l.dcNextBuf = make([]float32, outSize)
 	l.dxBuf = make([]float32, inSize)
 	l.dhPrevBuf = make([]float32, outSize)
 	l.cPrevBuf = make([]float32, outSize)
@@ -203,12 +209,16 @@ func (l *LSTM) Reset() {
 	l.timeStep = 0
 	l.savedCellOffsets = l.savedCellOffsets[:0]
 	l.savedHiddenOffsets = l.savedHiddenOffsets[:0]
+	l.savedPreActOffsets = l.savedPreActOffsets[:0]
 	// Clear buffers
 	for i := range l.cellBuf {
 		l.cellBuf[i] = 0
 	}
 	for i := range l.hiddenBuf {
 		l.hiddenBuf[i] = 0
+	}
+	for i := range l.dcNextBuf {
+		l.dcNextBuf[i] = 0
 	}
 }
 
@@ -331,8 +341,8 @@ storeState:
 	if arena != nil && offset != nil {
 		l.arenaPtr = arena
 		outSize := l.outSize
-		if len(*arena) < *offset+outSize*2 {
-			newArena := make([]float32, (*offset+outSize*2)*2)
+		if len(*arena) < *offset+outSize*6 {
+			newArena := make([]float32, (*offset+outSize*6)*2)
 			copy(newArena, *arena)
 			*arena = newArena
 		}
@@ -344,8 +354,12 @@ storeState:
 		l.savedHiddenOffsets = append(l.savedHiddenOffsets, *offset)
 		copy((*arena)[*offset:*offset+outSize], l.hiddenBuf)
 		*offset += outSize
+
+		l.savedPreActOffsets = append(l.savedPreActOffsets, *offset)
+		copy((*arena)[*offset:*offset+outSize*4], l.preActBuf)
+		*offset += outSize * 4
 	} else {
-		l.saveState(l.cellBuf, l.hiddenBuf)
+		l.saveState(l.cellBuf, l.hiddenBuf, l.preActBuf)
 	}
 
 	l.timeStep++
@@ -355,22 +369,24 @@ storeState:
 	return l.outputBuf
 }
 
-func (l *LSTM) saveState(c, h []float32) {
+func (l *LSTM) saveState(c, h, pre []float32) {
 	outSize := l.outSize
 	if l.arenaPtr == nil {
 		l.arenaPtr = &[]float32{}
 	}
 	offset := len(*l.arenaPtr)
-	if cap(*l.arenaPtr) < offset+outSize*2 {
-		newArena := make([]float32, (offset+outSize*2)*2)
+	if cap(*l.arenaPtr) < offset+outSize*6 {
+		newArena := make([]float32, (offset+outSize*6)*2)
 		copy(newArena, *l.arenaPtr)
 		*l.arenaPtr = newArena
 	}
-	*l.arenaPtr = (*l.arenaPtr)[:offset+outSize*2]
+	*l.arenaPtr = (*l.arenaPtr)[:offset+outSize*6]
 	copy((*l.arenaPtr)[offset:offset+outSize], c)
 	l.savedCellOffsets = append(l.savedCellOffsets, offset)
 	copy((*l.arenaPtr)[offset+outSize:offset+outSize*2], h)
 	l.savedHiddenOffsets = append(l.savedHiddenOffsets, offset+outSize)
+	copy((*l.arenaPtr)[offset+outSize*2:offset+outSize*6], pre)
+	l.savedPreActOffsets = append(l.savedPreActOffsets, offset+outSize*2)
 }
 
 // Forward performs a forward pass for one time step.
@@ -439,27 +455,34 @@ func (l *LSTM) Backward(grad []float32) []float32 {
 		}
 	}
 
-	// Gate outputs (fg unused in this function but kept for reference)
-	ig, _, cg, og := l.inputGateOut, l.forgetGateOut, l.cellGateOut, l.outputGateOut
-	pre := l.preActBuf
+	// Get saved pre-activations for this time step
+	preOffset := l.savedPreActOffsets[ts]
+	pre := (*l.arenaPtr)[preOffset : preOffset+outSize*4]
+	inputStart, forgetStart, cellStart, outputStart := 0, outSize, outSize*2, outSize*3
+
+	// Recompute gate outputs for this time step
+	ig, fg, cg, og := l.inputGateOut, l.forgetGateOut, l.cellGateOut, l.outputGateOut
+	for i := 0; i < outSize; i++ {
+		ig[i] = l.inputAct.Activate(pre[inputStart+i])
+		fg[i] = l.forgetAct.Activate(pre[forgetStart+i])
+		cg[i] = l.cellAct.Activate(pre[cellStart+i])
+		og[i] = l.outputAct.Activate(pre[outputStart+i])
+	}
 
 	// Compute dc (gradient w.r.t. cell state)
-	// dc = dL/dh * o * (1 - tanh(c)^2) + dL+1/dc_next * f_next
-	// Start with contribution from current hidden state
+	// dc(t) = dL/dh(t) * og(t) * (1 - tanh(c(t))^2) + dc(t+1) * fg(t+1)
+	// Note: l.dcNextBuf already contains dc(t+1) * fg(t+1) from previous Backward call
 	dc := l.dcBuf
 	for i := 0; i < l.outSize; i++ {
 		tanhC := float32(math.Tanh(float64(c[i])))
-		dc[i] = grad[i] * og[i] * (1 - tanhC*tanhC)
+		dc[i] = grad[i]*og[i]*(1-tanhC*tanhC) + l.dcNextBuf[i]
 	}
 
 	// Gate gradients
-	// d_input = dc * cell_candidate * input'(input)
-	// d_forget = dc * c_prev * forget'(forget)
-	// d_cell = dc * input * cell'(cell)
-	// d_output = dL/dh * tanh(c) * output'(output)
-	// Note: dL/dh includes grad from output AND dc from cell state
-
-	inputStart, forgetStart, cellStart, outputStart := 0, l.outSize, l.outSize*2, l.outSize*3
+	// d_input = dc * cell_candidate * input'(input_pre)
+	// d_forget = dc * c_prev * forget'(forget_pre)
+	// d_cell = dc * input * cell'(cell_pre)
+	// d_output = dL/dh * tanh(c) * output'(output_pre)
 
 	// Input gate gradient
 	for i := 0; i < l.outSize; i++ {
@@ -479,6 +502,12 @@ func (l *LSTM) Backward(grad []float32) []float32 {
 	// Output gate gradient
 	for i := 0; i < l.outSize; i++ {
 		l.dOutputBuf[i] = grad[i] * float32(math.Tanh(float64(c[i]))) * l.outputAct.Derivative(pre[outputStart+i])
+	}
+
+	// Update dcNext for the previous time step (t-1)
+	// dcNext(t-1) = dc(t) * fg(t)
+	for i := 0; i < l.outSize; i++ {
+		l.dcNextBuf[i] = dc[i] * fg[i]
 	}
 
 	// === Accumulate weight gradients ===
@@ -814,6 +843,8 @@ func (l *LSTM) LightweightClone(params []float32, grads []float32) Layer {
 		outputGateOut:        make([]float32, l.outSize),
 		savedCellOffsets:     make([]int, 0, 16),
 		savedHiddenOffsets:   make([]int, 0, 16),
+		savedPreActOffsets:   make([]int, 0, 16),
+		dcNextBuf:            make([]float32, l.outSize),
 		timeStep:             0,
 		device:               l.device,
 		training:             l.training,

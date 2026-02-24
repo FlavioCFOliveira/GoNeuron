@@ -72,8 +72,12 @@ func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offse
 				copy(s.outputBuf[t*s.OutSize()/s.timeSteps:t*s.OutSize()/s.timeSteps+len(fOut)], fOut)
 				copy(s.outputBuf[t*s.OutSize()/s.timeSteps+len(fOut):(t+1)*s.OutSize()/s.timeSteps], bOut)
 			} else if t == s.timeSteps-1 {
+				// For non-returning sequences, we want the "last" state from both directions.
+				// Forward: last time step (t=T-1)
+				// Backward: "last" time step in reverse (t=0)
+				bOutLast := bi.GetBackwardOutputAt(0)
 				copy(s.outputBuf[:len(fOut)], fOut)
-				copy(s.outputBuf[len(fOut):], bOut)
+				copy(s.outputBuf[len(fOut):], bOutLast)
 			}
 		}
 	} else {

@@ -59,6 +59,8 @@ type GRU struct {
 
 	// Saved states for BPTT
 	savedHiddenOffsets []int
+	savedPreActOffsets []int
+	arenaPtr           *[]float32
 	arena              []float32
 
 	// Current time step
@@ -82,6 +84,7 @@ func NewGRU(inSize, outSize int) *GRU {
 		cellAct:   activations.Tanh{},
 
 		savedHiddenOffsets: make([]int, 0, 16),
+		savedPreActOffsets: make([]int, 0, 16),
 		timeStep:           0,
 		device:             &CPUDevice{},
 	}
@@ -163,6 +166,7 @@ func (g *GRU) SetDevice(device Device) {
 func (g *GRU) Reset() {
 	g.timeStep = 0
 	g.savedHiddenOffsets = g.savedHiddenOffsets[:0]
+	g.savedPreActOffsets = g.savedPreActOffsets[:0]
 	// Clear buffers
 	for i := range g.cellBuf {
 		g.cellBuf[i] = 0
@@ -252,18 +256,21 @@ func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 
 	// === Store states for backprop ===
 	if arena != nil && offset != nil {
-		g.arena = *arena
-		if len(*arena) < *offset+outSize {
-			newArena := make([]float32, (*offset+outSize)*2)
+		g.arenaPtr = arena
+		if len(*arena) < *offset+outSize*4 {
+			newArena := make([]float32, (*offset+outSize*4)*2)
 			copy(newArena, *arena)
 			*arena = newArena
-			g.arena = *arena
 		}
 		g.savedHiddenOffsets = append(g.savedHiddenOffsets, *offset)
 		copy((*arena)[*offset:*offset+outSize], g.cellBuf)
 		*offset += outSize
+
+		g.savedPreActOffsets = append(g.savedPreActOffsets, *offset)
+		copy((*arena)[*offset:*offset+outSize*3], g.preActBuf)
+		*offset += outSize * 3
 	} else {
-		g.saveState(g.cellBuf)
+		g.saveState(g.cellBuf, g.preActBuf)
 	}
 
 	g.timeStep++
@@ -273,17 +280,22 @@ func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 	return g.outputBuf
 }
 
-func (g *GRU) saveState(h []float32) {
+func (g *GRU) saveState(h, pre []float32) {
 	outSize := g.outSize
-	offset := len(g.arena)
-	if cap(g.arena) < offset+outSize {
-		newArena := make([]float32, (offset+outSize)*2)
-		copy(newArena, g.arena)
-		g.arena = newArena
+	if g.arenaPtr == nil {
+		g.arenaPtr = &[]float32{}
 	}
-	g.arena = g.arena[:offset+outSize]
-	copy(g.arena[offset:offset+outSize], h)
+	offset := len(*g.arenaPtr)
+	if cap(*g.arenaPtr) < offset+outSize*4 {
+		newArena := make([]float32, (offset+outSize*4)*2)
+		copy(newArena, *g.arenaPtr)
+		*g.arenaPtr = newArena
+	}
+	*g.arenaPtr = (*g.arenaPtr)[:offset+outSize*4]
+	copy((*g.arenaPtr)[offset:offset+outSize], h)
 	g.savedHiddenOffsets = append(g.savedHiddenOffsets, offset)
+	copy((*g.arenaPtr)[offset+outSize:offset+outSize*4], pre)
+	g.savedPreActOffsets = append(g.savedPreActOffsets, offset+outSize)
 }
 
 // Forward performs a forward pass for one time step.
@@ -350,14 +362,24 @@ func (g *GRU) Backward(grad []float32) []float32 {
 	hPrev := g.hPrevBuf
 	if ts > 0 {
 		prevHOffset := g.savedHiddenOffsets[ts-1]
-		copy(hPrev, g.arena[prevHOffset:prevHOffset+outSize])
+		copy(hPrev, (*g.arenaPtr)[prevHOffset:prevHOffset+outSize])
 	} else {
 		for i := range hPrev {
 			hPrev[i] = 0
 		}
 	}
 
+	// Get saved pre-activations for this time step
+	preOffset := g.savedPreActOffsets[ts]
+	pre := (*g.arenaPtr)[preOffset : preOffset+outSize*3]
 	updateStart, resetStart, cellStart := 0, outSize, outSize*2
+
+	// Recompute gate outputs for this time step
+	for i := 0; i < outSize; i++ {
+		g.updateGateOut[i] = g.updateAct.Activate(pre[updateStart+i])
+		g.resetGateOut[i] = g.resetAct.Activate(pre[resetStart+i])
+		g.cellGateOut[i] = g.cellAct.Activate(pre[cellStart+i])
+	}
 
 	// Compute gradient of loss w.r.t. hidden state
 	// dL/dh = dL/doutput + dL+1/dh_next
@@ -641,6 +663,7 @@ func (g *GRU) LightweightClone(params []float32, grads []float32) Layer {
 		resetGateOut:         make([]float32, g.outSize),
 		cellGateOut:          make([]float32, g.outSize),
 		savedHiddenOffsets:   make([]int, 0, 16),
+		savedPreActOffsets:   make([]int, 0, 16),
 		timeStep:             0,
 		device:               g.device,
 		training:             g.training,

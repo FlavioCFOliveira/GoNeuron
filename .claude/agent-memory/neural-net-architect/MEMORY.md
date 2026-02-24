@@ -16,6 +16,23 @@ This file contains project-specific knowledge and patterns for the GoNeuron libr
 - `network.go::TrainTriplet()` - calls Reset before forward passes
 - `network.go::ForwardBatch()` - calls Reset before each sample
 
+**Impact**: Without this fix, sequential MNIST LSTM was achieving ~10% accuracy (random guessing) because LSTM state accumulated incorrectly across samples.
+
+### LSTM BPTT Gate & Cell Gradient Bug (Critical)
+**Issue**: LSTM layers were using only the gate outputs from the last forward pass step for all steps during BPTT. Additionally, the cell state gradient (`dc`) was not being propagated through time.
+
+**Root Cause**:
+1. Gate outputs and pre-activations were not being saved in the arena for each time step.
+2. `dc(t)` calculation was missing the recurrent term `dc(t+1) * forgetGate(t+1)`.
+
+**Fix**:
+1. Modified `LSTM` to save `preActBuf` for each time step in the arena.
+2. Modified `Backward` to recompute or retrieve gate outputs for the specific time step being processed.
+3. Implemented `dcNextBuf` to propagate the cell state gradient back through time.
+4. Corrected `unroller.go` to properly concatenate BiLSTM outputs (last forward state and first backward state) for sequence summaries.
+
+**Impact**: This fix ensures mathematical correctness for BPTT in LSTMs, allowing them to actually learn long-term dependencies. Without this, gradients were essentially noise for all but the last time step.
+
 **Code Pattern**:
 ```go
 for _, l := range n.layers {

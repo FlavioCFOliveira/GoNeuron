@@ -60,7 +60,7 @@ func main() {
 	const (
 		lookback   = 10
 		lstmUnits  = 32
-		epochs     = 100
+		epochs     = 1000
 		trainRatio = 0.8
 	)
 
@@ -97,7 +97,7 @@ func main() {
 	network := net.New(layers, loss.MSE{}, optimizer)
 
 	fmt.Println("Training...")
-	network.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 20})
+	network.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 200})
 
 	// Evaluation
 	var mse float32
