@@ -105,6 +105,9 @@ func (r *RBF) SetTraining(training bool) {
 }
 
 func (r *RBF) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+	if len(r.inputBuf) < r.inSize {
+		r.inputBuf = make([]float32, r.inSize)
+	}
 	copy(r.inputBuf, x)
 
 	// 1. Compute RBF activations: phi_j = exp(-gamma * ||x - c_j||^2)
@@ -148,23 +151,15 @@ func (r *RBF) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 		copy(savedPhi, r.phiBuf)
 		r.phiBuf = savedPhi
 		*offset += phiSize
-	} else {
-		// Ensure input and phi are saved for backward pass even without arena
-		if cap(r.inputBuf) < r.inSize {
-			r.inputBuf = make([]float32, r.inSize)
-		}
-		copy(r.inputBuf, x)
-		// phiBuf is already updated in the loop above
 	}
 
-	return r.outputBuf
+	return r.outputBuf[:r.outSize]
 }
 
 // Forward performs a forward pass.
 func (r *RBF) Forward(x []float32) []float32 {
 	return r.ForwardWithArena(x, nil, nil)
 }
-
 
 // Backward performs a backward pass.
 func (r *RBF) Backward(grad []float32) []float32 {
@@ -200,14 +195,50 @@ func (r *RBF) Backward(grad []float32) []float32 {
 		}
 	}
 
-	return r.gradInBuf
+	return r.gradInBuf[:r.inSize]
 }
 
 // AccumulateBackward is like Backward but specifically for accumulation.
 func (r *RBF) AccumulateBackward(grad []float32) []float32 {
-	// For RBF, we already accumulate in Backward if we don't clear.
-	// But let's follow the interface pattern.
 	return r.Backward(grad)
+}
+
+func (r *RBF) ForwardBatch(x []float32, batchSize int) []float32 {
+	return r.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (r *RBF) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return r.ForwardWithArena(x, arena, offset)
+	}
+	inSize := r.inSize
+	outSize := r.outSize
+	if len(r.outputBuf) < batchSize*outSize {
+		r.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := r.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(r.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return r.outputBuf[:batchSize*outSize]
+}
+
+func (r *RBF) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return r.Backward(grad)
+	}
+	inSize := r.inSize
+	outSize := r.outSize
+	dx := make([]float32, batchSize*inSize)
+	for i := batchSize - 1; i >= 0; i-- {
+		out := r.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(dx[i*inSize:(i+1)*inSize], out)
+	}
+	return dx
+}
+
+func (r *RBF) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return r.BackwardBatch(grad, batchSize)
 }
 
 // Params returns all parameters flattened.

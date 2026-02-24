@@ -185,24 +185,24 @@ func loadCorpus(path string) []string {
 	return cleanLines
 }
 
-func buildModel(vocabSize int, device layer.Device) *net.Network {
-	layers := []layer.Layer{
-		layer.NewEmbedding(vocabSize, embeddingDim),
-		layer.NewPositionalEncoding(seqLen, embeddingDim),
-		layer.NewTransformerBlock(embeddingDim, numHeads, seqLen, ffDim, true), // Causal: true
-		layer.NewSequenceUnroller(
-			layer.NewDense(embeddingDim, vocabSize, activations.Softmax{}),
+func buildModel(vocabSize int, device layer.Device) *goneuron.Model {
+	model := goneuron.NewSequential(
+		goneuron.Embedding(vocabSize, embeddingDim),
+		goneuron.PositionalEncoding(seqLen),
+		goneuron.TransformerBlock(numHeads, seqLen, ffDim, true),
+		goneuron.SequenceUnroller(
+			goneuron.Dense(vocabSize, goneuron.Softmax),
 			seqLen,
 			true,
 		),
-	}
+	)
 
-	model := net.New(layers, loss.CrossEntropy{}, opt.NewAdam(learningRate))
+	model.Compile(goneuron.Adam(learningRate), goneuron.CrossEntropy)
 	model.SetDevice(device)
 	return model
 }
 
-func trainModel(model *net.Network, tokenizer *SimpleTokenizer, lines []string) {
+func trainModel(model *goneuron.Model, tokenizer *SimpleTokenizer, lines []string) {
 	inputs, targets := prepareData(tokenizer, lines)
 
 	fmt.Println("Starting training loop...")

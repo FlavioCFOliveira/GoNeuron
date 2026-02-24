@@ -87,7 +87,7 @@ func (c CrossEntropy) Forward(yPred, yTrue []float32) float32 {
 		}
 		sum -= yTrue[i] * float32(math.Log(float64(pred)))
 	}
-	return sum / float32(n)
+	return sum
 }
 
 // Backward computes gradient for cross entropy: dL/dy_pred = -y_true / (y_pred + eps)
@@ -104,7 +104,7 @@ func (c CrossEntropy) Backward(yPred, yTrue []float32) []float32 {
 		if pred < eps {
 			pred = eps
 		}
-		grad[i] = -yTrue[i] / (pred * float32(n))
+		grad[i] = -yTrue[i] / pred
 	}
 	return grad
 }
@@ -122,7 +122,7 @@ func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float32) {
 		if pred < eps {
 			pred = eps
 		}
-		grad[i] = -yTrue[i] / (pred * float32(n))
+		grad[i] = -yTrue[i] / pred
 	}
 }
 
@@ -403,11 +403,11 @@ func (n NLLLoss) Forward(yPred, yTrue []float32) float32 {
 		}
 		sum -= yTrue[i] * logPred
 	}
-	return sum / float32(nLen)
+	return sum
 }
 
 // Backward computes gradient for NLL loss with log-probabilities.
-// For log-prob input: grad[i] = -y_true[i] / n
+// For log-prob input: grad[i] = -y_true[i]
 // This is combined with LogSoftmax's gradient in the Dense layer.
 func (n NLLLoss) Backward(yPred, yTrue []float32) []float32 {
 	nLen := len(yPred)
@@ -417,7 +417,7 @@ func (n NLLLoss) Backward(yPred, yTrue []float32) []float32 {
 
 	grad := make([]float32, nLen)
 	for i := 0; i < nLen; i++ {
-		grad[i] = -yTrue[i] / float32(nLen)
+		grad[i] = -yTrue[i]
 	}
 	return grad
 }
@@ -430,7 +430,7 @@ func (n NLLLoss) BackwardInPlace(yPred, yTrue, grad []float32) {
 	}
 
 	for i := 0; i < nLen; i++ {
-		grad[i] = -yTrue[i] / float32(nLen)
+		grad[i] = -yTrue[i]
 	}
 }
 

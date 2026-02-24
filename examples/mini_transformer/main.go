@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -105,36 +106,64 @@ func main() {
 
 	// 2. Model Architecture
 	const (
-		dModel   = 32
-		numHeads = 4
-		ffDim    = 64
+		dModel   = 16
+		numHeads = 2
+		ffDim    = 32
 	)
 
 	model := goneuron.NewSequential(
 		goneuron.Embedding(vocab.nextIdx, dModel),
-		goneuron.PositionalEncoding(maxLen, dModel),
-		// Using modern SOTA features: RMSNorm, SwiGLU, and RoPE
-		goneuron.TransformerBlockExt(numHeads, maxLen, ffDim, false, goneuron.ActSwiGLU, goneuron.NormRMS, true, dModel),
-		goneuron.GlobalAveragePooling1D(maxLen, dModel),
-		goneuron.Dense(2, goneuron.Softmax, dModel),
+		goneuron.TransformerBlockExt(numHeads, maxLen, ffDim, false, goneuron.ActReLU, goneuron.NormRMS, true),
+		goneuron.CLSPooling(maxLen, dModel),
+		goneuron.Dense(2, goneuron.LogSoftmax),
 	)
 
 	// 3. Compile and Train
-	model.Compile(goneuron.Adam(0.01), goneuron.NLLLoss)
+	// Using Adam for better convergence
+	model.Compile(goneuron.Adam(0.001), goneuron.NLLLoss)
 
 	fmt.Println("Starting training...")
 	model.Summary()
-	model.Fit(x, y, 10, 2, goneuron.Logger(2))
+
+	epochs := 200
+	batchSize := 4
+	numSamples := len(x)
+	numBatches := (numSamples + batchSize - 1) / batchSize
+
+	for epoch := 0; epoch < epochs; epoch++ {
+		totalLoss := float32(0.0)
+		for b := 0; b < numBatches; b++ {
+			start := b * batchSize
+			end := (b + 1) * batchSize
+			if end > numSamples {
+				end = numSamples
+			}
+			loss := model.TrainBatch(x[start:end], y[start:end])
+			totalLoss += loss
+		}
+		if epoch%20 == 0 {
+			fmt.Printf("Epoch %d: loss = %f\n", epoch, totalLoss/float32(numBatches))
+		}
+	}
 
 	// 4. Inference
-	testSentence := "i loved the movie"
-	testTokens := Tokenize(testSentence, vocab, maxLen)
-	prediction := model.Predict(testTokens)
+	sentences := []string{
+		"this movie was great",
+		"it was a waste of time",
+	}
+	for _, s := range sentences {
+		testTokens := Tokenize(s, vocab, maxLen)
+		prediction := model.Predict(testTokens)
+		fmt.Printf("\nSentence: \"%s\"\n", s)
 
-	fmt.Printf("\nTest Sentence: \"%s\"\n", testSentence)
-	if prediction[0] > prediction[1] {
-		fmt.Println("Prediction: Positive")
-	} else {
-		fmt.Println("Prediction: Negative")
+		p0 := float32(math.Exp(float64(prediction[0])))
+		p1 := float32(math.Exp(float64(prediction[1])))
+		fmt.Printf("Probabilities: [Positive: %.4f, Negative: %.4f]\n", p0, p1)
+
+		if prediction[0] > prediction[1] {
+			fmt.Println("Prediction: Positive")
+		} else {
+			fmt.Println("Prediction: Negative")
+		}
 	}
 }

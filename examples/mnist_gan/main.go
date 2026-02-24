@@ -112,22 +112,24 @@ func main() {
 	fmt.Printf("Loaded %d training images\n", len(xTrain))
 
 	// 2. Define Generator
-	genLayers := []layer.Layer{
-		layer.NewDense(noiseSize, 256, activations.NewLeakyReLU(0.2)),
-		layer.NewDense(256, 512, activations.NewLeakyReLU(0.2)),
-		layer.NewDense(512, 1024, activations.NewLeakyReLU(0.2)),
-		layer.NewDense(1024, imgSize, activations.Tanh{}),
-	}
-	genNet := net.New(genLayers, nil, opt.NewAdam(0.0002)) // Adam with LR 0.0002
+	genNet := goneuron.NewSequential(
+		goneuron.Dense(256, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(512, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(1024, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(imgSize, goneuron.Tanh),
+	)
+	genNet.Compile(goneuron.Adam(0.0002), goneuron.MSE)
+	genNet.Build(noiseSize)
 
 	// 3. Define Discriminator
-	discLayers := []layer.Layer{
-		layer.NewDense(imgSize, 512, activations.NewLeakyReLU(0.2)),
-		layer.NewDense(512, 256, activations.NewLeakyReLU(0.2)),
-		layer.NewDense(256, 1, activations.Linear{}), // Output logits
-	}
+	discNet := goneuron.NewSequential(
+		goneuron.Dense(512, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(256, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(1, goneuron.Linear), // Output logits
+	)
 	// Use BCEWithLogitsLoss for numerical stability
-	discNet := net.New(discLayers, loss.BCEWithLogitsLoss{}, opt.NewAdam(0.0002))
+	discNet.Compile(goneuron.Adam(0.0002), goneuron.BCEWithLogitsLoss)
+	discNet.Build(imgSize)
 
 	// 4. Training Loop
 	epochs := 50

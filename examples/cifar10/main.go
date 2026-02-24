@@ -109,23 +109,29 @@ func main() {
 
 	// 2. Architecture Design
 	model := goneuron.NewSequential(
-		goneuron.Conv2D(3, 32, 3, 1, 1, goneuron.ReLU),
-		goneuron.BatchNorm2D(32),
-		goneuron.Conv2D(32, 32, 3, 1, 1, goneuron.ReLU),
-		goneuron.BatchNorm2D(32),
-		goneuron.MaxPool2D(32, 2, 2, 0), // 32x32 -> 16x16
+		goneuron.Conv2D(32, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(),
+		goneuron.Conv2D(32, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(),
+		goneuron.MaxPool2D(2, 2, 0), // 32x32 -> 16x16
 
-		goneuron.Conv2D(32, 64, 3, 1, 1, goneuron.ReLU),
-		goneuron.BatchNorm2D(64),
-		goneuron.Conv2D(64, 64, 3, 1, 1, goneuron.ReLU),
-		goneuron.BatchNorm2D(64),
-		goneuron.MaxPool2D(64, 2, 2, 0), // 16x16 -> 8x8
+		goneuron.Conv2D(64, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(),
+		goneuron.Conv2D(64, 3, 1, 1, goneuron.ReLU),
+		goneuron.BatchNorm2D(),
+		goneuron.MaxPool2D(2, 2, 0), // 16x16 -> 8x8
 
 		goneuron.Flatten(),
-		goneuron.Dense(4096, 512, goneuron.ReLU),
+		goneuron.Dense(512, goneuron.ReLU),
 		goneuron.Dropout(0.5, 512),
-		goneuron.Dense(512, 10, goneuron.LogSoftmax),
+		goneuron.Dense(10, goneuron.LogSoftmax),
 	)
+
+	// Set input dimensions for the first layer (CIFAR-10 is 3x32x32)
+	if l, ok := model.Layers()[0].(interface{ SetInputDimensions(int, int) }); ok {
+		l.SetInputDimensions(ImageSize, ImageSize)
+	}
+	model.Build(Channels)
 
 	model.Compile(goneuron.Adam(0.001), goneuron.NLLLoss)
 

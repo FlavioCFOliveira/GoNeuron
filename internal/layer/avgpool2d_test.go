@@ -7,7 +7,7 @@ import (
 
 func TestAvgPool2DForward(t *testing.T) {
 	// Test 2x2 average pooling with stride 2, no padding
-	pool := NewAvgPool2D(2, 2, 0)
+	pool := NewAvgPool2D(1, 2, 2, 0)
 
 	// Input: 4x4 = 16 values
 	// 1  2  3  4
@@ -36,7 +36,7 @@ func TestAvgPool2DForward(t *testing.T) {
 
 func TestAvgPool2DForwardStride(t *testing.T) {
 	// Test with stride different from kernel size
-	pool := NewAvgPool2D(2, 1, 0)
+	pool := NewAvgPool2D(1, 2, 1, 0)
 
 	// Input: 3x3 = 9 values
 	// 1 2 3
@@ -66,7 +66,7 @@ func TestAvgPool2DForwardStride(t *testing.T) {
 
 func TestAvgPool2DForwardPadding(t *testing.T) {
 	// Test with padding
-	pool := NewAvgPool2D(2, 2, 1)
+	pool := NewAvgPool2D(1, 2, 2, 1)
 
 	// Input: 3x3 = 9 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
@@ -82,7 +82,7 @@ func TestAvgPool2DForwardPadding(t *testing.T) {
 }
 
 func TestAvgPool2DBackward(t *testing.T) {
-	pool := NewAvgPool2D(2, 2, 0)
+	pool := NewAvgPool2D(1, 2, 2, 0)
 
 	// Input: 4x4 = 16 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
@@ -114,7 +114,7 @@ func TestAvgPool2DBackward(t *testing.T) {
 }
 
 func TestAvgPool2DParams(t *testing.T) {
-	pool := NewAvgPool2D(2, 2, 0)
+	pool := NewAvgPool2D(1, 2, 2, 0)
 
 	params := pool.Params()
 	if len(params) != 0 {
@@ -136,7 +136,7 @@ func TestAvgPool2DParams(t *testing.T) {
 }
 
 func TestAvgPool2DInOutSize(t *testing.T) {
-	pool := NewAvgPool2D(2, 2, 0)
+	pool := NewAvgPool2D(1, 2, 2, 0)
 
 	// 4x4 input -> 2x2 output
 	input := make([]float32, 16)
@@ -154,7 +154,7 @@ func TestAvgPool2DInOutSize(t *testing.T) {
 }
 
 func TestAvgPool2DLargeInput(t *testing.T) {
-	pool := NewAvgPool2D(2, 2, 0)
+	pool := NewAvgPool2D(1, 2, 2, 0)
 
 	// 64x64 input
 	input := make([]float32, 4096)
@@ -168,7 +168,7 @@ func TestAvgPool2DLargeInput(t *testing.T) {
 }
 
 func TestAvgPool2DBackwardLarge(t *testing.T) {
-	pool := NewAvgPool2D(2, 2, 0)
+	pool := NewAvgPool2D(1, 2, 2, 0)
 
 	input := make([]float32, 4096)
 	for i := range input {

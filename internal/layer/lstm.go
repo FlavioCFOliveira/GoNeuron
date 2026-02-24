@@ -67,7 +67,7 @@ type LSTM struct {
 	// Saved states for BPTT
 	savedCellOffsets   []int
 	savedHiddenOffsets []int
-	arena              []float32
+	arenaPtr           *[]float32
 
 	// Current time step
 	timeStep int
@@ -124,6 +124,10 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 func (l *LSTM) Build(inSize int) {
 	l.inSize = inSize
 	outSize := l.outSize
+
+	if inSize <= 0 || outSize <= 0 {
+		return
+	}
 
 	// Xavier/Glorot initialization for LSTM with 4 gates
 	inputScale := float32(math.Sqrt(2.0 / float64(inSize+4*outSize)))
@@ -305,7 +309,7 @@ func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) []fl
 	// Copy previous cell state (or zeros if first step)
 	if l.timeStep > 0 && len(l.savedCellOffsets) > 0 {
 		prevCOffset := l.savedCellOffsets[len(l.savedCellOffsets)-1]
-		copy(l.cellBuf, l.arena[prevCOffset:prevCOffset+l.outSize])
+		copy(l.cellBuf, (*l.arenaPtr)[prevCOffset:prevCOffset+l.outSize])
 	} else {
 		for i := range l.cellBuf {
 			l.cellBuf[i] = 0
@@ -325,13 +329,12 @@ func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) []fl
 storeState:
 	// === Store states for backprop ===
 	if arena != nil && offset != nil {
-		l.arena = *arena
+		l.arenaPtr = arena
 		outSize := l.outSize
 		if len(*arena) < *offset+outSize*2 {
 			newArena := make([]float32, (*offset+outSize*2)*2)
 			copy(newArena, *arena)
 			*arena = newArena
-			l.arena = *arena
 		}
 
 		l.savedCellOffsets = append(l.savedCellOffsets, *offset)
@@ -354,16 +357,19 @@ storeState:
 
 func (l *LSTM) saveState(c, h []float32) {
 	outSize := l.outSize
-	offset := len(l.arena)
-	if cap(l.arena) < offset+outSize*2 {
-		newArena := make([]float32, (offset+outSize*2)*2)
-		copy(newArena, l.arena)
-		l.arena = newArena
+	if l.arenaPtr == nil {
+		l.arenaPtr = &[]float32{}
 	}
-	l.arena = l.arena[:offset+outSize*2]
-	copy(l.arena[offset:offset+outSize], c)
+	offset := len(*l.arenaPtr)
+	if cap(*l.arenaPtr) < offset+outSize*2 {
+		newArena := make([]float32, (offset+outSize*2)*2)
+		copy(newArena, *l.arenaPtr)
+		*l.arenaPtr = newArena
+	}
+	*l.arenaPtr = (*l.arenaPtr)[:offset+outSize*2]
+	copy((*l.arenaPtr)[offset:offset+outSize], c)
 	l.savedCellOffsets = append(l.savedCellOffsets, offset)
-	copy(l.arena[offset+outSize:offset+outSize*2], h)
+	copy((*l.arenaPtr)[offset+outSize:offset+outSize*2], h)
 	l.savedHiddenOffsets = append(l.savedHiddenOffsets, offset+outSize)
 }
 
@@ -372,6 +378,28 @@ func (l *LSTM) Forward(x []float32) []float32 {
 	return l.ForwardWithArena(x, nil, nil)
 }
 
+func (l *LSTM) ForwardBatch(x []float32, batchSize int) []float32 {
+	return l.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (l *LSTM) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return l.ForwardWithArena(x, arena, offset)
+	}
+	inSize := l.inSize
+	outSize := l.outSize
+	if len(l.outputBuf) < batchSize*outSize {
+		l.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		// Note: for batching in RNNs, we usually assume independent samples
+		// unless specifically handled. We reset before each sample.
+		l.Reset()
+		out := l.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(l.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return l.outputBuf[:batchSize*outSize]
+}
 
 // Backward performs backpropagation through time for one time step.
 // grad: gradient of loss w.r.t. output (length outSize)
@@ -389,12 +417,12 @@ func (l *LSTM) Backward(grad []float32) []float32 {
 	// Get saved states from arena
 	outSize := l.outSize
 	cOffset := l.savedCellOffsets[ts]
-	c := l.arena[cOffset : cOffset+outSize]
+	c := (*l.arenaPtr)[cOffset : cOffset+outSize]
 
 	cPrev := l.cPrevBuf
 	if ts > 0 {
 		prevCOffset := l.savedCellOffsets[ts-1]
-		copy(cPrev, l.arena[prevCOffset:prevCOffset+outSize])
+		copy(cPrev, (*l.arenaPtr)[prevCOffset:prevCOffset+outSize])
 	} else {
 		for i := range cPrev {
 			cPrev[i] = 0
@@ -404,7 +432,7 @@ func (l *LSTM) Backward(grad []float32) []float32 {
 	hPrev := l.hPrevBuf
 	if ts > 0 {
 		prevHOffset := l.savedHiddenOffsets[ts-1]
-		copy(hPrev, l.arena[prevHOffset:prevHOffset+outSize])
+		copy(hPrev, (*l.arenaPtr)[prevHOffset:prevHOffset+outSize])
 	} else {
 		for i := range hPrev {
 			hPrev[i] = 0
@@ -563,6 +591,26 @@ func (l *LSTM) Backward(grad []float32) []float32 {
 
 	l.timeStep--
 	return dx
+}
+
+func (l *LSTM) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return l.Backward(grad)
+	}
+	inSize := l.inSize
+	outSize := l.outSize
+	if len(l.dxBuf) < batchSize*inSize {
+		l.dxBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := l.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(l.dxBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return l.dxBuf[:batchSize*inSize]
+}
+
+func (l *LSTM) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return l.BackwardBatch(grad, batchSize)
 }
 
 // clipGradients scales gradients if their norm exceeds maxGradientNorm.
@@ -770,6 +818,21 @@ func (l *LSTM) LightweightClone(params []float32, grads []float32) Layer {
 		device:               l.device,
 		training:             l.training,
 	}
+
+	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() && l.inSize > 0 && l.outSize > 0 {
+		newL.bufWeightsIn = md.CreateBuffer(newL.inputWeights)
+		newL.bufWeightsRec = md.CreateBuffer(newL.recurrentWeights)
+		newL.bufBiases = md.CreateBuffer(newL.biases)
+		newL.bufPreAct = md.CreateEmptyBuffer(l.outSize * 4)
+		newL.bufC = md.CreateEmptyBuffer(l.outSize)
+		newL.bufH = md.CreateEmptyBuffer(l.outSize)
+		newL.bufI = md.CreateEmptyBuffer(l.outSize)
+		newL.bufF = md.CreateEmptyBuffer(l.outSize)
+		newL.bufG = md.CreateEmptyBuffer(l.outSize)
+		newL.bufO = md.CreateEmptyBuffer(l.outSize)
+		newL.bufX = md.CreateEmptyBuffer(l.inSize)
+	}
+
 	return newL
 }
 

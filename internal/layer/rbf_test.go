@@ -11,12 +11,15 @@ func TestRBFForward(t *testing.T) {
 
 	// Manually set centers
 	// c0 = [0, 0], c1 = [1, 1]
-	r.centers[0] = 0; r.centers[1] = 0
-	r.centers[2] = 1; r.centers[3] = 1
+	r.centers[0] = 0
+	r.centers[1] = 0
+	r.centers[2] = 1
+	r.centers[3] = 1
 
 	// Set weights and biases
 	// w = [1, 1], b = [0]
-	r.weights[0] = 1; r.weights[1] = 1
+	r.weights[0] = 1
+	r.weights[1] = 1
 	r.biases[0] = 0
 
 	// Test input x = [0, 0]

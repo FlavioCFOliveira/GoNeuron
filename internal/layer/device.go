@@ -12,6 +12,17 @@ const (
 	GPU
 )
 
+func (d DeviceType) String() string {
+	switch d {
+	case CPU:
+		return "CPU"
+	case GPU:
+		return "GPU"
+	default:
+		return "Unknown"
+	}
+}
+
 // Device manages the hardware resources for neural network operations.
 type Device interface {
 	Type() DeviceType
@@ -21,7 +32,7 @@ type Device interface {
 // CPUDevice handles computations on the host CPU.
 type CPUDevice struct{}
 
-func (d *CPUDevice) Type() DeviceType { return CPU }
+func (d *CPUDevice) Type() DeviceType  { return CPU }
 func (d *CPUDevice) IsAvailable() bool { return true }
 
 // GetDefaultDevice returns the best available device for the current platform.

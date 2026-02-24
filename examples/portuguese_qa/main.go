@@ -177,23 +177,21 @@ func main() {
 	ffDim := 128
 
 	// Check if Metal is available
-	var device layer.Device = &layer.CPUDevice{}
-	metal := &layer.MetalDevice{}
-	if metal.IsAvailable() {
+	device := goneuron.GetDefaultDevice()
+	if device.Type() == layer.GPU {
 		fmt.Println("Using Metal acceleration")
-		device = metal
 	} else {
 		fmt.Println("Using CPU")
 	}
 
-	layers := []layer.Layer{
-		layer.NewEmbedding(vocabSize, dim),
-		layer.NewPositionalEncoding(seqLen, dim),
-		layer.NewTransformerBlock(dim, numHeads, seqLen, ffDim, true), // Causal
-		layer.NewSequenceUnroller(layer.NewDense(dim, vocabSize, activations.LogSoftmax{}), seqLen, true),
-	}
+	model := goneuron.NewSequential(
+		goneuron.Embedding(vocabSize, dim),
+		goneuron.PositionalEncoding(seqLen),
+		goneuron.TransformerBlock(numHeads, seqLen, ffDim, true), // Causal
+		goneuron.SequenceUnroller(goneuron.Dense(vocabSize, goneuron.LogSoftmax), seqLen, true),
+	)
 
-	model := net.New(layers, loss.NLLLoss{}, opt.NewAdam(0.001))
+	model.Compile(goneuron.Adam(0.001), goneuron.NLLLoss)
 	model.SetDevice(device)
 
 	// 5. Training
@@ -201,16 +199,7 @@ func main() {
 	fmt.Printf("Training for %d epochs with %d samples...\n", epochs, len(trainX))
 
 	start := time.Now()
-	for epoch := 0; epoch < epochs; epoch++ {
-		totalLoss := float32(0.0)
-		for i := 0; i < len(trainX); i++ {
-			l := model.Train(trainX[i], trainY[i])
-			totalLoss += l
-		}
-		if epoch%10 == 0 || epoch == epochs-1 {
-			fmt.Printf("Epoch %d, Loss: %.6f\n", epoch, totalLoss/float32(len(trainX)))
-		}
-	}
+	model.Fit(trainX, trainY, epochs, 1, goneuron.Logger(10))
 	fmt.Printf("Training completed in %v\n", time.Since(start))
 
 	// 6. QA Functionality

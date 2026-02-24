@@ -82,9 +82,7 @@ func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		}
 		saved := (*arena)[*offset : *offset+batchSize]
 		copy(saved, x)
-		// For backward compatibility with current Backward() we might still need savedIndices
-		// but we can optimize Backward later to use the arena if we want.
-		// For now, let's just make sure savedIndices is reused.
+
 		if cap(e.savedIndices) < batchSize {
 			e.savedIndices = make([]int, batchSize)
 		}
@@ -169,6 +167,21 @@ func (e *Embedding) Backward(grad []float32) []float32 {
 	return gradInput
 }
 
+func (e *Embedding) ForwardBatch(x []float32, batchSize int) []float32 {
+	return e.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (e *Embedding) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	return e.ForwardWithArena(x, arena, offset)
+}
+
+func (e *Embedding) BackwardBatch(grad []float32, batchSize int) []float32 {
+	return e.Backward(grad)
+}
+
+func (e *Embedding) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return e.BackwardBatch(grad, batchSize)
+}
 
 // Params returns layer parameters (weights).
 func (e *Embedding) Params() []float32 {
@@ -180,7 +193,7 @@ func (e *Embedding) SetParams(params []float32) {
 	if len(params) == 0 {
 		return
 	}
-	if &e.weights[0] != &params[0] {
+	if len(e.weights) > 0 && &e.weights[0] != &params[0] {
 		e.weights = params
 	}
 }
@@ -195,7 +208,7 @@ func (e *Embedding) SetGradients(gradients []float32) {
 	if len(gradients) == 0 {
 		return
 	}
-	if &e.gradWeights[0] != &gradients[0] {
+	if len(e.gradWeights) > 0 && &e.gradWeights[0] != &gradients[0] {
 		e.gradWeights = gradients
 	}
 }

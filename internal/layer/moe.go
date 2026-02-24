@@ -30,6 +30,7 @@ type MoE struct {
 	expertOutputs [][]float32 // [numExperts][outSize]
 	gateGradBuf   []float32
 	dxTotalBuf    []float32
+	gradInBuf     []float32 // for BackwardBatch
 	expertGradBuf []float32 // reused for each expert backward
 	weightsBuf    []expertWeight
 
@@ -110,6 +111,7 @@ func (m *MoE) Build(inSize int) {
 
 	m.inputBuf = make([]float32, inSize)
 	m.dxTotalBuf = make([]float32, inSize)
+	m.gradInBuf = make([]float32, inSize)
 }
 
 func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
@@ -155,7 +157,9 @@ func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 	})
 
 	for i := range m.outputBuf {
-		m.outputBuf[i] = 0
+		if i < m.outSize {
+			m.outputBuf[i] = 0
+		}
 	}
 
 	for i := 0; i < m.k; i++ {
@@ -189,13 +193,12 @@ func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 		}
 	}
 
-	return m.outputBuf
+	return m.outputBuf[:m.outSize]
 }
 
 func (m *MoE) Forward(x []float32) []float32 {
 	return m.ForwardWithArena(x, nil, nil)
 }
-
 
 func (m *MoE) Backward(grad []float32) []float32 {
 	// Reset buffers
@@ -366,6 +369,7 @@ func (m *MoE) LightweightClone(params []float32, grads []float32) Layer {
 		expertOutputs: make([][]float32, m.numExperts),
 		gateGradBuf:   make([]float32, m.numExperts),
 		dxTotalBuf:    make([]float32, m.inSize),
+		gradInBuf:     make([]float32, m.inSize),
 		expertGradBuf: make([]float32, m.outSize),
 		weightsBuf:    make([]expertWeight, m.numExperts),
 		rng:           NewRNG(42),
@@ -390,6 +394,47 @@ func (m *MoE) LightweightClone(params []float32, grads []float32) Layer {
 	return newM
 }
 
+func (m *MoE) ForwardBatch(x []float32, batchSize int) []float32 {
+	return m.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (m *MoE) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return m.ForwardWithArena(x, arena, offset)
+	}
+	inSize := m.inSize
+	outSize := m.outSize
+	if len(m.outputBuf) < batchSize*outSize {
+		m.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		m.Reset()
+		out := m.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(m.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return m.outputBuf[:batchSize*outSize]
+}
+
+func (m *MoE) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return m.Backward(grad)
+	}
+	inSize := m.inSize
+	outSize := m.outSize
+	if len(m.gradInBuf) < batchSize*inSize {
+		m.gradInBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		out := m.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(m.gradInBuf[i*inSize:(i+1)*inSize], out)
+	}
+	return m.gradInBuf[:batchSize*inSize]
+}
+
+func (m *MoE) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return m.BackwardBatch(grad, batchSize)
+}
+
 func (m *MoE) SetDevice(d Device) {
 	m.gating.SetDevice(d)
 	for _, e := range m.experts {
@@ -404,7 +449,6 @@ func (m *MoE) SetTraining(t bool) {
 		e.SetTraining(t)
 	}
 }
-
 
 func (m *MoE) InSize() int  { return m.inSize }
 func (m *MoE) OutSize() int { return m.outSize }

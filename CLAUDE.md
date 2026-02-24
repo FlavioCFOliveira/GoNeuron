@@ -32,9 +32,10 @@ internal/
 
 ### Key Implementation Patterns
 ```go
-// ForwardWithArena: Save state using offsets
+// ForwardWithArena: Save state using pointers to avoid stale slice headers after resize
 if arena != nil && offset != nil {
-    d.savedInputOffsets = append(d.savedInputOffsets, *offset)
+    d.arenaPtr = arena
+    // ... resize logic ...
     copy((*arena)[*offset:], x)
     *offset += len(x)
 }

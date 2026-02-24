@@ -82,7 +82,6 @@ func (f *Flatten) Forward(x []float32) []float32 {
 	return f.ForwardWithArena(x, nil, nil)
 }
 
-
 // Backward performs backpropagation, reshaping gradient to original shape.
 func (f *Flatten) Backward(grad []float32) []float32 {
 	// Gradient flows through unchanged - just need to return correct size
@@ -96,6 +95,22 @@ func (f *Flatten) AccumulateBackward(grad []float32) []float32 {
 }
 
 var emptyParams = make([]float32, 0)
+
+func (f *Flatten) ForwardBatch(x []float32, batchSize int) []float32 {
+	return f.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (f *Flatten) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	return f.ForwardWithArena(x, arena, offset)
+}
+
+func (f *Flatten) BackwardBatch(grad []float32, batchSize int) []float32 {
+	return grad
+}
+
+func (f *Flatten) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return grad
+}
 
 // Params returns layer parameters (empty for Flatten).
 func (f *Flatten) Params() []float32 {

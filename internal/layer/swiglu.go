@@ -143,9 +143,6 @@ func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []
 		copy((*arena)[*offset:*offset+outSize], s.upBuf)
 		s.savedUpOffsets = append(s.savedUpOffsets, *offset)
 		*offset += outSize
-	} else {
-		// Use internal buffers for gate and up
-		// We'll just use gateBuf and upBuf directly in Backward if offsets are -1
 	}
 
 	// SwiGLU(x) = Swish(gate) * up
@@ -187,11 +184,6 @@ func (s *SwiGLU) Backward(grad []float32) []float32 {
 
 	inSize := s.inSize
 	outSize := s.outSize
-
-	// SwiGLU = Swish(g) * u
-	// dSwiGLU/du = Swish(g)
-	// dSwiGLU/dg = dSwish(g)/dg * u
-	// dSwish(g)/dg = Swish(g) + sigmoid(g) * (1 - Swish(g))
 
 	dGate := make([]float32, outSize)
 	dUp := make([]float32, outSize)
@@ -337,6 +329,44 @@ func (s *SwiGLU) LightweightClone(params []float32, grads []float32) Layer {
 
 func (s *SwiGLU) AccumulateBackward(grad []float32) []float32 {
 	return s.Backward(grad)
+}
+
+func (s *SwiGLU) ForwardBatch(x []float32, batchSize int) []float32 {
+	return s.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (s *SwiGLU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return s.ForwardWithArena(x, arena, offset)
+	}
+	inSize := s.inSize
+	outSize := s.outSize
+	if len(s.outputBuf) < batchSize*outSize {
+		s.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := s.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(s.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return s.outputBuf[:batchSize*outSize]
+}
+
+func (s *SwiGLU) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return s.Backward(grad)
+	}
+	inSize := s.inSize
+	outSize := s.outSize
+	dx := make([]float32, batchSize*inSize)
+	for i := batchSize - 1; i >= 0; i-- {
+		out := s.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(dx[i*inSize:(i+1)*inSize], out)
+	}
+	return dx
+}
+
+func (s *SwiGLU) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return s.BackwardBatch(grad, batchSize)
 }
 
 func (s *SwiGLU) SetDevice(device Device) {

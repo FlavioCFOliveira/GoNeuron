@@ -166,23 +166,31 @@ func main() {
 	fmt.Printf("Loaded %d training samples and %d test samples (%dx%d images)\n", len(xTrain), len(xTest), rows, cols)
 
 	// 2. Define Architecture using High-Level API
-	c1 := goneuron.Conv2D(1, 16, 3, 1, 1, goneuron.ReLU)
-	if l, ok := c1.(*layer.Conv2D); ok {
-		l.SetInputDimensions(28, 28)
-	}
-
 	model := goneuron.NewSequential(
-		c1,
-		goneuron.MaxPool2D(16, 2, 2, 0),
-		goneuron.Conv2D(16, 32, 3, 1, 1, goneuron.ReLU),
-		goneuron.MaxPool2D(32, 2, 2, 0),
+		goneuron.Conv2D(16, 3, 1, 1, goneuron.ReLU), // Inferred inChannels=1
+		goneuron.MaxPool2D(2, 2, 0),
+		goneuron.Conv2D(32, 3, 1, 1, goneuron.ReLU),
+		goneuron.MaxPool2D(2, 2, 0),
 		goneuron.Flatten(),
-		goneuron.Dense(1568, 128, goneuron.ReLU),
+		goneuron.Dense(128, goneuron.ReLU),
 		goneuron.Dropout(0.2, 128),
-		goneuron.Dense(128, 10, goneuron.LogSoftmax),
+		goneuron.Dense(10, goneuron.LogSoftmax),
 	)
 
+	// Set input dimensions for the first layer (MNIST is 1x28x28)
+	if l, ok := model.Layers()[0].(interface{ SetInputDimensions(int, int) }); ok {
+		l.SetInputDimensions(28, 28)
+	}
+	// Initializing model with 1*28*28 input
+	model.Build(1 * 28 * 28)
+
 	// 3. Compile Model
+	device := layer.NewMetalDevice()
+	if device.IsAvailable() {
+		fmt.Println("Using Metal acceleration")
+		model.SetDevice(device)
+	}
+
 	optimizer := goneuron.Adam(0.001)
 	model.Compile(optimizer, goneuron.NLLLoss)
 

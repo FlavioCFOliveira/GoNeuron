@@ -673,8 +673,8 @@ func TestDenseParamSlicing(t *testing.T) {
 	d := NewDense(3, 2, activations.Tanh{})
 
 	params := d.Params()
-	weights := params[:6]  // 3*2 = 6
-	biases := params[6:]   // 2
+	weights := params[:6] // 3*2 = 6
+	biases := params[6:]  // 2
 
 	if len(weights) != 6 {
 		t.Errorf("weights slice length = %d, want 6", len(weights))

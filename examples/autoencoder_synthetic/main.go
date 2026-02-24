@@ -28,9 +28,9 @@ func main() {
 	// 2. Create architecture (10 -> 2 -> 10)
 	model := goneuron.NewSequential(
 		// Encoder
-		goneuron.Dense(10, 2, goneuron.ReLU),
+		goneuron.Dense(2, goneuron.ReLU),
 		// Decoder
-		goneuron.Dense(2, 10, goneuron.Sigmoid), // Using Sigmoid assuming input normalized to [0,1]
+		goneuron.Dense(10, goneuron.Sigmoid), // Using Sigmoid assuming input normalized to [0,1]
 	)
 
 	model.Compile(goneuron.Adam(0.01), goneuron.MSE)

@@ -18,8 +18,8 @@ func main() {
 
 	// 2. Create the network architecture
 	model := goneuron.NewSequential(
-		goneuron.Dense(2, 4, goneuron.Tanh),
-		goneuron.Dense(4, 1, goneuron.Sigmoid),
+		goneuron.Dense(4, goneuron.Tanh),
+		goneuron.Dense(1, goneuron.Sigmoid),
 	)
 
 	// 3. Compile the model

@@ -103,8 +103,8 @@ func main() {
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
 	model := goneuron.NewSequential(
-		goneuron.SequenceUnroller(goneuron.LSTM(1, lstmUnits), lookback, false),
-		goneuron.Dense(lstmUnits, 1, goneuron.Linear),
+		goneuron.SequenceUnroller(goneuron.LSTM(lstmUnits), lookback, false),
+		goneuron.Dense(1, goneuron.Linear),
 	)
 
 	optimizer := goneuron.Adam(0.001)

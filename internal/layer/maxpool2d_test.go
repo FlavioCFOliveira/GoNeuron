@@ -163,7 +163,7 @@ func TestMaxPool2DArgmax(t *testing.T) {
 	// Position 1 (input indices 2,3,6,7): max at index 7
 	// Position 2 (input indices 8,9,12,13): max at index 13
 	// Position 3 (input indices 10,11,14,15): max at index 15
-	expectedArgmax := []int{5, 7, 13, 15}
+	expectedArgmax := []int32{5, 7, 13, 15}
 
 	for i := 0; i < 4; i++ {
 		if argmax[i] != expectedArgmax[i] {

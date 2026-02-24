@@ -16,13 +16,7 @@ type SequenceUnroller struct {
 	training    bool
 }
 
-// SetTraining sets the training mode for the base layer.
-func (s *SequenceUnroller) SetTraining(training bool) {
-	s.training = training
-	s.base.SetTraining(training)
-}
-
-
+// NewSequenceUnroller creates a new sequence unroller layer.
 func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnroller {
 	outSize := base.OutSize()
 	if returnSeq {
@@ -38,6 +32,12 @@ func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnr
 		gradInBuf:   make([]float32, timeSteps*base.InSize()),
 		storedInput: make([][]float32, timeSteps),
 	}
+}
+
+// SetTraining sets the training mode for the base layer.
+func (s *SequenceUnroller) SetTraining(training bool) {
+	s.training = training
+	s.base.SetTraining(training)
 }
 
 func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
@@ -105,7 +105,6 @@ func (s *SequenceUnroller) Forward(x []float32) []float32 {
 	return s.ForwardWithArena(x, nil, nil)
 }
 
-
 func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 	outSize := s.base.OutSize()
 	inSize := s.base.InSize()
@@ -145,9 +144,6 @@ func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 					currentGrad[i] += grad[t*(fOutSize+bOutSize)+fOutSize+i]
 				}
 			} else if t == 0 { // In returnSeq=false, only last step (T-1) of sequence (first in time) has grad
-				// Wait, if returnSeq=false, we only returned the last step's hidden state.
-				// For Bidirectional, the last hidden state [f(T-1), b(0)].
-				// So b(0) has gradient.
 				for i := 0; i < bOutSize; i++ {
 					currentGrad[i] += grad[fOutSize+i]
 				}
@@ -182,6 +178,46 @@ func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 	return s.gradInBuf
 }
 
+func (s *SequenceUnroller) ForwardBatch(x []float32, batchSize int) []float32 {
+	return s.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (s *SequenceUnroller) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return s.ForwardWithArena(x, arena, offset)
+	}
+	inSize := s.InSize()
+	outSize := s.OutSize()
+	if len(s.outputBuf) < batchSize*outSize {
+		s.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := s.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(s.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return s.outputBuf[:batchSize*outSize]
+}
+
+func (s *SequenceUnroller) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return s.Backward(grad)
+	}
+	inSize := s.InSize()
+	outSize := s.OutSize()
+	if len(s.gradInBuf) < batchSize*inSize {
+		s.gradInBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := s.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(s.gradInBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return s.gradInBuf[:batchSize*inSize]
+}
+
+func (s *SequenceUnroller) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return s.BackwardBatch(grad, batchSize)
+}
+
 func (s *SequenceUnroller) Params() []float32             { return s.base.Params() }
 func (s *SequenceUnroller) SetParams(p []float32)        { s.base.SetParams(p) }
 func (s *SequenceUnroller) Gradients() []float32         { return s.base.Gradients() }
@@ -206,6 +242,7 @@ func (s *SequenceUnroller) LightweightClone(params []float32, grads []float32) L
 	}
 	return newS
 }
+
 func (s *SequenceUnroller) InSize() int                  { return s.timeSteps * s.base.InSize() }
 func (s *SequenceUnroller) OutSize() int {
 	if s.returnSeq {

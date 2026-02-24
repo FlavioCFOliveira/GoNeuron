@@ -23,6 +23,7 @@ type GlobalAttention struct {
 
 	// Gradients
 	gradContext []float32
+	gradInBuf   []float32
 	timeStep    int
 
 	training bool
@@ -43,6 +44,7 @@ func NewGlobalAttention(inSize int) *GlobalAttention {
 		inputHistory:  make([][]float32, 0),
 		outputBuf:     make([]float32, inSize),
 		gradContext:   make([]float32, inSize),
+		gradInBuf:     make([]float32, inSize),
 	}
 }
 
@@ -78,7 +80,6 @@ func (g *GlobalAttention) Forward(x []float32) []float32 {
 	return g.ForwardWithArena(x, nil, nil)
 }
 
-
 // ComputeContext processes the accumulated history and returns the context vector.
 func (g *GlobalAttention) ComputeContext() []float32 {
 	seqLen := len(g.inputHistory)
@@ -87,18 +88,21 @@ func (g *GlobalAttention) ComputeContext() []float32 {
 	}
 
 	// 1. Compute similarity scores: dot(input_t, contextVector)
-	scores := make([]float32, seqLen)
+	if cap(g.scores) < seqLen {
+		g.scores = make([]float32, seqLen)
+	}
+	g.scores = g.scores[:seqLen]
 	for t := 0; t < seqLen; t++ {
 		dot := float32(0.0)
 		for i := 0; i < g.inSize; i++ {
 			dot += g.inputHistory[t][i] * g.contextVector[i]
 		}
-		scores[t] = dot
+		g.scores[t] = dot
 	}
 
 	// 2. Apply Softmax to get attention weights
 	softmax := activations.Softmax{}
-	weights := softmax.ActivateBatch(scores)
+	weights := softmax.ActivateBatch(g.scores)
 	g.scores = weights
 
 	// 3. Compute weighted sum
@@ -120,7 +124,11 @@ func (g *GlobalAttention) Backward(grad []float32) []float32 {
 	// grad is dL/dOutputBuf
 	seqLen := len(g.inputHistory)
 	if seqLen == 0 {
-		return make([]float32, g.inSize)
+		if len(g.gradInBuf) < g.inSize {
+			g.gradInBuf = make([]float32, g.inSize)
+		}
+		for i := 0; i < g.inSize; i++ { g.gradInBuf[i] = 0 }
+		return g.gradInBuf[:g.inSize]
 	}
 
 	// If scores haven't been computed (Sequence hasn't finished properly), compute them
@@ -130,25 +138,30 @@ func (g *GlobalAttention) Backward(grad []float32) []float32 {
 
 	ts := g.timeStep - 1
 	if ts < 0 {
-		return make([]float32, g.inSize)
+		if len(g.gradInBuf) < g.inSize {
+			g.gradInBuf = make([]float32, g.inSize)
+		}
+		for i := 0; i < g.inSize; i++ { g.gradInBuf[i] = 0 }
+		return g.gradInBuf[:g.inSize]
 	}
 
 	// This is a complex backward pass because each timestep grad depends on all previous inputs.
 	// For simplicity in the first version, we focus on the current timestep's contribution.
-
 	// dL/dInput_t = weight_t * grad + dSoftmax contribution
 	// Here we return the gradient for the current timestep ts
 
 	w := g.scores[ts]
-	dx := make([]float32, g.inSize)
+	if len(g.gradInBuf) < g.inSize {
+		g.gradInBuf = make([]float32, g.inSize)
+	}
 	for i := 0; i < g.inSize; i++ {
-		dx[i] = w * grad[i]
+		g.gradInBuf[i] = w * grad[i]
 		// Accumulate gradient for context vector
 		g.gradContext[i] += grad[i] * w * g.inputHistory[ts][i] // Simplified
 	}
 
 	g.timeStep--
-	return dx
+	return g.gradInBuf[:g.inSize]
 }
 
 // Params returns the learnable context vector.
@@ -161,10 +174,13 @@ func (g *GlobalAttention) SetParams(params []float32) {
 	if len(params) == 0 {
 		return
 	}
-	if &g.contextVector[0] == &params[0] {
-		return
+	if &g.contextVector[0] != &params[0] {
+		if len(params) == len(g.contextVector) {
+			g.contextVector = params
+		} else {
+			copy(g.contextVector, params)
+		}
 	}
-	copy(g.contextVector, params)
 }
 
 // Gradients returns context vector gradients.
@@ -177,10 +193,13 @@ func (g *GlobalAttention) SetGradients(grads []float32) {
 	if len(grads) == 0 {
 		return
 	}
-	if &g.gradContext[0] == &grads[0] {
-		return
+	if &g.gradContext[0] != &grads[0] {
+		if len(grads) == len(g.gradContext) {
+			g.gradContext = grads
+		} else {
+			copy(g.gradContext, grads)
+		}
 	}
-	copy(g.gradContext, grads)
 }
 
 // Reset clears state.
@@ -211,9 +230,48 @@ func (g *GlobalAttention) LightweightClone(params []float32, grads []float32) La
 		inputHistory:  make([][]float32, 0),
 		outputBuf:     make([]float32, g.inSize),
 		gradContext:   grads,
+		gradInBuf:     make([]float32, g.inSize),
 		training:      g.training,
 	}
 	return newG
+}
+
+func (g *GlobalAttention) ForwardBatch(x []float32, batchSize int) []float32 {
+	return g.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (g *GlobalAttention) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return g.ForwardWithArena(x, arena, offset)
+	}
+	outSize := g.OutSize()
+	if len(g.outputBuf) < batchSize*outSize {
+		g.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		g.Reset()
+		out := g.ForwardWithArena(x[i*g.inSize:(i+1)*g.inSize], arena, offset)
+		copy(g.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return g.outputBuf[:batchSize*outSize]
+}
+
+func (g *GlobalAttention) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return g.Backward(grad)
+	}
+	if len(g.gradInBuf) < batchSize*g.inSize {
+		g.gradInBuf = make([]float32, batchSize*g.inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		out := g.Backward(grad[i*g.inSize : (i+1)*g.inSize])
+		copy(g.gradInBuf[i*g.inSize:(i+1)*g.inSize], out)
+	}
+	return g.gradInBuf[:batchSize*g.inSize]
+}
+
+func (g *GlobalAttention) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return g.BackwardBatch(grad, batchSize)
 }
 
 // SetDevice sets the computation device (no-op for GlobalAttention).

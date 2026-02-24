@@ -2,7 +2,6 @@
 package layer
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -25,9 +24,9 @@ type MaxPool2D struct {
 	outputWidth  int
 
 	// Pre-allocated buffers
-	outputBuf    []float32
-	gradInBuf    []float32
-	argmaxBuf    []int // Stores index of max value for each output position
+	outputBuf []float32
+	gradInBuf []float32
+	argmaxBuf []int32 // Stores index of max value for each output position
 
 	// Saved input for backward pass
 	savedInput []float32
@@ -50,7 +49,7 @@ func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
 		padding:    padding,
 		outputBuf:  make([]float32, 0),
 		gradInBuf:  make([]float32, 0),
-		argmaxBuf:  make([]int, 0),
+		argmaxBuf:  make([]int32, 0),
 		savedInput: make([]float32, 0),
 		device:     &CPUDevice{},
 	}
@@ -65,9 +64,6 @@ func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
 // Build initializes the layer with the given input size (channels).
 func (m *MaxPool2D) Build(inChannels int) {
 	m.inChannels = inChannels
-
-	// If we can infer height/width from total size assuming square, do it
-	// This helps for lazy inference in Sequential networks
 }
 
 // SetInputDimensions explicitly sets the input dimensions.
@@ -102,21 +98,19 @@ func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 	}
 
 	if m.inChannels <= 0 {
-		panic("MaxPool2D: inChannels not set. Use NewMaxPool2D with inChannels parameter.")
-	}
-
-	if totalInput%m.inChannels != 0 {
-		panic(fmt.Sprintf("MaxPool2D: input length %d not divisible by inChannels %d", totalInput, m.inChannels))
+		m.inChannels = 1
 	}
 
 	channelSize := totalInput / m.inChannels
 
 	// Infer input dimensions
-	m.inputHeight = int(math.Sqrt(float64(channelSize)))
-	if m.inputHeight*m.inputHeight == channelSize {
-		m.inputWidth = m.inputHeight
-	} else {
-		m.inputWidth = channelSize / m.inputHeight
+	if m.inputHeight == 0 || m.inputWidth == 0 {
+		m.inputHeight = int(math.Sqrt(float64(channelSize)))
+		if m.inputHeight*m.inputHeight == channelSize {
+			m.inputWidth = m.inputHeight
+		} else {
+			m.inputWidth = channelSize / m.inputHeight
+		}
 	}
 
 	// Compute output dimensions
@@ -131,10 +125,10 @@ func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		m.outputBuf = make([]float32, requiredOutput)
 	}
 	if cap(m.argmaxBuf) < requiredOutput {
-		m.argmaxBuf = make([]int, requiredOutput)
-	} else {
-		m.argmaxBuf = m.argmaxBuf[:requiredOutput]
+		m.argmaxBuf = make([]int32, requiredOutput)
 	}
+	m.argmaxBuf = m.argmaxBuf[:requiredOutput]
+
 	if cap(m.gradInBuf) < totalInput {
 		m.gradInBuf = make([]float32, totalInput)
 	}
@@ -156,6 +150,21 @@ func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		}
 		m.savedInput = m.savedInput[:totalInput]
 		copy(m.savedInput, input)
+	}
+
+	// GPU acceleration
+	if met, ok := m.device.(*MetalDevice); ok && met.IsAvailable() {
+		inBuf := met.CreateBuffer(input)
+		outBuf := met.CreateBuffer(m.outputBuf[:requiredOutput])
+		argBuf := met.CreateIntBuffer(m.argmaxBuf[:requiredOutput])
+		defer inBuf.Free()
+		defer outBuf.Free()
+		defer argBuf.Free()
+
+		met.MaxPool2DPersistent(inBuf, outBuf, argBuf, 1, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
+		outBuf.Read(m.outputBuf[:requiredOutput])
+		argBuf.ReadInt(m.argmaxBuf[:requiredOutput])
+		return m.outputBuf[:requiredOutput]
 	}
 
 	// Max pooling logic
@@ -196,7 +205,7 @@ func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 
 				pos := outputOffset + oh*outW + ow
 				m.outputBuf[pos] = maxVal
-				m.argmaxBuf[pos] = maxIdx
+				m.argmaxBuf[pos] = int32(maxIdx)
 			}
 		}
 	}
@@ -209,11 +218,159 @@ func (m *MaxPool2D) Forward(input []float32) []float32 {
 	return m.ForwardWithArena(input, nil, nil)
 }
 
+func (m *MaxPool2D) ForwardBatch(input []float32, batchSize int) []float32 {
+	return m.ForwardBatchWithArena(input, batchSize, nil, nil)
+}
+
+func (m *MaxPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return m.ForwardWithArena(input, arena, offset)
+	}
+
+	inSize := len(input) / batchSize
+	if m.inChannels <= 0 {
+		m.inChannels = 1
+	}
+
+	channelSize := inSize / m.inChannels
+	// Infer dimensions if needed
+	if m.inputHeight == 0 || m.inputWidth == 0 {
+		m.inputHeight = int(math.Sqrt(float64(channelSize)))
+		if m.inputHeight*m.inputHeight == channelSize {
+			m.inputWidth = m.inputHeight
+		} else {
+			m.inputWidth = channelSize / m.inputHeight
+		}
+		m.outputHeight, m.outputWidth = m.computeOutputSize(m.inputHeight, m.inputWidth)
+	}
+
+	outSize := m.outputHeight * m.outputWidth
+	requiredOutput := batchSize * m.inChannels * outSize
+
+	if len(m.outputBuf) < requiredOutput {
+		m.outputBuf = make([]float32, requiredOutput)
+	}
+	if cap(m.argmaxBuf) < requiredOutput {
+		m.argmaxBuf = make([]int32, requiredOutput)
+	}
+	m.argmaxBuf = m.argmaxBuf[:requiredOutput]
+
+	// Save input to arena if provided
+	if arena != nil && offset != nil {
+		if len(*arena) < *offset+len(input) {
+			newArena := make([]float32, (*offset+len(input))*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		saved := (*arena)[*offset : *offset+len(input)]
+		copy(saved, input)
+		m.savedInput = saved
+		*offset += len(input)
+	} else {
+		if cap(m.savedInput) < len(input) {
+			m.savedInput = make([]float32, len(input))
+		}
+		m.savedInput = m.savedInput[:len(input)]
+		copy(m.savedInput, input)
+	}
+
+	// GPU acceleration
+	if met, ok := m.device.(*MetalDevice); ok && met.IsAvailable() {
+		inBuf := met.CreateBuffer(input)
+		outBuf := met.CreateBuffer(m.outputBuf[:requiredOutput])
+		argBuf := met.CreateIntBuffer(m.argmaxBuf[:requiredOutput])
+		defer inBuf.Free()
+		defer outBuf.Free()
+		defer argBuf.Free()
+
+		met.MaxPool2DPersistent(inBuf, outBuf, argBuf, batchSize, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
+		outBuf.Read(m.outputBuf[:requiredOutput])
+		argBuf.ReadInt(m.argmaxBuf[:requiredOutput])
+		return m.outputBuf[:requiredOutput]
+	}
+
+	for i := 0; i < batchSize; i++ {
+		// Use a temporary slice for the output of each sample to avoid overwriting m.outputBuf
+		sampleInput := input[i*inSize : (i+1)*inSize]
+
+		// We need to manually perform pooling here or fix ForwardWithArena to accept an offset
+		// For simplicity and correctness, let's just use the logic here
+		outH := m.outputHeight
+		outW := m.outputWidth
+		kernelSize := m.kernelSize
+		stride := m.stride
+		padding := m.padding
+		inputHeight := m.inputHeight
+		inputWidth := m.inputWidth
+		inChannels := m.inChannels
+
+		channelStride := inputHeight * inputWidth
+		outputChannelStride := outH * outW
+		sampleOutputOffset := i * inChannels * outputChannelStride
+
+		for c := 0; c < inChannels; c++ {
+			channelOffset := c * channelStride
+			outputOffset := sampleOutputOffset + c * outputChannelStride
+
+			for oh := 0; oh < outH; oh++ {
+				for ow := 0; ow < outW; ow++ {
+					maxVal := float32(math.Inf(-1))
+					maxIdx := -1
+
+					for kh := 0; kh < kernelSize; kh++ {
+						for kw := 0; kw < kernelSize; kw++ {
+							inH := oh*stride + kh - padding
+							inW := ow*stride + kw - padding
+
+							if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
+								idx := channelOffset + inH*inputWidth + inW
+								val := sampleInput[idx]
+								if val > maxVal {
+									maxVal = val
+									maxIdx = i*inSize + idx
+								}
+							}
+						}
+					}
+
+					pos := outputOffset + oh*outW + ow
+					m.outputBuf[pos] = maxVal
+					m.argmaxBuf[pos] = int32(maxIdx)
+				}
+			}
+		}
+	}
+	return m.outputBuf[:requiredOutput]
+}
 
 // Backward performs backpropagation through the max pooling layer.
 func (m *MaxPool2D) Backward(grad []float32) []float32 {
 	totalInput := len(m.savedInput)
+	if totalInput == 0 {
+		return nil
+	}
+	if len(m.gradInBuf) < totalInput {
+		m.gradInBuf = make([]float32, totalInput)
+	}
 	gradIn := m.gradInBuf[:totalInput]
+
+	// GPU acceleration
+	if met, ok := m.device.(*MetalDevice); ok && met.IsAvailable() {
+		// Clear gradient buffer first
+		for i := range gradIn {
+			gradIn[i] = 0
+		}
+		gOutBuf := met.CreateBuffer(grad)
+		gInBuf := met.CreateBuffer(gradIn)
+		argBuf := met.CreateIntBuffer(m.argmaxBuf)
+		defer gOutBuf.Free()
+		defer gInBuf.Free()
+		defer argBuf.Free()
+
+		met.MaxPool2DBackwardPersistent(gOutBuf, gInBuf, argBuf, 1, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
+		gInBuf.Read(gradIn)
+		return gradIn
+	}
 
 	// Clear gradient buffer
 	for i := range gradIn {
@@ -242,6 +399,57 @@ func (m *MaxPool2D) Backward(grad []float32) []float32 {
 	return gradIn
 }
 
+func (m *MaxPool2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return m.Backward(grad)
+	}
+
+	inSize := m.InSize()
+	outSize := m.OutSize()
+	requiredInput := batchSize * inSize
+
+	if len(m.gradInBuf) < requiredInput {
+		m.gradInBuf = make([]float32, requiredInput)
+	}
+	gradIn := m.gradInBuf[:requiredInput]
+
+	// GPU acceleration
+	if met, ok := m.device.(*MetalDevice); ok && met.IsAvailable() {
+		// Clear gradient buffer first
+		for i := range gradIn {
+			gradIn[i] = 0
+		}
+		gOutBuf := met.CreateBuffer(grad)
+		gInBuf := met.CreateBuffer(gradIn)
+		argBuf := met.CreateIntBuffer(m.argmaxBuf)
+		defer gOutBuf.Free()
+		defer gInBuf.Free()
+		defer argBuf.Free()
+
+		met.MaxPool2DBackwardPersistent(gOutBuf, gInBuf, argBuf, batchSize, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
+		gInBuf.Read(gradIn)
+		return gradIn
+	}
+
+	for i := 0; i < batchSize; i++ {
+		sampleGrad := grad[i*outSize : (i+1)*outSize]
+		// Use absolute indexing from argmaxBuf
+		sampleArgmax := m.argmaxBuf[i*outSize : (i+1)*outSize]
+
+		for j := range sampleGrad {
+			maxIdx := sampleArgmax[j]
+			if maxIdx >= 0 {
+				gradIn[maxIdx] += sampleGrad[j]
+			}
+		}
+	}
+	return gradIn
+}
+
+func (m *MaxPool2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return m.BackwardBatch(grad, batchSize)
+}
+
 // Params returns layer parameters (empty for MaxPool2D).
 func (m *MaxPool2D) Params() []float32 {
 	return make([]float32, 0)
@@ -249,7 +457,6 @@ func (m *MaxPool2D) Params() []float32 {
 
 // SetParams sets layer parameters (no-op for MaxPool2D).
 func (m *MaxPool2D) SetParams(params []float32) {
-	// No parameters to set
 }
 
 // Gradients returns layer gradients (empty for MaxPool2D).
@@ -259,7 +466,6 @@ func (m *MaxPool2D) Gradients() []float32 {
 
 // SetGradients sets layer gradients (no-op for MaxPool2D).
 func (m *MaxPool2D) SetGradients(gradients []float32) {
-	// No parameters to set
 }
 
 // InSize returns the total input size (channels * height * width).
@@ -273,13 +479,6 @@ func (m *MaxPool2D) InSize() int {
 // OutSize returns the total output size (channels * outputHeight * outputWidth).
 func (m *MaxPool2D) OutSize() int {
 	if m.outputHeight == 0 || m.outputWidth == 0 {
-		// Try to infer from a default square input if height/width not set but channels are
-		if m.inChannels > 0 && m.inputHeight > 0 && m.inputWidth > 0 {
-			h, w := m.computeOutputSize(m.inputHeight, m.inputWidth)
-			return m.inChannels * h * w
-		}
-		// If we only have channels (common in lazy init), we can't know the spatial size yet.
-		// However, for Sequential.Summary(), we might need a better heuristic or just return 0.
 		return 0
 	}
 	return m.inChannels * m.outputHeight * m.outputWidth
@@ -295,7 +494,6 @@ func (m *MaxPool2D) Reset() {
 
 // ClearGradients zeroes out the accumulated gradients (no-op for MaxPool2D).
 func (m *MaxPool2D) ClearGradients() {
-	// No parameters to clear
 }
 
 // Clone creates a deep copy of the max pooling layer.
@@ -321,7 +519,7 @@ func (m *MaxPool2D) LightweightClone(params []float32, grads []float32) Layer {
 		outputWidth:  m.outputWidth,
 		outputBuf:    make([]float32, 0),
 		gradInBuf:    make([]float32, 0),
-		argmaxBuf:    make([]int, 0),
+		argmaxBuf:    make([]int32, 0),
 		savedInput:   make([]float32, 0),
 		training:     m.training,
 		device:       m.device,
@@ -345,7 +543,7 @@ func (m *MaxPool2D) GetPadding() int {
 }
 
 // GetArgmax returns the argmax indices buffer (for testing/verification).
-func (m *MaxPool2D) GetArgmax() []int {
+func (m *MaxPool2D) GetArgmax() []int32 {
 	return m.argmaxBuf
 }
 
@@ -358,7 +556,6 @@ func (m *MaxPool2D) GetOutputDimensions() (int, int) {
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
-// For MaxPool2D, gradients are already accumulated in Backward, so this just calls Backward.
 func (m *MaxPool2D) AccumulateBackward(grad []float32) []float32 {
 	return m.Backward(grad)
 }

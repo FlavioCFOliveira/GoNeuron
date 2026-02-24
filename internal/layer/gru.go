@@ -98,6 +98,10 @@ func (g *GRU) Build(inSize int) {
 	g.inSize = inSize
 	outSize := g.outSize
 
+	if inSize <= 0 || outSize <= 0 {
+		return
+	}
+
 	// Xavier/Glorot initialization
 	scale := float32(math.Sqrt(2.0 / (float64(inSize) + float64(outSize))))
 
@@ -287,8 +291,46 @@ func (g *GRU) Forward(x []float32) []float32 {
 	return g.ForwardWithArena(x, nil, nil)
 }
 
+func (g *GRU) ForwardBatch(x []float32, batchSize int) []float32 {
+	return g.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
 
-// Backward performs backpropagation through time for one time step.
+func (g *GRU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return g.ForwardWithArena(x, arena, offset)
+	}
+	inSize := g.inSize
+	outSize := g.outSize
+	if len(g.outputBuf) < batchSize*outSize {
+		g.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		g.Reset()
+		out := g.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(g.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return g.outputBuf[:batchSize*outSize]
+}
+
+func (g *GRU) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return g.Backward(grad)
+	}
+	inSize := g.inSize
+	outSize := g.outSize
+	dx := make([]float32, batchSize*inSize)
+	for i := batchSize - 1; i >= 0; i-- {
+		out := g.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(dx[i*inSize:(i+1)*inSize], out)
+	}
+	return dx
+}
+
+func (g *GRU) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return g.BackwardBatch(grad, batchSize)
+}
+
+// Params returns all GRU parameters flattened.
 // grad: gradient of loss w.r.t. output (length outSize)
 // Returns: gradient of loss w.r.t. input (length inSize)
 func (g *GRU) Backward(grad []float32) []float32 {

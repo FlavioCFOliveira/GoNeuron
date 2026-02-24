@@ -265,6 +265,44 @@ func (b *Bidirectional) LightweightClone(params []float32, grads []float32) Laye
 	return newB
 }
 
+func (b *Bidirectional) ForwardBatch(x []float32, batchSize int) []float32 {
+	return b.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (b *Bidirectional) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return b.ForwardWithArena(x, arena, offset)
+	}
+	inSize := b.InSize()
+	outSize := b.OutSize()
+	if len(b.outputBuf) < batchSize*outSize {
+		b.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := b.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(b.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return b.outputBuf[:batchSize*outSize]
+}
+
+func (b *Bidirectional) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return b.Backward(grad)
+	}
+	inSize := b.InSize()
+	outSize := b.OutSize()
+	dx := make([]float32, batchSize*inSize)
+	for i := batchSize - 1; i >= 0; i-- {
+		out := b.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(dx[i*inSize:(i+1)*inSize], out)
+	}
+	return dx
+}
+
+func (b *Bidirectional) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return b.BackwardBatch(grad, batchSize)
+}
+
 // InSize returns input size.
 func (b *Bidirectional) InSize() int {
 	return b.forward.InSize()

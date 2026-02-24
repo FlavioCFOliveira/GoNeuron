@@ -1,9 +1,6 @@
 // Package layer provides neural network layer implementations.
 package layer
 
-import (
-)
-
 // Dropout implements dropout regularization.
 // During training, randomly sets inputs to 0 with probability p.
 // During inference, passes inputs through unchanged.
@@ -27,6 +24,10 @@ type Dropout struct {
 	gradInBuf  []float32 // Gradient w.r.t. input
 	gradParams []float32 // No learnable parameters, just for interface
 
+	// Saved state for backward pass
+	savedMaskOffsets []int
+	arenaPtr         *[]float32
+
 	// RNG for dropout masks
 	rng *RNG
 
@@ -38,17 +39,18 @@ type Dropout struct {
 // A higher p means more aggressive dropout.
 func NewDropout(p float32, inSize int) *Dropout {
 	return &Dropout{
-		p:         p,
-		training:  true,
-		inSize:    inSize,
-		outSize:   inSize,
-		inputBuf:  make([]float32, inSize),
-		outputBuf: make([]float32, inSize),
-		maskBuf:   make([]float32, inSize),
-		gradInBuf: make([]float32, inSize),
-		gradParams: make([]float32, 0), // No parameters
-		rng:       NewRNG(42),
-		device:    &CPUDevice{},
+		p:                p,
+		training:         true,
+		inSize:           inSize,
+		outSize:          inSize,
+		inputBuf:         make([]float32, inSize),
+		outputBuf:        make([]float32, inSize),
+		maskBuf:          make([]float32, inSize),
+		gradInBuf:        make([]float32, inSize),
+		gradParams:       make([]float32, 0),
+		savedMaskOffsets: make([]int, 0, 16),
+		rng:              NewRNG(42),
+		device:           &CPUDevice{},
 	}
 }
 
@@ -58,8 +60,6 @@ func (d *Dropout) SetDevice(device Device) {
 }
 
 // SetTraining sets whether the layer should be in training or inference mode.
-// In training mode, dropout is applied.
-// In inference mode, inputs pass through unchanged.
 func (d *Dropout) SetTraining(training bool) {
 	d.training = training
 }
@@ -70,43 +70,68 @@ func (d *Dropout) IsTraining() bool {
 }
 
 func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
-	copy(d.inputBuf, x)
-
-	if d.training {
-		// Generate dropout mask
-		keepProb := 1.0 - d.p
-		scale := 1.0 / keepProb
-
-		var mask []float32
-		if arena != nil && offset != nil {
-			if len(*arena) < *offset+d.inSize {
-				newArena := make([]float32, (*offset+d.inSize)*2)
-				copy(newArena, *arena)
-				*arena = newArena
-			}
-			mask = (*arena)[*offset : *offset+d.inSize]
-			d.maskBuf = mask // Update reference for Backward
-			*offset += d.inSize
-		} else {
-			mask = d.maskBuf
+	if !d.training {
+		if len(d.outputBuf) < len(x) {
+			d.outputBuf = make([]float32, len(x))
 		}
-
-		for i := 0; i < d.inSize; i++ {
-			r := d.rng.RandFloat()
-			if r < d.p {
-				mask[i] = 0
-				d.outputBuf[i] = 0
-			} else {
-				mask[i] = 1
-				d.outputBuf[i] = d.inputBuf[i] * scale
-			}
-		}
-	} else {
-		// Inference mode: pass through unchanged
 		copy(d.outputBuf, x)
+		return d.outputBuf[:len(x)]
 	}
 
-	return d.outputBuf
+	inSize := len(x)
+	if len(d.outputBuf) < inSize {
+		d.outputBuf = make([]float32, inSize)
+	}
+
+	var mask []float32
+	if arena != nil && offset != nil {
+		d.arenaPtr = arena
+		if len(*arena) < *offset+inSize {
+			newArena := make([]float32, (*offset+inSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		mask = (*arena)[*offset : *offset+inSize]
+		d.savedMaskOffsets = append(d.savedMaskOffsets, *offset)
+		*offset += inSize
+	} else {
+		if cap(d.maskBuf) < inSize {
+			d.maskBuf = make([]float32, inSize)
+		}
+		mask = d.maskBuf[:inSize]
+		d.savedMaskOffsets = append(d.savedMaskOffsets[:0], 0)
+		d.arenaPtr = &d.maskBuf
+	}
+
+	// GPU acceleration
+	if m, ok := d.device.(*MetalDevice); ok && m.IsAvailable() {
+		inBuf := m.CreateBuffer(x)
+		outBuf := m.CreateBuffer(d.outputBuf[:inSize])
+		mBuf := m.CreateBuffer(mask)
+		defer inBuf.Free()
+		defer outBuf.Free()
+		defer mBuf.Free()
+
+		m.DropoutPersistent(inBuf, outBuf, mBuf, inSize, d.p, true, d.rng.RandUint64())
+		outBuf.Read(d.outputBuf[:inSize])
+		mBuf.Read(mask)
+		return d.outputBuf[:inSize]
+	}
+
+	keepProb := 1.0 - d.p
+	scale := 1.0 / keepProb
+
+	for i := 0; i < inSize; i++ {
+		if d.rng.RandFloat() < d.p {
+			mask[i] = 0
+			d.outputBuf[i] = 0
+		} else {
+			mask[i] = 1
+			d.outputBuf[i] = x[i] * scale
+		}
+	}
+
+	return d.outputBuf[:inSize]
 }
 
 // Forward performs a forward pass through the dropout layer.
@@ -114,43 +139,214 @@ func (d *Dropout) Forward(x []float32) []float32 {
 	return d.ForwardWithArena(x, nil, nil)
 }
 
+func (d *Dropout) ForwardBatch(x []float32, batchSize int) []float32 {
+	return d.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return d.ForwardWithArena(x, arena, offset)
+	}
+
+	inSize := len(x) / batchSize
+	requiredSize := batchSize * inSize
+	if len(d.outputBuf) < requiredSize {
+		d.outputBuf = make([]float32, requiredSize)
+	}
+
+	if !d.training {
+		copy(d.outputBuf[:requiredSize], x)
+		return d.outputBuf[:requiredSize]
+	}
+
+	var mask []float32
+	if arena != nil && offset != nil {
+		d.arenaPtr = arena
+		if len(*arena) < *offset+requiredSize {
+			newArena := make([]float32, (*offset+requiredSize)*2)
+			copy(newArena, *arena)
+			*arena = newArena
+		}
+		mask = (*arena)[*offset : *offset+requiredSize]
+		d.savedMaskOffsets = d.savedMaskOffsets[:0]
+		for i := 0; i < batchSize; i++ {
+			d.savedMaskOffsets = append(d.savedMaskOffsets, *offset+i*inSize)
+		}
+		*offset += requiredSize
+	} else {
+		if cap(d.maskBuf) < requiredSize {
+			d.maskBuf = make([]float32, requiredSize)
+		}
+		mask = d.maskBuf[:requiredSize]
+		d.arenaPtr = &d.maskBuf
+		d.savedMaskOffsets = d.savedMaskOffsets[:0]
+		for i := 0; i < batchSize; i++ {
+			d.savedMaskOffsets = append(d.savedMaskOffsets, i*inSize)
+		}
+	}
+
+	// GPU acceleration
+	if m, ok := d.device.(*MetalDevice); ok && m.IsAvailable() {
+		inBuf := m.CreateBuffer(x)
+		outBuf := m.CreateBuffer(d.outputBuf[:requiredSize])
+		mBuf := m.CreateBuffer(mask)
+		defer inBuf.Free()
+		defer outBuf.Free()
+		defer mBuf.Free()
+
+		m.DropoutPersistent(inBuf, outBuf, mBuf, requiredSize, d.p, true, d.rng.RandUint64())
+		outBuf.Read(d.outputBuf[:requiredSize])
+		mBuf.Read(mask)
+		return d.outputBuf[:requiredSize]
+	}
+
+	keepProb := 1.0 - d.p
+	scale := 1.0 / keepProb
+
+	for i := 0; i < requiredSize; i++ {
+		if d.rng.RandFloat() < d.p {
+			mask[i] = 0
+			d.outputBuf[i] = 0
+		} else {
+			mask[i] = 1
+			d.outputBuf[i] = x[i] * scale
+		}
+	}
+
+	return d.outputBuf[:requiredSize]
+}
 
 // Backward performs backpropagation through the dropout layer.
 func (d *Dropout) Backward(grad []float32) []float32 {
-	if d.training {
-		// Gradient flows through where mask was 1, scaled by 1/keepProb
-		keepProb := 1.0 - d.p
-		scale := 1.0 / keepProb
-
-		for i := 0; i < d.inSize; i++ {
-			if d.maskBuf[i] > 0 {
-				d.gradInBuf[i] = grad[i] * scale
-			} else {
-				d.gradInBuf[i] = 0
-			}
+	if !d.training {
+		if len(d.gradInBuf) < len(grad) {
+			d.gradInBuf = make([]float32, len(grad))
 		}
-	} else {
-		// No dropout in inference, gradient passes through unchanged
 		copy(d.gradInBuf, grad)
+		return d.gradInBuf[:len(grad)]
 	}
 
-	return d.gradInBuf
+	numSaved := len(d.savedMaskOffsets)
+	if numSaved == 0 {
+		return nil
+	}
+
+	ts := numSaved - 1
+	offset := d.savedMaskOffsets[ts]
+	inSize := len(grad)
+	mask := (*d.arenaPtr)[offset : offset+inSize]
+
+	if len(d.gradInBuf) < inSize {
+		d.gradInBuf = make([]float32, inSize)
+	}
+
+	// GPU acceleration
+	if m, ok := d.device.(*MetalDevice); ok && m.IsAvailable() {
+		gOutBuf := m.CreateBuffer(grad)
+		gInBuf := m.CreateBuffer(d.gradInBuf[:inSize])
+		mBuf := m.CreateBuffer(mask)
+		defer gOutBuf.Free()
+		defer gInBuf.Free()
+		defer mBuf.Free()
+
+		m.DropoutBackwardPersistent(gOutBuf, gInBuf, mBuf, inSize, d.p)
+		gInBuf.Read(d.gradInBuf[:inSize])
+
+		d.savedMaskOffsets = d.savedMaskOffsets[:ts]
+		return d.gradInBuf[:inSize]
+	}
+
+	keepProb := 1.0 - d.p
+	scale := 1.0 / keepProb
+
+	for i := 0; i < inSize; i++ {
+		if mask[i] > 0 {
+			d.gradInBuf[i] = grad[i] * scale
+		} else {
+			d.gradInBuf[i] = 0
+		}
+	}
+
+	d.savedMaskOffsets = d.savedMaskOffsets[:ts]
+	return d.gradInBuf[:inSize]
 }
 
-// AccumulateBackward performs backpropagation and accumulates gradients.
-// For Dropout, we just apply the mask and return the input gradient.
+func (d *Dropout) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return d.Backward(grad)
+	}
+
+	inSize := len(grad) / batchSize
+	requiredSize := batchSize * inSize
+	if len(d.gradInBuf) < requiredSize {
+		d.gradInBuf = make([]float32, requiredSize)
+	}
+
+	if !d.training {
+		copy(d.gradInBuf[:requiredSize], grad)
+		return d.gradInBuf[:requiredSize]
+	}
+
+	numSaved := len(d.savedMaskOffsets)
+	if numSaved < batchSize {
+		// Fallback to sequential if not enough masks
+		for i := batchSize - 1; i >= 0; i-- {
+			dx := d.Backward(grad[i*inSize : (i+1)*inSize])
+			copy(d.gradInBuf[i*inSize:(i+1)*inSize], dx)
+		}
+		return d.gradInBuf[:requiredSize]
+	}
+
+	ts := numSaved - batchSize
+	offset := d.savedMaskOffsets[ts]
+	mask := (*d.arenaPtr)[offset : offset+requiredSize]
+
+	// GPU acceleration
+	if m, ok := d.device.(*MetalDevice); ok && m.IsAvailable() {
+		gOutBuf := m.CreateBuffer(grad)
+		gInBuf := m.CreateBuffer(d.gradInBuf[:requiredSize])
+		mBuf := m.CreateBuffer(mask)
+		defer gOutBuf.Free()
+		defer gInBuf.Free()
+		defer mBuf.Free()
+
+		m.DropoutBackwardPersistent(gOutBuf, gInBuf, mBuf, requiredSize, d.p)
+		gInBuf.Read(d.gradInBuf[:requiredSize])
+
+		d.savedMaskOffsets = d.savedMaskOffsets[:ts]
+		return d.gradInBuf[:requiredSize]
+	}
+
+	keepProb := 1.0 - d.p
+	scale := 1.0 / keepProb
+
+	for i := 0; i < requiredSize; i++ {
+		if mask[i] > 0 {
+			d.gradInBuf[i] = grad[i] * scale
+		} else {
+			d.gradInBuf[i] = 0
+		}
+	}
+
+	d.savedMaskOffsets = d.savedMaskOffsets[:ts]
+	return d.gradInBuf[:requiredSize]
+}
+
+func (d *Dropout) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	return d.BackwardBatch(grad, batchSize)
+}
+
 func (d *Dropout) AccumulateBackward(grad []float32) []float32 {
 	return d.Backward(grad)
 }
 
-// Params returns layer parameters (empty for Dropout - no learnable params).
+// Params returns layer parameters (empty for Dropout).
 func (d *Dropout) Params() []float32 {
 	return d.gradParams
 }
 
 // SetParams sets layer parameters (no-op for Dropout).
 func (d *Dropout) SetParams(params []float32) {
-	// No parameters to set
 }
 
 // Gradients returns layer gradients (empty for Dropout).
@@ -160,7 +356,6 @@ func (d *Dropout) Gradients() []float32 {
 
 // SetGradients sets layer gradients (no-op for Dropout).
 func (d *Dropout) SetGradients(gradients []float32) {
-	// No parameters to set
 }
 
 // InSize returns the input size of the layer.
@@ -173,14 +368,13 @@ func (d *Dropout) OutSize() int {
 	return d.outSize
 }
 
-// Reset resets the dropout layer (clears RNG state for reproducibility).
+// Reset resets the dropout layer.
 func (d *Dropout) Reset() {
 	d.rng = NewRNG(42)
 }
 
 // ClearGradients zeroes out the accumulated gradients (no-op for Dropout).
 func (d *Dropout) ClearGradients() {
-	// No parameters to clear
 }
 
 // Clone creates a deep copy of the dropout layer.
@@ -193,17 +387,18 @@ func (d *Dropout) Clone() Layer {
 
 func (d *Dropout) LightweightClone(params []float32, grads []float32) Layer {
 	newD := &Dropout{
-		p:          d.p,
-		training:   d.training,
-		inSize:     d.inSize,
-		outSize:    d.outSize,
-		inputBuf:   make([]float32, d.inSize),
-		outputBuf:  make([]float32, d.inSize),
-		maskBuf:    make([]float32, d.inSize),
-		gradInBuf:  make([]float32, d.inSize),
-		gradParams: make([]float32, 0),
-		rng:        NewRNG(42),
-		device:     d.device,
+		p:                d.p,
+		training:         d.training,
+		inSize:           d.inSize,
+		outSize:          d.outSize,
+		inputBuf:         make([]float32, d.inSize),
+		outputBuf:        make([]float32, d.inSize),
+		maskBuf:          make([]float32, d.inSize),
+		gradInBuf:        make([]float32, d.inSize),
+		gradParams:       make([]float32, 0),
+		savedMaskOffsets: make([]int, 0, 128),
+		rng:              NewRNG(42),
+		device:           d.device,
 	}
 	return newD
 }

@@ -26,7 +26,7 @@ func main() {
 
 	// 3. Create a model
 	model := goneuron.NewSequential(
-		goneuron.Dense(8, goneuron.Tanh, 2),
+		goneuron.Dense(8, goneuron.Tanh),
 		goneuron.Dense(1, goneuron.Sigmoid),
 	)
 

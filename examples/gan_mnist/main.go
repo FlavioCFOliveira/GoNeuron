@@ -136,25 +136,27 @@ func main() {
 
 	// 2. Define Generator using High-Level API
 	gen := goneuron.NewSequential(
-		goneuron.Dense(noiseSize, 256, goneuron.ReLU),
-		goneuron.Dense(256, 512, goneuron.ReLU),
-		goneuron.Dense(512, 1024, goneuron.ReLU),
-		goneuron.Dense(1024, imgSize, goneuron.Tanh),
+		goneuron.Dense(256, goneuron.ReLU),
+		goneuron.Dense(512, goneuron.ReLU),
+		goneuron.Dense(1024, goneuron.ReLU),
+		goneuron.Dense(imgSize, goneuron.Tanh),
 	)
 	gen.Compile(goneuron.Adam(0.0002), goneuron.MSE) // Loss not used directly for G
 	gen.SetDevice(device)
+	gen.Build(noiseSize)
 
 	// 3. Define Discriminator using High-Level API
 	disc := goneuron.NewSequential(
-		goneuron.Dense(imgSize, 1024, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(1024, goneuron.LeakyReLU(0.2)),
 		goneuron.Dropout(0.3, 1024),
-		goneuron.Dense(1024, 512, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(512, goneuron.LeakyReLU(0.2)),
 		goneuron.Dropout(0.3, 512),
-		goneuron.Dense(512, 256, goneuron.LeakyReLU(0.2)),
-		goneuron.Dense(256, 1, goneuron.Sigmoid),
+		goneuron.Dense(256, goneuron.LeakyReLU(0.2)),
+		goneuron.Dense(1, goneuron.Sigmoid),
 	)
 	disc.Compile(goneuron.Adam(0.0002), goneuron.BCELoss)
 	disc.SetDevice(device)
+	disc.Build(imgSize)
 
 	// 4. Training loop
 	epochs := 100
