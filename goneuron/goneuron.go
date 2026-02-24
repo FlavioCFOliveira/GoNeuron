@@ -44,20 +44,68 @@ func ELU(alpha float32) activations.Activation {
 }
 
 // Layers
-func Dense(out int, act activations.Activation, in ...int) Layer {
-	inSize := -1
-	if len(in) > 0 {
-		inSize = in[0]
+
+// Dense creates a fully connected layer.
+// Supports:
+// - Dense(out, act) -> Lazy inference of input size
+// - Dense(in, out, act) -> Explicit input size
+// - Dense(out, act, in) -> Explicit input size (alternative order used in some examples)
+func Dense(args ...interface{}) Layer {
+	if len(args) == 2 {
+		out := args[0].(int)
+		act := args[1].(activations.Activation)
+		return layer.NewDense(-1, out, act)
 	}
-	return layer.NewDense(inSize, out, act)
+	if len(args) == 3 {
+		// Check if 2nd arg is int (in, out, act) or activation (out, act, in)
+		if out, ok := args[1].(int); ok {
+			in := args[0].(int)
+			act := args[2].(activations.Activation)
+			return layer.NewDense(in, out, act)
+		} else {
+			out := args[0].(int)
+			act := args[1].(activations.Activation)
+			in := args[2].(int)
+			return layer.NewDense(in, out, act)
+		}
+	}
+	panic("Dense expects (out, act) or (in, out, act)")
 }
 
-func Conv2D(outChannels, kernelSize, stride, padding int, act activations.Activation, in ...int) Layer {
-	inChannels := -1
-	if len(in) > 0 {
-		inChannels = in[0]
+// Conv2D creates a 2D convolutional layer.
+// Supports:
+// - Conv2D(outC, k, s, p, act) -> Lazy inference of inChannels
+// - Conv2D(inC, outC, k, s, p, act) -> Explicit inChannels
+// - Conv2D(outC, k, s, p, act, inC) -> Explicit inChannels (alternative order)
+func Conv2D(args ...interface{}) Layer {
+	if len(args) == 5 {
+		outC := args[0].(int)
+		k := args[1].(int)
+		s := args[2].(int)
+		p := args[3].(int)
+		act := args[4].(activations.Activation)
+		return layer.NewConv2D(-1, outC, k, s, p, act)
 	}
-	return layer.NewConv2D(inChannels, outChannels, kernelSize, stride, padding, act)
+	if len(args) == 6 {
+		// Check if 6th arg is activation (inC, outC, k, s, p, act) or int (outC, k, s, p, act, inC)
+		if act, ok := args[5].(activations.Activation); ok {
+			inC := args[0].(int)
+			outC := args[1].(int)
+			k := args[2].(int)
+			s := args[3].(int)
+			p := args[4].(int)
+			return layer.NewConv2D(inC, outC, k, s, p, act)
+		} else {
+			outC := args[0].(int)
+			k := args[1].(int)
+			s := args[2].(int)
+			p := args[3].(int)
+			act := args[4].(activations.Activation)
+			inC := args[5].(int)
+			return layer.NewConv2D(inC, outC, k, s, p, act)
+		}
+	}
+	panic("Conv2D expects (outC, k, s, p, act) or (inC, outC, k, s, p, act)")
 }
 
 func LSTM(out int, in ...int) Layer {
@@ -76,8 +124,12 @@ func GRU(out int, in ...int) Layer {
 	return layer.NewGRU(inSize, out)
 }
 
-func Dropout(prob float32, in int) Layer {
-	return layer.NewDropout(prob, in)
+func Dropout(prob float32, in ...int) Layer {
+	inSize := -1
+	if len(in) > 0 {
+		inSize = in[0]
+	}
+	return layer.NewDropout(prob, inSize)
 }
 
 func BatchNorm2D(inChannels ...int) Layer {
@@ -120,6 +172,14 @@ func MaxPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
 	return layer.NewMaxPool2D(in, kernelSize, stride, padding)
 }
 
+func AvgPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
+	in := -1
+	if len(inChannels) > 0 {
+		in = inChannels[0]
+	}
+	return layer.NewAvgPool2D(in, kernelSize, stride, padding)
+}
+
 func Flatten(inSize ...int) Layer {
 	f := layer.NewFlatten()
 	if len(inSize) > 0 {
@@ -140,12 +200,27 @@ func RBF(in, numCenters, out int, gamma float32) Layer {
 	return layer.NewRBF(in, numCenters, out, gamma)
 }
 
-func TransformerBlock(numHeads, seqLen, ffDim int, causal bool, dim ...int) Layer {
-	inDim := -1
-	if len(dim) > 0 {
-		inDim = dim[0]
+// TransformerBlock creates a Transformer block.
+// Supports:
+// - TransformerBlock(numHeads, seqLen, ffDim, causal) -> Lazy inference of dim
+// - TransformerBlock(dim, numHeads, seqLen, ffDim, causal) -> Explicit dim
+func TransformerBlock(args ...interface{}) Layer {
+	if len(args) == 4 {
+		numHeads := args[0].(int)
+		seqLen := args[1].(int)
+		ffDim := args[2].(int)
+		causal := args[3].(bool)
+		return layer.NewTransformerBlock(-1, numHeads, seqLen, ffDim, causal)
 	}
-	return layer.NewTransformerBlock(inDim, numHeads, seqLen, ffDim, causal)
+	if len(args) == 5 {
+		dim := args[0].(int)
+		numHeads := args[1].(int)
+		seqLen := args[2].(int)
+		ffDim := args[3].(int)
+		causal := args[4].(bool)
+		return layer.NewTransformerBlock(dim, numHeads, seqLen, ffDim, causal)
+	}
+	panic("TransformerBlock expects 4 or 5 arguments")
 }
 
 func TransformerBlockExt(numHeads, seqLen, ffDim int, causal bool, actType layer.ActivationType, normType layer.NormType, useRoPE bool, dim ...int) Layer {
@@ -160,6 +235,7 @@ func TransformerBlockExt(numHeads, seqLen, ffDim int, causal bool, actType layer
 const (
 	ActReLU   = layer.ActReLU
 	ActSwiGLU = layer.ActSwiGLU
+	ActGELU   = layer.ActGELU
 	NormLN    = layer.NormLN
 	NormRMS   = layer.NormRMS
 )
@@ -207,6 +283,10 @@ func MoE(outSize, numExperts, k int, in ...int) Layer {
 // Optimizers
 func Adam(lr float32) Optimizer {
 	return opt.NewAdam(lr)
+}
+
+func SGD(lr float32) Optimizer {
+	return &opt.SGD{LearningRate: lr}
 }
 
 func ReduceLROnPlateau(optimizer Optimizer, factor float32, patience int, threshold, minLR float32) *opt.ReduceLROnPlateau {

@@ -22,6 +22,12 @@ func (r *RNG) RandFloat() float32 {
 	return float32(r.seed>>33) / float32(1<<31)
 }
 
+// RandUint64 returns a random uint64.
+func (r *RNG) RandUint64() uint64 {
+	r.seed = r.seed*6364136223846793005 + 1
+	return r.seed
+}
+
 // Layer is a neural network layer.
 type Layer interface {
 	Forward(x []float32) []float32
@@ -52,6 +58,11 @@ type Layer interface {
 
 	// Training state
 	SetTraining(bool)
+
+	// Batch methods
+	ForwardBatch(x []float32, batchSize int) []float32
+	BackwardBatch(grad []float32, batchSize int) []float32
+	AccumulateBackwardBatch(grad []float32, batchSize int) []float32
 
 	// LightweightClone creates a new layer that shares the same parameters and gradients
 	// but has its own internal reusable buffers.
@@ -91,6 +102,8 @@ func getActivationType(act activations.Activation) int {
 		return MetalActivationTanh
 	case activations.ReLU, *activations.ReLU:
 		return MetalActivationReLU
+	case activations.GELU, *activations.GELU:
+		return MetalActivationGELU
 	default:
 		return MetalActivationNone
 	}
@@ -121,13 +134,17 @@ type Dense struct {
 	savedInputOffsets  []int
 	savedPreActOffsets []int
 	savedOutput        []float32
-	arena              []float32
+	arenaPtr           *[]float32
 
 	// Metal persistent buffers
 	bufWeights *MetalBuffer
 	bufBiases  *MetalBuffer
 	bufIn      *MetalBuffer
 	bufOut     *MetalBuffer
+	bufGradW   *MetalBuffer
+	bufGradB   *MetalBuffer
+	bufGradIn  *MetalBuffer
+	bufDZ      *MetalBuffer
 }
 
 // NewDense creates a new dense layer with pre-allocated buffers.
@@ -146,7 +163,7 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 		savedPreActOffsets: make([]int, 0, 1),
 	}
 
-	if in != -1 {
+	if in != -1 && out != -1 {
 		d.Build(in)
 	}
 
@@ -155,6 +172,10 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 
 // Build initializes the layer with the given input size.
 func (d *Dense) Build(in int) {
+	// Robustness for deferred initialization
+	if in <= 0 || d.outSize <= 0 {
+		return
+	}
 	d.inSize = in
 	out := d.outSize
 
@@ -186,6 +207,10 @@ func (d *Dense) Build(in int) {
 		d.bufBiases = metal.CreateBuffer(d.biases)
 		d.bufIn = metal.CreateEmptyBuffer(in)
 		d.bufOut = metal.CreateEmptyBuffer(out)
+		d.bufGradW = metal.CreateEmptyBuffer(out * in)
+		d.bufGradB = metal.CreateEmptyBuffer(out)
+		d.bufGradIn = metal.CreateEmptyBuffer(in)
+		d.bufDZ = metal.CreateEmptyBuffer(out)
 	}
 }
 
@@ -194,14 +219,13 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []f
 
 	// Save input to arena
 	if arena != nil && offset != nil {
-		d.arena = *arena
+		d.arenaPtr = arena
 		inSize := len(x)
 		if len(*arena) < *offset+inSize {
 			// Grow arena if needed
 			newArena := make([]float32, (*offset+inSize)*2)
 			copy(newArena, *arena)
 			*arena = newArena
-			d.arena = *arena
 		}
 		saved := (*arena)[*offset : *offset+inSize]
 		copy(saved, x)
@@ -251,7 +275,6 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []f
 			newArena := make([]float32, (*offset+outSize)*2)
 			copy(newArena, *arena)
 			*arena = newArena
-			d.arena = *arena
 		}
 		saved := (*arena)[*offset : *offset+outSize]
 		copy(saved, preAct)
@@ -284,6 +307,26 @@ func (d *Dense) Forward(x []float32) []float32 {
 	return d.ForwardWithArena(x, nil, nil)
 }
 
+func (d *Dense) ForwardBatch(x []float32, batchSize int) []float32 {
+	return d.ForwardBatchWithArena(x, batchSize, nil, nil)
+}
+
+func (d *Dense) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+	if batchSize <= 1 {
+		return d.ForwardWithArena(x, arena, offset)
+	}
+	inSize := d.inSize
+	outSize := d.outSize
+	if len(d.outputBuf) < batchSize*outSize {
+		d.outputBuf = make([]float32, batchSize*outSize)
+	}
+	for i := 0; i < batchSize; i++ {
+		out := d.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		copy(d.outputBuf[i*outSize:(i+1)*outSize], out)
+	}
+	return d.outputBuf[:batchSize*outSize]
+}
+
 func (d *Dense) Backward(grad []float32) []float32 {
 	outSize := d.outSize
 	inSize := d.inSize
@@ -297,28 +340,57 @@ func (d *Dense) Backward(grad []float32) []float32 {
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
 		output := d.savedOutput[:outSize]
 		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
-			for k := 0; k < outSize; k++ {
-				sum := float32(0.0)
-				outK := output[k]
-				for i := 0; i < outSize; i++ {
-					delta := float32(0.0)
-					if i == k { delta = 1.0 }
-					sum += grad[i] * output[i] * (delta - outK)
+			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+				d.bufOut.Update(grad)
+				d.bufDZ.Update(output)
+				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+				d.bufDZ.Read(dz)
+				for k := 0; k < outSize; k++ {
+					gradB[k] += dz[k]
 				}
-				dz[k] = sum
-				gradB[k] += sum
+			} else {
+				for k := 0; k < outSize; k++ {
+					sum := float32(0.0)
+					outK := output[k]
+					for i := 0; i < outSize; i++ {
+						delta := float32(0.0)
+						if i == k {
+							delta = 1.0
+						}
+						sum += grad[i] * output[i] * (delta - outK)
+					}
+					dz[k] = sum
+					gradB[k] += sum
+				}
 			}
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
-			for k := 0; k < outSize; k++ {
-				sum := float32(0.0)
-				softmaxK := float32(math.Exp(float64(output[k])))
-				for i := 0; i < outSize; i++ {
-					delta := float32(0.0)
-					if i == k { delta = 1.0 }
-					sum += grad[i] * (delta - softmaxK)
+			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+				// For LogSoftmax, we need softmax(preAct)
+				softmax := make([]float32, outSize)
+				for i := range softmax {
+					softmax[i] = float32(math.Exp(float64(output[i])))
 				}
-				dz[k] = sum
-				gradB[k] += sum
+				d.bufOut.Update(grad)
+				d.bufDZ.Update(softmax)
+				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+				d.bufDZ.Read(dz)
+				for k := 0; k < outSize; k++ {
+					gradB[k] += dz[k]
+				}
+			} else {
+				for k := 0; k < outSize; k++ {
+					sum := float32(0.0)
+					softmaxK := float32(math.Exp(float64(output[k])))
+					for i := 0; i < outSize; i++ {
+						delta := float32(0.0)
+						if i == k {
+							delta = 1.0
+						}
+						sum += grad[i] * (delta - softmaxK)
+					}
+					dz[k] = sum
+					gradB[k] += sum
+				}
 			}
 		}
 	} else {
@@ -329,32 +401,71 @@ func (d *Dense) Backward(grad []float32) []float32 {
 		}
 	}
 
-	for o := 0; o < outSize; o++ {
-		dzo := dz[o]
-		wBase := o * inSize
-		for i := 0; i < inSize; i++ {
-			gradW[wBase+i] += dzo * input[i]
-		}
-	}
-
 	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-		metal.MatMul(dz, weights, gradIn, 1, inSize, outSize)
+		d.bufOut.Update(dz) // dz has same size as grad (outSize)
+		d.bufIn.Update(input)
+		d.bufGradW.Update(gradW)
+		d.bufGradB.Update(gradB)
+
+		metal.DenseBackwardPersistent(d.bufOut, d.bufIn, d.bufGradW, d.bufGradB, 1, inSize, outSize)
+		metal.MatMulTransposePersistent(d.bufOut, d.bufWeights, d.bufGradIn, 1, inSize, outSize, 0.0, false, false)
+
+		d.bufGradW.Read(gradW)
+		d.bufGradB.Read(gradB)
+		d.bufGradIn.Read(gradIn)
 	} else {
-		const chunkSize = 8
-		for chunk := 0; chunk < inSize; chunk += chunkSize {
-			limit := chunk + chunkSize
-			if limit > inSize { limit = inSize }
-			for i := chunk; i < limit; i++ {
-				sum := float32(0.0)
-				for o := 0; o < outSize; o++ {
-					sum += dz[o] * weights[o*inSize+i]
-				}
-				gradIn[i] = sum
+		for o := 0; o < outSize; o++ {
+			dzo := dz[o]
+			wBase := o * inSize
+			for i := 0; i < inSize; i++ {
+				gradW[wBase+i] += dzo * input[i]
 			}
+		}
+
+		for i := 0; i < inSize; i++ {
+			sum := float32(0.0)
+			for o := 0; o < outSize; o++ {
+				sum += dz[o] * weights[o*inSize+i]
+			}
+			gradIn[i] = sum
 		}
 	}
 
 	return gradIn[:inSize]
+}
+
+func (d *Dense) BackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return d.Backward(grad)
+	}
+	inSize := d.inSize
+	outSize := d.outSize
+
+	if len(d.gradInBuf) < batchSize*inSize {
+		d.gradInBuf = make([]float32, batchSize*inSize)
+	}
+
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := d.Backward(grad[i*outSize : (i+1)*outSize])
+		copy(d.gradInBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return d.gradInBuf[:batchSize*inSize]
+}
+
+func (d *Dense) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+	if batchSize <= 1 {
+		return d.AccumulateBackward(grad)
+	}
+	inSize := d.inSize
+	outSize := d.outSize
+	if len(d.gradInBuf) < batchSize*inSize {
+		d.gradInBuf = make([]float32, batchSize*inSize)
+	}
+	for i := batchSize - 1; i >= 0; i-- {
+		dx := d.AccumulateBackward(grad[i*outSize : (i+1)*outSize])
+		copy(d.gradInBuf[i*inSize:(i+1)*inSize], dx)
+	}
+	return d.gradInBuf[:batchSize*inSize]
 }
 
 func (d *Dense) Params() []float32 {
@@ -413,6 +524,32 @@ func (d *Dense) updateGradViews() {
 
 func (d *Dense) SetDevice(device Device) {
 	d.device = device
+	if md, ok := device.(*MetalDevice); ok && md.IsAvailable() && d.inSize > 0 {
+		if d.bufWeights == nil {
+			d.bufWeights = md.CreateBuffer(d.weights)
+		}
+		if d.bufBiases == nil {
+			d.bufBiases = md.CreateBuffer(d.biases)
+		}
+		if d.bufIn == nil {
+			d.bufIn = md.CreateEmptyBuffer(d.inSize)
+		}
+		if d.bufOut == nil {
+			d.bufOut = md.CreateEmptyBuffer(d.outSize)
+		}
+		if d.bufGradW == nil {
+			d.bufGradW = md.CreateEmptyBuffer(d.outSize * d.inSize)
+		}
+		if d.bufGradB == nil {
+			d.bufGradB = md.CreateEmptyBuffer(d.outSize)
+		}
+		if d.bufGradIn == nil {
+			d.bufGradIn = md.CreateEmptyBuffer(d.inSize)
+		}
+		if d.bufDZ == nil {
+			d.bufDZ = md.CreateEmptyBuffer(d.outSize)
+		}
+	}
 }
 
 func (d *Dense) SetTraining(training bool) {
@@ -512,31 +649,46 @@ func (d *Dense) LightweightClone(params []float32, grads []float32) Layer {
 		savedPreActOffsets: make([]int, 0, 16),
 		training:           d.training,
 	}
+
+	if md, ok := d.device.(*MetalDevice); ok && md.IsAvailable() && d.inSize > 0 {
+		newD.bufWeights = md.CreateBuffer(newD.weights)
+		newD.bufBiases = md.CreateBuffer(newD.biases)
+		newD.bufIn = md.CreateEmptyBuffer(d.inSize)
+		newD.bufOut = md.CreateEmptyBuffer(d.outSize)
+		newD.bufGradW = md.CreateEmptyBuffer(d.outSize * d.inSize)
+		newD.bufGradB = md.CreateEmptyBuffer(d.outSize)
+		newD.bufGradIn = md.CreateEmptyBuffer(d.inSize)
+		newD.bufDZ = md.CreateEmptyBuffer(d.outSize)
+	}
+
 	return newD
 }
 
 func (d *Dense) saveInput(x []float32) {
 	inSize := len(x)
 	// We use the internal arena even when not provided from outside
-	if cap(d.arena) < inSize {
-		d.arena = make([]float32, inSize*2)
+	if d.arenaPtr == nil {
+		d.arenaPtr = &[]float32{}
 	}
-	d.arena = d.arena[:inSize]
-	copy(d.arena, x)
+	if cap(*d.arenaPtr) < inSize {
+		*d.arenaPtr = make([]float32, inSize*2)
+	}
+	*d.arenaPtr = (*d.arenaPtr)[:inSize]
+	copy(*d.arenaPtr, x)
 	d.savedInputOffsets = append(d.savedInputOffsets[:0], 0)
 }
 
 func (d *Dense) savePreAct(preAct []float32) {
 	outSize := len(preAct)
-	inSize := len(d.arena)
+	inSize := len(*d.arenaPtr)
 	offset := inSize
-	if cap(d.arena) < offset+outSize {
+	if cap(*d.arenaPtr) < offset+outSize {
 		newArena := make([]float32, (offset+outSize)*2)
-		copy(newArena, d.arena)
-		d.arena = newArena
+		copy(newArena, *d.arenaPtr)
+		*d.arenaPtr = newArena
 	}
-	d.arena = d.arena[:offset+outSize]
-	copy(d.arena[offset:], preAct)
+	*d.arenaPtr = (*d.arenaPtr)[:offset+outSize]
+	copy((*d.arenaPtr)[offset:], preAct)
 	d.savedPreActOffsets = append(d.savedPreActOffsets[:0], offset)
 }
 
@@ -557,8 +709,8 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 	s := numSaved - 1
 	inOff := d.savedInputOffsets[s]
 	paOff := d.savedPreActOffsets[s]
-	savedInput := d.arena[inOff : inOff+inSize]
-	savedPreAct := d.arena[paOff : paOff+outSize]
+	savedInput := (*d.arenaPtr)[inOff : inOff+inSize]
+	savedPreAct := (*d.arenaPtr)[paOff : paOff+outSize]
 
 	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
 		output := d.outputBuf[:outSize]
@@ -566,26 +718,49 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 		d.act.(activations.BatchActivation).ActivateBatch(output)
 
 		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
-			for k := 0; k < outSize; k++ {
-				sum := float32(0.0)
-				outK := output[k]
-				for i := 0; i < outSize; i++ {
-					delta := float32(0.0)
-					if i == k { delta = 1.0 }
-					sum += grad[i] * output[i] * (delta - outK)
+			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+				d.bufOut.Update(grad)
+				d.bufDZ.Update(output) // Using bufDZ as temp for 'output'
+				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+				d.bufDZ.Read(dz)
+			} else {
+				for k := 0; k < outSize; k++ {
+					sum := float32(0.0)
+					outK := output[k]
+					for i := 0; i < outSize; i++ {
+						delta := float32(0.0)
+						if i == k {
+							delta = 1.0
+						}
+						sum += grad[i] * output[i] * (delta - outK)
+					}
+					dz[k] = sum
 				}
-				dz[k] = sum
 			}
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
-			for k := 0; k < outSize; k++ {
-				sum := float32(0.0)
-				softmaxK := float32(math.Exp(float64(output[k])))
-				for i := 0; i < outSize; i++ {
-					delta := float32(0.0)
-					if i == k { delta = 1.0 }
-					sum += grad[i] * (delta - softmaxK)
+			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+				// For LogSoftmax, we need softmax(preAct)
+				softmax := make([]float32, outSize)
+				for i := range softmax {
+					softmax[i] = float32(math.Exp(float64(output[i])))
 				}
-				dz[k] = sum
+				d.bufOut.Update(grad)
+				d.bufDZ.Update(softmax)
+				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+				d.bufDZ.Read(dz)
+			} else {
+				for k := 0; k < outSize; k++ {
+					sum := float32(0.0)
+					softmaxK := float32(math.Exp(float64(output[k])))
+					for i := 0; i < outSize; i++ {
+						delta := float32(0.0)
+						if i == k {
+							delta = 1.0
+						}
+						sum += grad[i] * (delta - softmaxK)
+					}
+					dz[k] = sum
+				}
 			}
 		}
 	} else {
@@ -595,21 +770,35 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 		}
 	}
 
-	for o := 0; o < outSize; o++ {
-		dzo := dz[o]
-		gradB[o] += dzo
-		wBase := o * inSize
-		for i := 0; i < inSize; i++ {
-			gradW[wBase+i] += dzo * savedInput[i]
-		}
-	}
+	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+		d.bufOut.Update(dz) // dz has same size as grad (outSize)
+		d.bufIn.Update(savedInput)
+		d.bufGradW.Update(gradW)
+		d.bufGradB.Update(gradB)
 
-	for i := 0; i < inSize; i++ {
-		sum := float32(0.0)
+		metal.DenseBackwardPersistent(d.bufOut, d.bufIn, d.bufGradW, d.bufGradB, 1, inSize, outSize)
+		metal.MatMulTransposePersistent(d.bufOut, d.bufWeights, d.bufGradIn, 1, inSize, outSize, 0.0, false, false)
+
+		d.bufGradW.Read(gradW)
+		d.bufGradB.Read(gradB)
+		d.bufGradIn.Read(gradIn)
+	} else {
 		for o := 0; o < outSize; o++ {
-			sum += dz[o] * weights[o*inSize+i]
+			dzo := dz[o]
+			gradB[o] += dzo
+			wBase := o * inSize
+			for i := 0; i < inSize; i++ {
+				gradW[wBase+i] += dzo * savedInput[i]
+			}
 		}
-		gradIn[i] = sum
+
+		for i := 0; i < inSize; i++ {
+			sum := float32(0.0)
+			for o := 0; o < outSize; o++ {
+				sum += dz[o] * weights[o*inSize+i]
+			}
+			gradIn[i] = sum
+		}
 	}
 
 	d.savedInputOffsets = d.savedInputOffsets[:s]
