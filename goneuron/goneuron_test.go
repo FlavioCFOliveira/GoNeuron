@@ -142,6 +142,17 @@ func TestOptimizers(t *testing.T) {
 			t.Error("SGD returned nil")
 		}
 	})
+
+	t.Run("AdamW", func(t *testing.T) {
+		opt := AdamW(0.001, 0.01)
+		if opt == nil {
+			t.Error("AdamW returned nil")
+		}
+		// Verify it's the correct type
+		if opt.WeightDecay != 0.01 {
+			t.Errorf("AdamW WeightDecay = %v, want 0.01", opt.WeightDecay)
+		}
+	})
 }
 
 // TestLayers tests various layer factories.

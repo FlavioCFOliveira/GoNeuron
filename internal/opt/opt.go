@@ -328,3 +328,259 @@ func (a *Adam) SetGobState(state any) {
 		a.timestep = st.Timestep
 	}
 }
+
+// AdamW optimizer with decoupled weight decay.
+// AdamW improves upon Adam by applying weight decay directly to the parameters
+// rather than to the gradients, which often leads to better generalization.
+// Reference: "Decoupled Weight Decay Regularization" (Loshchilov & Hutter, 2017)
+type AdamW struct {
+	LearningRate float32
+	Beta1        float32 // Exponential decay rate for first moment
+	Beta2        float32 // Exponential decay rate for second moment
+	Epsilon      float32 // Small constant for numerical stability
+	WeightDecay  float32 // Weight decay coefficient (lambda)
+
+	// Per-layer state - indexed by layer
+	momentum1 [][]float32 // First moment (m) for each layer
+	momentum2 [][]float32 // Second moment (v) for each layer
+
+	// Contiguous moment buffers for global network calls
+	mGlobal []float32
+	vGlobal []float32
+
+	// Internal counter to track layer index during training
+	currentLayer int
+
+	// Global timestep for bias correction
+	timestep int
+}
+
+// NewAdamW creates a new AdamW optimizer with default values.
+// Default weight decay is 0.01 (common starting point).
+func NewAdamW(learningRate float32) *AdamW {
+	return &AdamW{
+		LearningRate: learningRate,
+		Beta1:        0.9,
+		Beta2:        0.999,
+		Epsilon:      1e-8,
+		WeightDecay:  0.01,
+		currentLayer: 0,
+		timestep:     0,
+	}
+}
+
+// initMoments initializes the moment buffers for given parameter shape.
+func (a *AdamW) initMoments(params []float32) {
+	// If it's a large global buffer, use the contiguous buffers
+	if a.currentLayer == 0 && len(params) > 1000 { // Heuristic for global buffer
+		if len(a.mGlobal) != len(params) {
+			a.mGlobal = make([]float32, len(params))
+			a.vGlobal = make([]float32, len(params))
+			// Reset layer-wise buffers to avoid inconsistency
+			a.momentum1 = nil
+			a.momentum2 = nil
+		}
+		return
+	}
+
+	// Ensure we have enough layer buffers
+	for len(a.momentum1) <= a.currentLayer {
+		a.momentum1 = append(a.momentum1, nil)
+		a.momentum2 = append(a.momentum2, nil)
+	}
+
+	// Initialize or resize the buffers for current layer
+	if a.momentum1[a.currentLayer] == nil || len(a.momentum1[a.currentLayer]) != len(params) {
+		a.momentum1[a.currentLayer] = make([]float32, len(params))
+		a.momentum2[a.currentLayer] = make([]float32, len(params))
+	}
+}
+
+// Step computes updated parameters using AdamW
+func (a *AdamW) Step(params, gradients []float32) []float32 {
+	a.initMoments(params)
+
+	lr := a.LearningRate
+	beta1 := a.Beta1
+	if beta1 == 0 {
+		beta1 = 0.9
+	}
+	beta2 := a.Beta2
+	if beta2 == 0 {
+		beta2 = 0.999
+	}
+	eps := a.Epsilon
+	if eps == 0 {
+		eps = 1e-8
+	}
+	wd := a.WeightDecay
+
+	var m, v []float32
+	if a.mGlobal != nil && len(a.mGlobal) == len(params) {
+		m = a.mGlobal
+		v = a.vGlobal
+	} else {
+		m = a.momentum1[a.currentLayer]
+		v = a.momentum2[a.currentLayer]
+	}
+	a.currentLayer++
+
+	// Bias correction
+	ts := float64(a.timestep + 1)
+	bias1 := float32(1 - math.Pow(float64(beta1), ts))
+	bias2 := float32(1 - math.Pow(float64(beta2), ts))
+
+	// Effective learning rate with bias correction
+	effLR := lr * float32(math.Sqrt(float64(bias2))) / bias1
+
+	result := make([]float32, len(params))
+	for i := range params {
+		// Update biased first moment estimate
+		m[i] = beta1*m[i] + (1-beta1)*gradients[i]
+		// Update biased second moment estimate
+		v[i] = beta2*v[i] + (1-beta2)*gradients[i]*gradients[i]
+		// Compute update with decoupled weight decay
+		// θ_t = θ_{t-1} - lr * (m̂_t / (sqrt(v̂_t) + ε) + λ * θ_{t-1})
+		update := effLR * m[i] / (float32(math.Sqrt(float64(v[i]))) + eps)
+		weightDecayTerm := wd * params[i]
+		result[i] = params[i] - update - lr*weightDecayTerm
+	}
+	return result
+}
+
+// StepInPlace updates params in-place using AdamW
+func (a *AdamW) StepInPlace(params, gradients []float32) {
+	a.initMoments(params)
+
+	lr := a.LearningRate
+	beta1 := a.Beta1
+	if beta1 == 0 {
+		beta1 = 0.9
+	}
+	beta2 := a.Beta2
+	if beta2 == 0 {
+		beta2 = 0.999
+	}
+	eps := a.Epsilon
+	if eps == 0 {
+		eps = 1e-8
+	}
+	wd := a.WeightDecay
+
+	var m, v []float32
+	if a.mGlobal != nil && len(a.mGlobal) == len(params) {
+		m = a.mGlobal
+		v = a.vGlobal
+	} else {
+		m = a.momentum1[a.currentLayer]
+		v = a.momentum2[a.currentLayer]
+	}
+	a.currentLayer++
+
+	// Bias correction
+	ts := float64(a.timestep + 1)
+	bias1 := float32(1 - math.Pow(float64(beta1), ts))
+	bias2 := float32(1 - math.Pow(float64(beta2), ts))
+
+	// Effective learning rate with bias correction
+	effLR := lr * float32(math.Sqrt(float64(bias2))) / bias1
+
+	for i := range params {
+		// Update biased first moment estimate
+		m[i] = beta1*m[i] + (1-beta1)*gradients[i]
+		// Update biased second moment estimate
+		v[i] = beta2*v[i] + (1-beta2)*gradients[i]*gradients[i]
+		// Update parameters in-place with decoupled weight decay
+		update := effLR * m[i] / (float32(math.Sqrt(float64(v[i]))) + eps)
+		weightDecayTerm := wd * params[i]
+		params[i] -= update + lr*weightDecayTerm
+	}
+}
+
+// NewStep signals the beginning of a new optimization step for AdamW.
+func (a *AdamW) NewStep() {
+	a.timestep++
+	a.currentLayer = 0
+}
+
+// adamWGobState is a gob-encodable state for AdamW optimizer.
+type adamWGobState struct {
+	LearningRate float32
+	Beta1        float32
+	Beta2        float32
+	Epsilon      float32
+	WeightDecay  float32
+	Momentum1    [][]float32
+	Momentum2    [][]float32
+	Timestep     int
+}
+
+// State returns AdamW state.
+func (a *AdamW) State() map[string]any {
+	return map[string]any{
+		"LearningRate": a.LearningRate,
+		"Beta1":        a.Beta1,
+		"Beta2":        a.Beta2,
+		"Epsilon":      a.Epsilon,
+		"WeightDecay":  a.WeightDecay,
+		"momentum1":    a.momentum1,
+		"momentum2":    a.momentum2,
+		"timestep":     a.timestep,
+	}
+}
+
+// SetState sets AdamW state from a map.
+func (a *AdamW) SetState(state map[string]any) {
+	if lr, ok := state["LearningRate"].(float32); ok {
+		a.LearningRate = lr
+	}
+	if b1, ok := state["Beta1"].(float32); ok {
+		a.Beta1 = b1
+	}
+	if b2, ok := state["Beta2"].(float32); ok {
+		a.Beta2 = b2
+	}
+	if eps, ok := state["Epsilon"].(float32); ok {
+		a.Epsilon = eps
+	}
+	if wd, ok := state["WeightDecay"].(float32); ok {
+		a.WeightDecay = wd
+	}
+	if m1, ok := state["momentum1"].([][]float32); ok {
+		a.momentum1 = m1
+	}
+	if m2, ok := state["momentum2"].([][]float32); ok {
+		a.momentum2 = m2
+	}
+	if ts, ok := state["timestep"].(int); ok {
+		a.timestep = ts
+	}
+}
+
+// GobState returns AdamW state in a gob-encodable format.
+func (a *AdamW) GobState() any {
+	return adamWGobState{
+		LearningRate: a.LearningRate,
+		Beta1:        a.Beta1,
+		Beta2:        a.Beta2,
+		Epsilon:      a.Epsilon,
+		WeightDecay:  a.WeightDecay,
+		Momentum1:    a.momentum1,
+		Momentum2:    a.momentum2,
+		Timestep:     a.timestep,
+	}
+}
+
+// SetGobState sets AdamW state from a gob-decoded value.
+func (a *AdamW) SetGobState(state any) {
+	if st, ok := state.(adamWGobState); ok {
+		a.LearningRate = st.LearningRate
+		a.Beta1 = st.Beta1
+		a.Beta2 = st.Beta2
+		a.Epsilon = st.Epsilon
+		a.WeightDecay = st.WeightDecay
+		a.momentum1 = st.Momentum1
+		a.momentum2 = st.Momentum2
+		a.timestep = st.Timestep
+	}
+}

@@ -501,3 +501,199 @@ func TestSGDMultipleParameters(t *testing.T) {
 		}
 	}
 }
+
+// ==================== AdamW Tests ====================
+
+// TestAdamWCreation tests AdamW creation with default values.
+func TestAdamWCreation(t *testing.T) {
+	adamw := NewAdamW(0.001)
+
+	if adamw.LearningRate != 0.001 {
+		t.Errorf("LearningRate = %v, want 0.001", adamw.LearningRate)
+	}
+	if adamw.WeightDecay != 0.01 {
+		t.Errorf("WeightDecay = %v, want 0.01", adamw.WeightDecay)
+	}
+	if adamw.Beta1 != 0.9 {
+		t.Errorf("Beta1 = %v, want 0.9", adamw.Beta1)
+	}
+	if adamw.Beta2 != 0.999 {
+		t.Errorf("Beta2 = %v, want 0.999", adamw.Beta2)
+	}
+	if adamw.Epsilon != 1e-8 {
+		t.Errorf("Epsilon = %v, want 1e-8", adamw.Epsilon)
+	}
+}
+
+// TestAdamWStep tests AdamW step computation.
+func TestAdamWStep(t *testing.T) {
+	adamw := NewAdamW(0.1)
+	adamw.WeightDecay = 0.0 // Disable weight decay for comparison with Adam
+
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.1, 0.2}
+
+	updated := adamw.Step(params, gradients)
+
+	// With weight decay = 0, AdamW should behave like Adam
+	for i := range updated {
+		if math.IsNaN(float64(updated[i])) || math.IsInf(float64(updated[i]), 0) {
+			t.Errorf("AdamW produced NaN or Inf at index %d: %v", i, updated[i])
+		}
+	}
+}
+
+// TestAdamWWeightDecay tests that weight decay actually shrinks parameters.
+func TestAdamWWeightDecay(t *testing.T) {
+	// Test with weight decay
+	adamw := NewAdamW(0.01)
+	adamw.WeightDecay = 0.1
+
+	params := []float32{10.0, 10.0}
+	gradients := []float32{0.0, 0.0} // Zero gradients
+
+	adamw.NewStep()
+	updated := adamw.Step(params, gradients)
+
+	// With zero gradients and weight decay, parameters should shrink
+	for i := range updated {
+		if updated[i] >= params[i] {
+			t.Errorf("AdamW with weight decay should shrink parameters: updated[%d] = %v, original = %v",
+				i, updated[i], params[i])
+		}
+	}
+}
+
+// TestAdamWStepInPlace tests AdamW in-place update.
+func TestAdamWStepInPlace(t *testing.T) {
+	adamw := NewAdamW(0.1)
+
+	params := []float32{1.0, 2.0}
+	gradients := []float32{0.1, 0.2}
+
+	// First call initializes moments
+	adamw.StepInPlace(params, gradients)
+
+	// Second call should continue with updated moments
+	adamw.StepInPlace(params, gradients)
+
+	// Check that params changed
+	if params[0] == 1.0 && params[1] == 2.0 {
+		t.Error("AdamW StepInPlace should modify params")
+	}
+
+	// Check no NaN or Inf
+	for i := range params {
+		if math.IsNaN(float64(params[i])) || math.IsInf(float64(params[i]), 0) {
+			t.Errorf("Param[%d] is NaN or Inf: %v", i, params[i])
+		}
+	}
+}
+
+// TestAdamWConvergence tests AdamW convergence on simple quadratic.
+func TestAdamWConvergence(t *testing.T) {
+	adamw := NewAdamW(0.5)
+	adamw.WeightDecay = 0.01
+
+	// Minimize f(x, y) = x^2 + y^2 starting from (10, 10)
+	params := []float32{10.0, 10.0}
+
+	for i := 0; i < 100; i++ {
+		adamw.NewStep()
+
+		// Gradient of x^2 is 2x
+		gradients := []float32{2.0 * params[0], 2.0 * params[1]}
+		adamw.StepInPlace(params, gradients)
+	}
+
+	// Should converge close to zero
+	if math.Abs(float64(params[0])) > 0.1 || math.Abs(float64(params[1])) > 0.1 {
+		t.Errorf("AdamW did not converge: params = %v", params)
+	}
+}
+
+// TestAdamWState tests AdamW state serialization.
+func TestAdamWState(t *testing.T) {
+	adamw := NewAdamW(0.01)
+	adamw.WeightDecay = 0.05
+	adamw.timestep = 5
+
+	state := adamw.State()
+
+	if state["LearningRate"].(float32) != 0.01 {
+		t.Error("State LearningRate mismatch")
+	}
+	if state["WeightDecay"].(float32) != 0.05 {
+		t.Error("State WeightDecay mismatch")
+	}
+	if state["timestep"].(int) != 5 {
+		t.Error("State timestep mismatch")
+	}
+
+	// Test restoring state
+	adamw2 := NewAdamW(0.0)
+	adamw2.SetState(state)
+
+	if adamw2.LearningRate != 0.01 {
+		t.Error("SetState LearningRate mismatch")
+	}
+	if adamw2.WeightDecay != 0.05 {
+		t.Error("SetState WeightDecay mismatch")
+	}
+}
+
+// TestAdamWGobState tests AdamW gob serialization.
+func TestAdamWGobState(t *testing.T) {
+	adamw := NewAdamW(0.01)
+	adamw.WeightDecay = 0.05
+	adamw.timestep = 10
+
+	gobState := adamw.GobState()
+
+	// Test restoring from gob state
+	adamw2 := NewAdamW(0.0)
+	adamw2.SetGobState(gobState)
+
+	if adamw2.LearningRate != 0.01 {
+		t.Errorf("SetGobState LearningRate = %v, want 0.01", adamw2.LearningRate)
+	}
+	if adamw2.WeightDecay != 0.05 {
+		t.Errorf("SetGobState WeightDecay = %v, want 0.05", adamw2.WeightDecay)
+	}
+	if adamw2.timestep != 10 {
+		t.Errorf("SetGobState timestep = %v, want 10", adamw2.timestep)
+	}
+}
+
+// TestAdamWVsAdamWithZeroWeightDecay tests AdamW equals Adam when weight decay is 0.
+func TestAdamWVsAdamWithZeroWeightDecay(t *testing.T) {
+	// Both optimizers with same parameters
+	adam := NewAdam(0.1)
+	adamw := NewAdamW(0.1)
+	adamw.WeightDecay = 0.0
+
+	paramsAdam := []float32{1.0, 2.0, 3.0}
+	paramsAdamW := []float32{1.0, 2.0, 3.0}
+	gradients := []float32{0.1, 0.2, 0.3}
+
+	// Run multiple steps
+	for step := 0; step < 5; step++ {
+		adam.NewStep()
+		adamw.NewStep()
+
+		updatedAdam := adam.Step(paramsAdam, gradients)
+		updatedAdamW := adamw.Step(paramsAdamW, gradients)
+
+		// Copy back for next iteration
+		copy(paramsAdam, updatedAdam)
+		copy(paramsAdamW, updatedAdamW)
+	}
+
+	// Results should be very close (allowing for tiny numerical differences)
+	for i := range paramsAdam {
+		diff := math.Abs(float64(paramsAdam[i] - paramsAdamW[i]))
+		if diff > 1e-5 {
+			t.Errorf("Adam and AdamW with zero weight decay differ at index %d: diff = %v", i, diff)
+		}
+	}
+}

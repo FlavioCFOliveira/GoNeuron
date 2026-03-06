@@ -285,6 +285,16 @@ func Adam(lr float32) Optimizer {
 	return opt.NewAdam(lr)
 }
 
+// AdamW creates an AdamW optimizer with decoupled weight decay.
+// weightDecay defaults to 0.01 if set to 0.
+func AdamW(lr, weightDecay float32) *opt.AdamW {
+	aw := opt.NewAdamW(lr)
+	if weightDecay != 0 {
+		aw.WeightDecay = weightDecay
+	}
+	return aw
+}
+
 func SGD(lr float32) Optimizer {
 	return &opt.SGD{LearningRate: lr}
 }
