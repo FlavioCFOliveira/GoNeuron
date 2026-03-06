@@ -95,3 +95,17 @@ func (b *Buffer) SyncToFloat64(dst []float64) {
 func (d *Device) MatMul(A, B, res *Buffer, m, n, k int) {
 	C.MPSMatMul(d.ctx, A.ptr, B.ptr, res.ptr, C.int(m), C.int(n), C.int(k))
 }
+
+// LSTMForward performs LSTM forward pass for one timestep on GPU
+func (d *Device) LSTMForward(gateBuf, cPrev, hPrev, cOut, hOut *Buffer, batchSize, hiddenSize int) {
+	C.LSTMForward(d.ctx,
+		gateBuf.ptr, cPrev.ptr, hPrev.ptr, cOut.ptr, hOut.ptr,
+		C.int(batchSize), C.int(hiddenSize))
+}
+
+// GRUForward performs GRU forward pass for one timestep on GPU
+func (d *Device) GRUForward(gateBuf, hPrev, hOut *Buffer, batchSize, hiddenSize int) {
+	C.GRUForward(d.ctx,
+		gateBuf.ptr, hPrev.ptr, hOut.ptr,
+		C.int(batchSize), C.int(hiddenSize))
+}
