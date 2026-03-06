@@ -8,11 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
 // Tokenizer handles basic word-level tokenization
@@ -177,7 +174,7 @@ func main() {
 	ffDim := 128
 
 	// Check if Metal is available
-	device := goneuron.GetDefaultDevice()
+	device := layer.GetDefaultDevice()
 	if device.Type() == layer.GPU {
 		fmt.Println("Using Metal acceleration")
 	} else {

@@ -90,7 +90,9 @@ func (c CrossEntropy) Forward(yPred, yTrue []float32) float32 {
 	return sum
 }
 
-// Backward computes gradient for cross entropy: dL/dy_pred = -y_true / (y_pred + eps)
+// Backward computes gradient for cross entropy combined with softmax.
+// When used with softmax activation, the combined gradient is: dL/dz = y_pred - y_true
+// This assumes y_pred contains probabilities from softmax and y_true is one-hot encoded.
 func (c CrossEntropy) Backward(yPred, yTrue []float32) []float32 {
 	n := len(yPred)
 	if n != len(yTrue) {
@@ -98,31 +100,22 @@ func (c CrossEntropy) Backward(yPred, yTrue []float32) []float32 {
 	}
 
 	grad := make([]float32, n)
-	const eps = 1e-10
 	for i := 0; i < n; i++ {
-		pred := yPred[i]
-		if pred < eps {
-			pred = eps
-		}
-		grad[i] = -yTrue[i] / pred
+		grad[i] = yPred[i] - yTrue[i]
 	}
 	return grad
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Combined gradient: y_pred - y_true (when yPred is from softmax)
 func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float32) {
 	n := len(yPred)
 	if n != len(yTrue) || n != len(grad) {
 		panic("CrossEntropy: slices must have same length")
 	}
 
-	const eps = 1e-10
 	for i := 0; i < n; i++ {
-		pred := yPred[i]
-		if pred < eps {
-			pred = eps
-		}
-		grad[i] = -yTrue[i] / pred
+		grad[i] = yPred[i] - yTrue[i]
 	}
 }
 
@@ -403,7 +396,7 @@ func (n NLLLoss) Forward(yPred, yTrue []float32) float32 {
 		}
 		sum -= yTrue[i] * logPred
 	}
-	return sum
+	return sum / float32(nLen)
 }
 
 // Backward computes gradient for NLL loss with log-probabilities.
@@ -415,9 +408,10 @@ func (n NLLLoss) Backward(yPred, yTrue []float32) []float32 {
 		panic("NLLLoss: prediction and target must have same length")
 	}
 
+	factor := float32(1.0) / float32(nLen)
 	grad := make([]float32, nLen)
 	for i := 0; i < nLen; i++ {
-		grad[i] = -yTrue[i]
+		grad[i] = -yTrue[i] * factor
 	}
 	return grad
 }
@@ -429,8 +423,9 @@ func (n NLLLoss) BackwardInPlace(yPred, yTrue, grad []float32) {
 		panic("NLLLoss: slices must have same length")
 	}
 
+	factor := float32(1.0) / float32(nLen)
 	for i := 0; i < nLen; i++ {
-		grad[i] = -yTrue[i]
+		grad[i] = -yTrue[i] * factor
 	}
 }
 
