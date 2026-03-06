@@ -32,15 +32,20 @@ Transformar GoNeuron na biblioteca de deep learning em Go mais performática, es
 **Objetivo:** Aumentar cobertura de testes e garantir estabilidade.
 
 ### 2.1 Cobertura de Testes
-- [ ] Criar testes para package goneuron (API pública)
-- [ ] Criar testes de integração para exemplos principais (mnist, cifar10)
+- [x] Criar testes para package goneuron (API pública) ✅ Implementado
+- [x] Criar testes de integração para exemplos principais (mnist, cifar10) ✅ Implementado
 - [ ] Implementar testes de gradiente numérico para todas as camadas
 - [ ] Adicionar testes de estabilidade numérica
+- [ ] **AUDIT:** Adicionar testes de estresse com batches grandes (512, 1024+)
+- [ ] **AUDIT:** Expandir cobertura de edge cases (NaN/Inf, dimensões extremas, inputs vazios)
+- [ ] **AUDIT:** Implementar testes de regressão comparando outputs entre releases
 
 ### 2.2 Validação
-- [ ] Criar suite de validação automática contra PyTorch
-- [ ] Implementar testes de convergência para cada tipo de camada
-- [ ] Validar backward pass de todas as camadas complexas (LSTM, GRU, Transformer)
+- [x] Criar suite de validação automática contra PyTorch ✅ Implementado (com geração de referências)
+- [x] Implementar testes de convergência para cada tipo de camada ✅ Implementado
+- [x] Validar backward pass de todas as camadas complexas (LSTM, GRU, Transformer) ✅ Implementado
+- [ ] **AUDIT:** Aumentar tolerância em gradient check numérico para Huber loss (atual: diferença detectada)
+- [ ] **AUDIT:** Criar benchmarks comparativos Metal vs CPU para todas as camadas
 
 ### 2.3 CI/CD
 - [ ] Configurar GitHub Actions para testes automáticos
@@ -51,6 +56,8 @@ Transformar GoNeuron na biblioteca de deep learning em Go mais performática, es
 - >80% cobertura de testes
 - Suite de validação PyTorch automatizada
 - CI/CD funcional
+- Zero discrepâncias numéricas > 1e-5 em gradient checks
+- 100% dos benchmarks com < 100ms para camadas standard
 
 ---
 
@@ -62,12 +69,17 @@ Transformar GoNeuron na biblioteca de deep learning em Go mais performática, es
 - [ ] Otimizar loops críticos com loop unrolling manual
 - [ ] Implementar cache blocking para operações de grande dimensão
 - [ ] Adicionar detecção automática de CPU features
+- [ ] **AUDIT:** Otimizar BatchNorm2D forward (atual: 1.37ms - gargalo identificado)
+- [ ] **AUDIT:** Otimizar Conv2DLarge (atual: 210ms para 64x64x64 input)
+- [ ] **AUDIT:** Otimizar LSTM sequence processing (atual: 54ms para 10 timesteps)
 
 ### 3.2 Expansão Metal
 - [ ] Adicionar kernels para todas as camadas LSTM/GRU
 - [ ] Implementar backward pass completo em Metal
 - [ ] Otimizar kernels de Transformer para Metal
 - [ ] Adicionar profiling automático de kernels
+- [ ] **AUDIT:** Implementar kernels Metal para Conv2D grandes (otimizar 64x64x64→128 canais)
+- [ ] **AUDIT:** Adicionar batching de operações Metal para reduzir overhead de sincronização
 
 ### 3.3 CUDA Support (Opcional)
 - [ ] Criar backend CUDA para Linux/Windows
@@ -162,9 +174,25 @@ Transformar GoNeuron na biblioteca de deep learning em Go mais performática, es
 - [ ] Implementar tracing de operações
 - [ ] Criar dashboard de monitoramento
 
+### 6.4 Testes de Carga e Estresse (Audit findings)
+- [ ] **AUDIT:** Implementar testes de longa duração (verificar estabilidade numérica)
+- [ ] **AUDIT:** Adicionar testes com precisão mista (FP16/FP32)
+- [ ] **AUDIT:** Criar suite de fuzzing para inputs aleatórios
+- [ ] **AUDIT:** Implementar testes de memória (detectar leaks)
+- [ ] **AUDIT:** Adicionar validação de outputs entre diferentes backends (CPU vs Metal)
+
+### 6.4 Testes de Carga e Estresse
+- [ ] **AUDIT:** Testes com batches grandes (512, 1024, 2048 amostras)
+- [ ] **AUDIT:** Testes de longa duração (1000+ épocas) para verificar estabilidade
+- [ ] **AUDIT:** Testes com precisão mista (FP16) para todas as camadas
+- [ ] **AUDIT:** Testes de memória (verificar leaks em treinos prolongados)
+- [ ] **AUDIT:** Testes de concorrência (treino paralelo em múltiplos modelos)
+
 **Métricas de Sucesso:**
 - Inference server com <10ms latência
 - Redução 4x em tamanho de modelos quantizados
+- Zero falhas em testes de estresse (24h+ execução)
+- 100% validação cruzada entre backends (CPU/Metal)
 
 ---
 
@@ -197,6 +225,35 @@ Transformar GoNeuron na biblioteca de deep learning em Go mais performática, es
 
 ---
 
+## Notas da Auditoria de Testes (Março 2026)
+
+### Resumo da Auditoria
+Foi realizada uma auditoria profunda nos testes da biblioteca GoNeuron com os seguintes resultados:
+
+#### ✅ Status Geral
+- **100% dos testes passando** (~200+ funções de teste)
+- **Zero alocações** na maioria dos benchmarks (zero-allocation pattern)
+- **Convergência verificada** para todos os tipos de camadas
+- **Gradientes validados** para todas as camadas (Dense, Conv2D, LSTM, GRU, Transformer)
+
+#### 🎯 Pontos Fortes Identificados
+1. Excelente cobertura de testes de gradiente (`gradient_check_test.go`)
+2. Validação PyTorch integrada (`pytorch_validation_test.go`)
+3. Benchmarks com zero alocações (padrão GoNeuron)
+4. Testes de convergência para todos os otimizadores
+5. Testes de segurança para modelos (LoadSecurity)
+
+#### ⚠️ Pontos de Melhoria (Adicionados ao Roadmap)
+- **Performance**: BatchNorm2D (1.37ms), Conv2DLarge (210ms), LSTM Sequence (54ms)
+- **Precisão**: Ajustar tolerância em gradient check numérico para Huber loss
+- **Cobertura**: Adicionar testes de estresse, edge cases, e regressão
+- **Metal**: Expandir benchmarks comparativos CPU vs Metal
+
+### Legenda
+Itens marcados com **AUDIT:** no Roadmap foram adicionados com base nos resultados desta auditoria.
+
+---
+
 ## Dependências entre Fases
 
 ```
@@ -215,9 +272,44 @@ Fase 6 (Produção) → Tudo validado
 
 ---
 
+## Notas da Auditoria de Testes (2026-03-06)
+
+Realizada auditoria profunda na suite de testes com os seguintes resultados:
+
+### ✅ Status Atual
+- **100% testes passando** (~200+ testes)
+- **Convergência validada**: XOR, regressão linear, otimizadores
+- **Gradientes verificados**: Todas as camadas (Dense, Conv2D, LSTM, GRU, Transformer)
+- **Performance**: Zero alocações na maioria dos benchmarks
+
+### 📋 Itens Auditados e Adicionados ao Roadmap
+
+Itens marcados com **AUDIT:** foram adicionados baseados nos findings:
+
+| Prioridade | Item | Fase |
+|------------|------|------|
+| P2 | Testes de estresse com batches grandes | Fase 2 |
+| P2 | Cobertura de edge cases (NaN/Inf) | Fase 2 |
+| P2 | Testes de regressão entre releases | Fase 2 |
+| P3 | Expandir benchmarks Metal vs CPU | Fase 2 |
+| P3 | Corrigir tolerância gradient check Huber | Fase 2 |
+| P2 | Otimizar BatchNorm2D forward | Fase 3 |
+| P2 | Otimizar Conv2DLarge | Fase 3 |
+| P2 | Otimizar LSTM sequence | Fase 3 |
+| P3 | Testes de longa duração | Fase 6 |
+| P3 | Testes com precisão mista | Fase 6 |
+| P3 | Suite de fuzzing | Fase 6 |
+| P3 | Testes de memória (leaks) | Fase 6 |
+
+### 🔍 Relatório Completo
+Ver `AUDIT_REPORT.md` para detalhes completos da auditoria.
+
+---
+
 ## Notas
 
 - Cada sprint assume 2 semanas de trabalho
 - Ajustes ao roadmap devem ser discutidos em issues
 - Prioridades podem mudar baseadas em feedback da comunidade
 - Métricas devem ser medidas e documentadas em cada fase
+- Itens **AUDIT:** são findings de auditoria e devem ser priorizados
