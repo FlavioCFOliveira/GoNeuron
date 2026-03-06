@@ -1,0 +1,27 @@
+{
+  "name": "loss_cross_entropy",
+  "inputs": {
+    "logits": {
+      "shape": [
+        2,
+        3
+      ],
+      "type": "float32"
+    },
+    "targets": {
+      "shape": [
+        2
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "loss": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "loss_cross_entropy"
+}

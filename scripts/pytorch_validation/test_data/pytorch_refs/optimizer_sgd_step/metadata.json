@@ -1,0 +1,38 @@
+{
+  "name": "optimizer_sgd_step",
+  "inputs": {
+    "param": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    },
+    "grad": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    },
+    "lr": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    },
+    "momentum": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "param_updated": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "optimizer_sgd_step"
+}

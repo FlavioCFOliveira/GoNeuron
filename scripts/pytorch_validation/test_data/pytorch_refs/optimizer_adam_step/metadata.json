@@ -1,0 +1,50 @@
+{
+  "name": "optimizer_adam_step",
+  "inputs": {
+    "param": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    },
+    "grad": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    },
+    "lr": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    },
+    "beta1": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    },
+    "beta2": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    },
+    "eps": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "param_updated": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "optimizer_adam_step"
+}

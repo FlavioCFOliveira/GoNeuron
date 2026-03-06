@@ -1,0 +1,35 @@
+{
+  "name": "dense_batch",
+  "inputs": {
+    "input": {
+      "shape": [
+        3,
+        4
+      ],
+      "type": "float32"
+    },
+    "weights": {
+      "shape": [
+        3,
+        4
+      ],
+      "type": "float32"
+    },
+    "biases": {
+      "shape": [
+        3
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "shape": [
+        3,
+        3
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "dense_forward"
+}

@@ -1,0 +1,27 @@
+{
+  "name": "batchnorm2d_eval",
+  "inputs": {
+    "input": {
+      "shape": [
+        2,
+        3,
+        4,
+        4
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "shape": [
+        2,
+        3,
+        4,
+        4
+      ],
+      "type": "float32"
+    }
+  },
+  "num_features": 3,
+  "operation": "batchnorm2d_forward"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "activation_softmax",
+  "inputs": {
+    "input": {
+      "shape": [
+        2,
+        3
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "shape": [
+        2,
+        3
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "activation_softmax"
+}

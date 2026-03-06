@@ -1,0 +1,26 @@
+{
+  "name": "loss_mse",
+  "inputs": {
+    "y_pred": {
+      "shape": [
+        4
+      ],
+      "type": "float32"
+    },
+    "y_true": {
+      "shape": [
+        4
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "loss": {
+      "shape": [
+        1
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "loss_mse"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "activation_elu",
+  "inputs": {
+    "input": {
+      "shape": [
+        7
+      ],
+      "type": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "shape": [
+        7
+      ],
+      "type": "float32"
+    }
+  },
+  "operation": "activation_elu"
+}

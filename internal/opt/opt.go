@@ -36,6 +36,11 @@ type SGD struct {
 	LearningRate float32
 }
 
+// NewSGD creates a new SGD optimizer with the given learning rate.
+func NewSGD(learningRate float32) *SGD {
+	return &SGD{LearningRate: learningRate}
+}
+
 // Step computes updated parameters: params - lr * gradients
 func (s *SGD) Step(params, gradients []float32) []float32 {
 	result := make([]float32, len(params))
