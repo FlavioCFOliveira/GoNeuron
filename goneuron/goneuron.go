@@ -1,6 +1,8 @@
 package goneuron
 
 import (
+	"fmt"
+
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
@@ -50,26 +52,62 @@ func ELU(alpha float32) activations.Activation {
 // - Dense(out, act) -> Lazy inference of input size
 // - Dense(in, out, act) -> Explicit input size
 // - Dense(out, act, in) -> Explicit input size (alternative order used in some examples)
+//
+// Deprecated: This function panics on invalid arguments. Use DenseE() instead for error handling.
 func Dense(args ...interface{}) Layer {
+	l, err := DenseE(args...)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
+
+// DenseE creates a fully connected layer and returns an error if arguments are invalid.
+// Supports:
+// - DenseE(out, act) -> Lazy inference of input size
+// - DenseE(in, out, act) -> Explicit input size
+// - DenseE(out, act, in) -> Explicit input size (alternative order)
+func DenseE(args ...interface{}) (Layer, error) {
 	if len(args) == 2 {
-		out := args[0].(int)
-		act := args[1].(activations.Activation)
-		return layer.NewDense(-1, out, act)
+		out, ok1 := args[0].(int)
+		act, ok2 := args[1].(activations.Activation)
+		if !ok1 {
+			return nil, fmt.Errorf("Dense: first argument must be int (output size), got %T", args[0])
+		}
+		if !ok2 {
+			return nil, fmt.Errorf("Dense: second argument must be Activation, got %T", args[1])
+		}
+		return layer.NewDense(-1, out, act), nil
 	}
 	if len(args) == 3 {
 		// Check if 2nd arg is int (in, out, act) or activation (out, act, in)
 		if out, ok := args[1].(int); ok {
-			in := args[0].(int)
-			act := args[2].(activations.Activation)
-			return layer.NewDense(in, out, act)
+			in, ok1 := args[0].(int)
+			act, ok3 := args[2].(activations.Activation)
+			if !ok1 {
+				return nil, fmt.Errorf("Dense: first argument must be int (input size), got %T", args[0])
+			}
+			if !ok3 {
+				return nil, fmt.Errorf("Dense: third argument must be Activation, got %T", args[2])
+			}
+			return layer.NewDense(in, out, act), nil
 		} else {
-			out := args[0].(int)
-			act := args[1].(activations.Activation)
-			in := args[2].(int)
-			return layer.NewDense(in, out, act)
+			out, ok1 := args[0].(int)
+			act, ok2 := args[1].(activations.Activation)
+			in, ok3 := args[2].(int)
+			if !ok1 {
+				return nil, fmt.Errorf("Dense: first argument must be int (output size), got %T", args[0])
+			}
+			if !ok2 {
+				return nil, fmt.Errorf("Dense: second argument must be Activation, got %T", args[1])
+			}
+			if !ok3 {
+				return nil, fmt.Errorf("Dense: third argument must be int (input size), got %T", args[2])
+			}
+			return layer.NewDense(in, out, act), nil
 		}
 	}
-	panic("Dense expects (out, act) or (in, out, act)")
+	return nil, fmt.Errorf("Dense expects 2 or 3 arguments: (out, act) or (in, out, act), got %d arguments", len(args))
 }
 
 // Conv2D creates a 2D convolutional layer.
@@ -77,35 +115,68 @@ func Dense(args ...interface{}) Layer {
 // - Conv2D(outC, k, s, p, act) -> Lazy inference of inChannels
 // - Conv2D(inC, outC, k, s, p, act) -> Explicit inChannels
 // - Conv2D(outC, k, s, p, act, inC) -> Explicit inChannels (alternative order)
+//
+// Deprecated: This function panics on invalid arguments. Use Conv2DE() instead for error handling.
 func Conv2D(args ...interface{}) Layer {
+	l, err := Conv2DE(args...)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
+
+// Conv2DE creates a 2D convolutional layer and returns an error if arguments are invalid.
+// Supports:
+// - Conv2DE(outC, k, s, p, act) -> Lazy inference of inChannels
+// - Conv2DE(inC, outC, k, s, p, act) -> Explicit inChannels
+// - Conv2DE(outC, k, s, p, act, inC) -> Explicit inChannels (alternative order)
+func Conv2DE(args ...interface{}) (Layer, error) {
 	if len(args) == 5 {
-		outC := args[0].(int)
-		k := args[1].(int)
-		s := args[2].(int)
-		p := args[3].(int)
-		act := args[4].(activations.Activation)
-		return layer.NewConv2D(-1, outC, k, s, p, act)
+		outC, ok1 := args[0].(int)
+		k, ok2 := args[1].(int)
+		s, ok3 := args[2].(int)
+		p, ok4 := args[3].(int)
+		act, ok5 := args[4].(activations.Activation)
+		if !ok1 || !ok2 || !ok3 || !ok4 {
+			return nil, fmt.Errorf("Conv2D: first 4 arguments must be int (outC, k, s, p)")
+		}
+		if !ok5 {
+			return nil, fmt.Errorf("Conv2D: 5th argument must be Activation, got %T", args[4])
+		}
+		return layer.NewConv2D(-1, outC, k, s, p, act), nil
 	}
 	if len(args) == 6 {
 		// Check if 6th arg is activation (inC, outC, k, s, p, act) or int (outC, k, s, p, act, inC)
 		if act, ok := args[5].(activations.Activation); ok {
-			inC := args[0].(int)
-			outC := args[1].(int)
-			k := args[2].(int)
-			s := args[3].(int)
-			p := args[4].(int)
-			return layer.NewConv2D(inC, outC, k, s, p, act)
+			inC, ok1 := args[0].(int)
+			outC, ok2 := args[1].(int)
+			k, ok3 := args[2].(int)
+			s, ok4 := args[3].(int)
+			p, ok5 := args[4].(int)
+			if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
+				return nil, fmt.Errorf("Conv2D: first 5 arguments must be int (inC, outC, k, s, p)")
+			}
+			return layer.NewConv2D(inC, outC, k, s, p, act), nil
 		} else {
-			outC := args[0].(int)
-			k := args[1].(int)
-			s := args[2].(int)
-			p := args[3].(int)
-			act := args[4].(activations.Activation)
-			inC := args[5].(int)
-			return layer.NewConv2D(inC, outC, k, s, p, act)
+			outC, ok1 := args[0].(int)
+			k, ok2 := args[1].(int)
+			s, ok3 := args[2].(int)
+			p, ok4 := args[3].(int)
+			act, ok5 := args[4].(activations.Activation)
+			inC, ok6 := args[5].(int)
+			if !ok1 || !ok2 || !ok3 || !ok4 {
+				return nil, fmt.Errorf("Conv2D: arguments 1-4 and 6 must be int")
+			}
+			if !ok5 {
+				return nil, fmt.Errorf("Conv2D: 5th argument must be Activation, got %T", args[4])
+			}
+			if !ok6 {
+				return nil, fmt.Errorf("Conv2D: 6th argument must be int (inC), got %T", args[5])
+			}
+			return layer.NewConv2D(inC, outC, k, s, p, act), nil
 		}
 	}
-	panic("Conv2D expects (outC, k, s, p, act) or (inC, outC, k, s, p, act)")
+	return nil, fmt.Errorf("Conv2D expects 5 or 6 arguments: (outC, k, s, p, act) or (inC, outC, k, s, p, act), got %d arguments", len(args))
 }
 
 func LSTM(out int, in ...int) Layer {
@@ -204,23 +275,49 @@ func RBF(in, numCenters, out int, gamma float32) Layer {
 // Supports:
 // - TransformerBlock(numHeads, seqLen, ffDim, causal) -> Lazy inference of dim
 // - TransformerBlock(dim, numHeads, seqLen, ffDim, causal) -> Explicit dim
+//
+// Deprecated: This function panics on invalid arguments. Use TransformerBlockE() instead for error handling.
 func TransformerBlock(args ...interface{}) Layer {
+	l, err := TransformerBlockE(args...)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
+
+// TransformerBlockE creates a Transformer block and returns an error if arguments are invalid.
+// Supports:
+// - TransformerBlockE(numHeads, seqLen, ffDim, causal) -> Lazy inference of dim
+// - TransformerBlockE(dim, numHeads, seqLen, ffDim, causal) -> Explicit dim
+func TransformerBlockE(args ...interface{}) (Layer, error) {
 	if len(args) == 4 {
-		numHeads := args[0].(int)
-		seqLen := args[1].(int)
-		ffDim := args[2].(int)
-		causal := args[3].(bool)
-		return layer.NewTransformerBlock(-1, numHeads, seqLen, ffDim, causal)
+		numHeads, ok1 := args[0].(int)
+		seqLen, ok2 := args[1].(int)
+		ffDim, ok3 := args[2].(int)
+		causal, ok4 := args[3].(bool)
+		if !ok1 || !ok2 || !ok3 {
+			return nil, fmt.Errorf("TransformerBlock: first 3 arguments must be int (numHeads, seqLen, ffDim)")
+		}
+		if !ok4 {
+			return nil, fmt.Errorf("TransformerBlock: 4th argument must be bool (causal), got %T", args[3])
+		}
+		return layer.NewTransformerBlock(-1, numHeads, seqLen, ffDim, causal), nil
 	}
 	if len(args) == 5 {
-		dim := args[0].(int)
-		numHeads := args[1].(int)
-		seqLen := args[2].(int)
-		ffDim := args[3].(int)
-		causal := args[4].(bool)
-		return layer.NewTransformerBlock(dim, numHeads, seqLen, ffDim, causal)
+		dim, ok1 := args[0].(int)
+		numHeads, ok2 := args[1].(int)
+		seqLen, ok3 := args[2].(int)
+		ffDim, ok4 := args[3].(int)
+		causal, ok5 := args[4].(bool)
+		if !ok1 || !ok2 || !ok3 || !ok4 {
+			return nil, fmt.Errorf("TransformerBlock: first 4 arguments must be int (dim, numHeads, seqLen, ffDim)")
+		}
+		if !ok5 {
+			return nil, fmt.Errorf("TransformerBlock: 5th argument must be bool (causal), got %T", args[4])
+		}
+		return layer.NewTransformerBlock(dim, numHeads, seqLen, ffDim, causal), nil
 	}
-	panic("TransformerBlock expects 4 or 5 arguments")
+	return nil, fmt.Errorf("TransformerBlock expects 4 or 5 arguments: (numHeads, seqLen, ffDim, causal) or (dim, numHeads, seqLen, ffDim, causal), got %d arguments", len(args))
 }
 
 func TransformerBlockExt(numHeads, seqLen, ffDim int, causal bool, actType layer.ActivationType, normType layer.NormType, useRoPE bool, dim ...int) Layer {
@@ -296,7 +393,7 @@ func AdamW(lr, weightDecay float32) *opt.AdamW {
 }
 
 func SGD(lr float32) Optimizer {
-	return &opt.SGD{LearningRate: lr}
+	return opt.NewSGD(lr)
 }
 
 func ReduceLROnPlateau(optimizer Optimizer, factor float32, patience int, threshold, minLR float32) *opt.ReduceLROnPlateau {
