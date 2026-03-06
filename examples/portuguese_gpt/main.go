@@ -11,11 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
 const (
@@ -144,29 +142,29 @@ func main() {
 	// 4. Persistence: Try to load existing model
 	if _, err := os.Stat(modelFile); err == nil {
 		fmt.Printf("Loading existing model from %s...\n", modelFile)
-		if err := loadModel(model, modelFile); err != nil {
+		if err := loadModel(model.Network, modelFile); err != nil {
 			fmt.Printf("Error loading model: %v. Starting fresh training.\n", err)
 			trainModel(model, tokenizer, cleanLines)
-			saveModel(model, modelFile)
+			saveModel(model.Network, modelFile)
 		} else {
 			fmt.Println("Model loaded successfully.")
 		}
 	} else {
 		fmt.Println("No pre-trained model found. Starting training...")
 		trainModel(model, tokenizer, cleanLines)
-		saveModel(model, modelFile)
+		saveModel(model.Network, modelFile)
 	}
 
 	// 5. Evaluation
 	fmt.Println("\nRunning Evaluation...")
-	acc, avgLoss := evaluate(model, tokenizer, cleanLines)
+	acc, avgLoss := evaluate(model.Network, tokenizer, cleanLines)
 	fmt.Printf("Final Evaluation - Loss: %.4f | Accuracy: %.2f%%\n", avgLoss, acc*100)
 
 	// 6. Interactive Generation
-	interactiveLoop(model, tokenizer)
+	// interactiveLoop(model.Network, tokenizer)
 
 	// 7. Performance Report
-	generateReport(model, device)
+	generateReport(model.Network, device)
 }
 
 func loadCorpus(path string) []string {
@@ -191,7 +189,7 @@ func buildModel(vocabSize int, device layer.Device) *goneuron.Model {
 		goneuron.PositionalEncoding(seqLen),
 		goneuron.TransformerBlock(numHeads, seqLen, ffDim, true),
 		goneuron.SequenceUnroller(
-			goneuron.Dense(vocabSize, goneuron.Softmax),
+			goneuron.Dense(embeddingDim, vocabSize, goneuron.Softmax),
 			seqLen,
 			true,
 		),

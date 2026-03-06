@@ -192,23 +192,24 @@ func main() {
 	model := goneuron.NewSequential(
 		goneuron.Embedding(vocab.nextIdx, embeddingDim),
 		goneuron.Flatten(),
-		goneuron.SequenceUnroller(goneuron.Bidirectional(goneuron.LSTM(embeddingDim, lstmUnits)), maxLen, true),
+		goneuron.SequenceUnroller(goneuron.Bidirectional(goneuron.LSTM(lstmUnits, embeddingDim)), maxLen, true),
 		goneuron.GlobalAttention(lstmUnits*2),
 		goneuron.Dense(lstmUnits*2, 2, goneuron.LogSoftmax),
 	)
 
 	optimizer := goneuron.Adam(0.001)
-	model.Compile(optimizer, goneuron.CrossEntropy)
+	model.Compile(optimizer, goneuron.NLLLoss)
 
 	fmt.Println("\nStarting BiLSTM + Attention training...")
 	start := time.Now()
-	epochs := 50
+	epochs := 1000
 	batchSize := 4
 
 	scheduler := goneuron.ReduceLROnPlateau(optimizer, 0.5, 5, 0.01, 1e-6)
 
 	callbacks := []goneuron.Callback{
 		goneuron.Logger(10),
+		goneuron.EarlyStopping(20, 0.0001),
 		goneuron.SchedulerCallback(scheduler),
 	}
 

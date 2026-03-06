@@ -36,7 +36,7 @@ func main() {
 	model.Compile(goneuron.Adam(0.01), goneuron.MSE)
 
 	// 3. Train (self-supervised: target == input)
-	epochs := 100
+	epochs := 1000
 	fmt.Printf("Training for %d epochs...\n", epochs)
 	model.Fit(data, data, epochs, 32, goneuron.Logger(20))
 

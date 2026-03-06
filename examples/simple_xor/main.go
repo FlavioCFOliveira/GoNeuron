@@ -30,7 +30,7 @@ func main() {
 
 	// 5. Train the model
 	fmt.Println("Training...")
-	model.Fit(inputs, targets, 500, 1)
+	model.Fit(inputs, targets, 1000, 1)
 
 	// 6. Evaluate
 	loss := model.Evaluate(inputs, targets)

@@ -36,7 +36,7 @@ func main() {
 
 	// 4. Train
 	fmt.Println("Training...")
-	model.Fit(trainInputs, trainTargets, 200, 1, goneuron.Logger(20))
+	model.Fit(trainInputs, trainTargets, 1000, 1, goneuron.Logger(20))
 
 	// 5. Evaluate
 	correct := 0

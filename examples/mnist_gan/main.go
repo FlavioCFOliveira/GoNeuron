@@ -12,11 +12,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
+	"github.com/FlavioCFOliveira/GoNeuron/goneuron"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
-	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
 
 const (

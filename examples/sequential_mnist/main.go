@@ -177,14 +177,14 @@ func main() {
 	// 2. Define Architecture using High-Level API
 	lstmUnits := 64
 	model := goneuron.NewSequential(
-		goneuron.SequenceUnroller(goneuron.LSTM(cols, lstmUnits), rows, false),
+		goneuron.SequenceUnroller(goneuron.LSTM(lstmUnits, cols), rows, false),
 		goneuron.Dense(lstmUnits, 128, goneuron.Tanh),
 		goneuron.Dense(128, 10, goneuron.LogSoftmax),
 	)
 
 	// 3. Compile Model
 	optimizer := goneuron.Adam(0.001)
-	model.Compile(optimizer, goneuron.CrossEntropy)
+	model.Compile(optimizer, goneuron.NLLLoss)
 
 	// 4. Training
 	fmt.Println("\nStarting Sequential MNIST training...")
@@ -200,7 +200,7 @@ func main() {
 		goneuron.SchedulerCallback(scheduler),
 	}
 
-	model.Fit(xTrain, yTrain, 10, 64, callbacks...)
+	model.Fit(xTrain, yTrain, 1000, 64, callbacks...)
 	fmt.Printf("\nTraining finished in %v\n", time.Since(start))
 
 	// 5. Evaluation

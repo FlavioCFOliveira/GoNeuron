@@ -131,18 +131,11 @@ func main() {
 	if l, ok := model.Layers()[0].(interface{ SetInputDimensions(int, int) }); ok {
 		l.SetInputDimensions(ImageSize, ImageSize)
 	}
-	model.Build(Channels)
+	model.Build(Channels * ImageSize * ImageSize)
 
 	model.Compile(goneuron.Adam(0.001), goneuron.NLLLoss)
 
-	// Support for MetalDevice if available
-	metal := goneuron.GetDefaultDevice()
-	if metal.Type() == 1 { // GPU
-		fmt.Println("Using GPU device for acceleration")
-		model.SetDevice(metal)
-	} else {
-		fmt.Println("Using CPU device")
-	}
+	fmt.Println("Using CPU device")
 
 	// 3. Training Loop
 	epochs := 10

@@ -652,7 +652,11 @@ func (c *Conv2D) Clone() Layer {
 }
 
 func (c *Conv2D) LightweightClone(params []float32, grads []float32) Layer {
-	weightSize := c.outChannels * c.inChannels * c.kernelSize * c.kernelSize
+	inChannels := c.inChannels
+	if inChannels <= 0 {
+		inChannels = 0 // Avoid negative index panic
+	}
+	weightSize := c.outChannels * inChannels * c.kernelSize * c.kernelSize
 	newC := &Conv2D{
 		inChannels:        c.inChannels,
 		outChannels:       c.outChannels,
@@ -661,20 +665,31 @@ func (c *Conv2D) LightweightClone(params []float32, grads []float32) Layer {
 		padding:           c.padding,
 		setInputHeight:    c.setInputHeight,
 		setInputWidth:     c.setInputWidth,
+		inputHeight:       c.inputHeight,
+		inputWidth:        c.inputWidth,
 		activation:        c.activation,
 		params:            params,
-		weights:           params[:weightSize],
-		biases:            params[weightSize:],
+		weights:           nil,
+		biases:            nil,
 		grads:             grads,
-		gradWeights:       grads[:weightSize],
-		gradBiases:        grads[weightSize:],
+		gradWeights:       nil,
+		gradBiases:        nil,
 		outputBuf:         make([]float32, 0),
 		gradInBuf:         make([]float32, 0),
 		savedInput:        make([]float32, 0),
 		savedInputOffsets: make([]int, 0, 128),
 		training:          c.training,
 		device:            c.device,
-		metalState:       c.metalState, // Shared state as it points to shared weights
+		metalState:       c.metalState,
+	}
+
+	if len(params) >= weightSize {
+		newC.weights = params[:weightSize]
+		newC.biases = params[weightSize:]
+	}
+	if len(grads) >= weightSize {
+		newC.gradWeights = grads[:weightSize]
+		newC.gradBiases = grads[weightSize:]
 	}
 
 	if md, ok := c.device.(*MetalDevice); ok && md.IsAvailable() && len(c.params) > 0 {

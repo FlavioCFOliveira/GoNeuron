@@ -625,9 +625,13 @@ func (b *BatchNorm2D) Clone() Layer {
 
 func (b *BatchNorm2D) LightweightClone(params, grads []float32) Layer {
 	var gamma, beta, gradGamma, gradBeta []float32
-	if b.affine {
-		gamma, beta = params[:b.numFeatures], params[b.numFeatures:]
-		gradGamma, gradBeta = grads[:b.numFeatures], grads[b.numFeatures:]
+	numFeatures := b.numFeatures
+	if numFeatures <= 0 {
+		numFeatures = 0
+	}
+	if b.affine && len(params) >= numFeatures*2 {
+		gamma, beta = params[:numFeatures], params[numFeatures:]
+		gradGamma, gradBeta = grads[:numFeatures], grads[numFeatures:]
 	}
 	newB := &BatchNorm2D{
 		numFeatures: b.numFeatures, eps: b.eps, momentum: b.momentum, affine: b.affine,
@@ -635,7 +639,7 @@ func (b *BatchNorm2D) LightweightClone(params, grads []float32) Layer {
 		runningMean: b.runningMean, runningVar: b.runningVar,
 		grads: grads, gradGammaBuf: gradGamma, gradBetaBuf: gradBeta,
 		outputBuf: make([]float32, 0), gradInBuf: make([]float32, 0),
-		savedMean: make([]float32, b.numFeatures), savedVar: make([]float32, b.numFeatures), savedStd: make([]float32, b.numFeatures),
+		savedMean: make([]float32, numFeatures), savedVar: make([]float32, numFeatures), savedStd: make([]float32, numFeatures),
 		savedInputOffsets: make([]int, 0, 128), savedMeanOffsets: make([]int, 0, 128), savedStdOffsets: make([]int, 0, 128),
 		device: b.device, numelPerChannel: b.numelPerChannel,
 	}

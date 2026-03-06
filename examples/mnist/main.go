@@ -185,11 +185,9 @@ func main() {
 	model.Build(1 * 28 * 28)
 
 	// 3. Compile Model
-	device := layer.NewMetalDevice()
-	if device.IsAvailable() {
-		fmt.Println("Using Metal acceleration")
-		model.SetDevice(device)
-	}
+	device := &layer.CPUDevice{}
+	fmt.Println("Using CPU for training")
+	model.SetDevice(device)
 
 	optimizer := goneuron.Adam(0.001)
 	model.Compile(optimizer, goneuron.NLLLoss)

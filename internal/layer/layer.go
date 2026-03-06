@@ -629,25 +629,39 @@ func (d *Dense) Clone() Layer {
 }
 
 func (d *Dense) LightweightClone(params []float32, grads []float32) Layer {
+	inSize := d.inSize
+	if inSize <= 0 {
+		inSize = 0
+	}
+	weightSize := d.outSize * inSize
 	newD := &Dense{
 		params:             params,
-		weights:            params[:d.outSize*d.inSize],
-		biases:             params[d.outSize*d.inSize:],
+		weights:            nil,
+		biases:             nil,
 		act:                d.act,
 		outSize:            d.outSize,
 		inSize:             d.inSize,
 		device:             d.device,
-		inputBuf:           make([]float32, d.inSize),
+		inputBuf:           make([]float32, inSize),
 		outputBuf:          make([]float32, d.outSize),
 		preActBuf:          make([]float32, d.outSize),
 		grads:              grads,
-		gradWBuf:           grads[:d.outSize*d.inSize],
-		gradBBuf:           grads[d.outSize*d.inSize:],
-		gradInBuf:          make([]float32, d.inSize),
+		gradWBuf:           nil,
+		gradBBuf:           nil,
+		gradInBuf:          make([]float32, inSize),
 		dzBuf:              make([]float32, d.outSize),
 		savedInputOffsets:  make([]int, 0, 16),
 		savedPreActOffsets: make([]int, 0, 16),
 		training:           d.training,
+	}
+
+	if len(params) >= weightSize {
+		newD.weights = params[:weightSize]
+		newD.biases = params[weightSize:]
+	}
+	if len(grads) >= weightSize {
+		newD.gradWBuf = grads[:weightSize]
+		newD.gradBBuf = grads[weightSize:]
 	}
 
 	if md, ok := d.device.(*MetalDevice); ok && md.IsAvailable() && d.inSize > 0 {

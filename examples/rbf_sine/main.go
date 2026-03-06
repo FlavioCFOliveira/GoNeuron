@@ -30,7 +30,7 @@ func main() {
 	network := net.New(layers, loss.MSE{}, optimizer)
 
 	// 3. Train
-	epochs := 500
+	epochs := 1000
 	fmt.Printf("Training for %d epochs...\n", epochs)
 
 	for epoch := 1; epoch <= epochs; epoch++ {

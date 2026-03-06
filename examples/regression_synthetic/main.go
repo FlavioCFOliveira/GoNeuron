@@ -38,7 +38,7 @@ func main() {
 	model.Compile(goneuron.Adam(0.005), goneuron.Huber(1.0))
 
 	// 3. Train
-	epochs := 200
+	epochs := 1000
 	fmt.Printf("Training for %d epochs...\n", epochs)
 
 	model.Fit(inputs, targets, epochs, 32, goneuron.Logger(20))

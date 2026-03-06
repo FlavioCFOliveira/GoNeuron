@@ -107,7 +107,7 @@ func main() {
 	model := goneuron.NewSequential(
 		goneuron.Embedding(vocabSize, 16), // [maxLen, 16]
 		goneuron.Flatten(),                // SequenceUnroller expects [T * InSize]
-		goneuron.SequenceUnroller(goneuron.GRU(32), maxLen, false), // Returns [32]
+		goneuron.SequenceUnroller(goneuron.GRU(32, 16), maxLen, false), // Returns [32]
 		goneuron.Dense(2, goneuron.LogSoftmax),
 	)
 
@@ -125,7 +125,7 @@ func main() {
 		goneuron.SchedulerCallback(scheduler),
 	}
 
-	model.Fit(x, y, 200, 4, callbacks...)
+	model.Fit(x, y, 1000, 4, callbacks...)
 	fmt.Printf("Training finished in %v\n", time.Since(start))
 
 	// 6. Evaluation

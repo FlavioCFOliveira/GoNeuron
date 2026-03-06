@@ -329,12 +329,23 @@ func CPUDevice() layer.Device {
 var (
 	MSE          = loss.MSE{}
 	CrossEntropy = loss.CrossEntropy{}
-	BCELoss      = loss.BCELoss{}
-	NLLLoss      = loss.NLLLoss{}
+	BCELoss           = loss.BCELoss{}
+	BCEWithLogitsLoss = loss.BCEWithLogitsLoss{}
+	NLLLoss           = loss.NLLLoss{}
+	L1Loss            = loss.L1Loss{}
+	KLDivLoss         = loss.KLDivLoss{}
 )
 
 func Huber(delta float32) Loss {
 	return loss.NewHuber(delta)
+}
+
+func TripletMarginLoss(margin float32, p int) Loss {
+	return loss.NewTripletMarginLoss(margin, p)
+}
+
+func MarginRankingLoss(margin float32) Loss {
+	return loss.NewMarginRankingLoss(margin)
 }
 
 // Data Loading
