@@ -1,0 +1,107 @@
+# GoNeuron Training Configuration Example
+# This is a sample configuration file for training a neural network
+
+# Model Architecture
+model:
+  name: "mnist_classifier"
+  description: "MNIST digit classification model"
+
+  layers:
+    # Input layer (implied by first layer)
+    - type: dense
+      output: 128
+      activation: relu
+
+    - type: dropout
+      rate: 0.2
+
+    - type: dense
+      output: 64
+      activation: relu
+
+    - type: dense
+      output: 10
+      activation: softmax
+
+# Training Configuration
+training:
+  epochs: 100
+  batch_size: 32
+
+  optimizer:
+    type: adam
+    learning_rate: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+
+  loss:
+    type: crossentropy
+
+  callbacks:
+    - type: logger
+      interval: 10
+
+    - type: model_checkpoint
+      filepath: "checkpoints/model_epoch_{epoch}.gob"
+      save_best_only: true
+      monitor: loss
+
+    - type: early_stopping
+      patience: 10
+      min_delta: 0.001
+      monitor: loss
+
+# Dataset Configuration
+dataset:
+  name: "mnist"
+  source: "builtin"  # or "csv", "url", "path"
+  train_split: 0.8
+  validation_split: 0.1
+  test_split: 0.1
+
+  # For CSV files
+  # source: "csv"
+  # path: "data/mnist.csv"
+  # label_column: 0
+  # feature_columns: [1, 2, 3, ..., 784]
+
+# Data Preprocessing
+preprocessing:
+  normalize: true
+  mean: 0.5
+  std: 0.5
+
+  # Data augmentation (optional)
+  augmentation:
+    enabled: false
+    rotation_range: 10
+    shift_range: 0.1
+    zoom_range: 0.1
+
+# Output Configuration
+output:
+  model_file: "trained_model.gob"
+  log_file: "training.log"
+  history_file: "training_history.csv"
+  tensorboard: false
+  tensorboard_dir: "./logs"
+
+# Hardware Configuration
+hardware:
+  device: "auto"  # "cpu", "gpu", "auto"
+  use_metal: true  # For macOS
+  use_cuda: false  # For NVIDIA GPUs
+  use_vulkan: false  # For other GPUs
+  mixed_precision: false  # Use FP16
+
+# Export Configuration
+export:
+  formats:
+    - onnx
+    - gguf
+  onnx:
+    opset_version: 13
+    input_shape: [1, 784]
+  gguf:
+    quantization: "Q4_0"  # "Q4_0", "Q5_0", "Q8_0", "F16", "F32"
