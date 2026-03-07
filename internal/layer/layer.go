@@ -2,8 +2,21 @@
 package layer
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"math"
+)
+
+// Common errors for layer operations.
+var (
+	ErrInputSizeMismatch  = errors.New("input size mismatch")
+	ErrInvalidDimensions  = errors.New("invalid dimensions")
+	ErrUninitializedLayer = errors.New("layer not initialized")
+	ErrInvalidInput       = errors.New("invalid input")
+	ErrIndexOutOfBounds   = errors.New("index out of bounds")
+	ErrInvalidShape       = errors.New("invalid shape")
 )
 
 // RNG is a simple, fast random number generator using LCG for deterministic behavior.
@@ -30,9 +43,9 @@ func (r *RNG) RandUint64() uint64 {
 
 // Layer is a neural network layer.
 type Layer interface {
-	Forward(x []float32) []float32
-	Backward(grad []float32) []float32
-	AccumulateBackward(grad []float32) []float32
+	Forward(x []float32) ([]float32, error)
+	Backward(grad []float32) ([]float32, error)
+	AccumulateBackward(grad []float32) ([]float32, error)
 	Params() []float32
 	SetParams([]float32)
 	Gradients() []float32
@@ -60,9 +73,9 @@ type Layer interface {
 	SetTraining(bool)
 
 	// Batch methods
-	ForwardBatch(x []float32, batchSize int) []float32
-	BackwardBatch(grad []float32, batchSize int) []float32
-	AccumulateBackwardBatch(grad []float32, batchSize int) []float32
+	ForwardBatch(x []float32, batchSize int) ([]float32, error)
+	BackwardBatch(grad []float32, batchSize int) ([]float32, error)
+	AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error)
 
 	// LightweightClone creates a new layer that shares the same parameters and gradients
 	// but has its own internal reusable buffers.
@@ -79,7 +92,7 @@ type DeferredLayer interface {
 // ArenaLayer is an optional interface for layers that support zero-allocation activation saving.
 type ArenaLayer interface {
 	Layer
-	ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32
+	ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error)
 }
 
 // NamedParam represents a named parameter with its shape and data.
@@ -214,7 +227,11 @@ func (d *Dense) Build(in int) {
 	}
 }
 
-func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
+	if len(x) != d.inSize {
+		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInputSizeMismatch, d.inSize, len(x))
+	}
+
 	copy(d.inputBuf, x)
 
 	// Save input to arena
@@ -300,34 +317,44 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) []f
 	}
 	copy(d.savedOutput[:outSize], output[:outSize])
 
-	return output[:outSize]
+	return output[:outSize], nil
 }
 
-func (d *Dense) Forward(x []float32) []float32 {
+func (d *Dense) Forward(x []float32) ([]float32, error) {
 	return d.ForwardWithArena(x, nil, nil)
 }
 
-func (d *Dense) ForwardBatch(x []float32, batchSize int) []float32 {
+func (d *Dense) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return d.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (d *Dense) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (d *Dense) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return d.ForwardWithArena(x, arena, offset)
 	}
 	inSize := d.inSize
 	outSize := d.outSize
+	if len(x) != batchSize*inSize {
+		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInputSizeMismatch, batchSize*inSize, len(x))
+	}
 	if len(d.outputBuf) < batchSize*outSize {
 		d.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := d.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := d.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(d.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return d.outputBuf[:batchSize*outSize]
+	return d.outputBuf[:batchSize*outSize], nil
 }
 
-func (d *Dense) Backward(grad []float32) []float32 {
+func (d *Dense) Backward(grad []float32) ([]float32, error) {
+	if len(grad) != d.outSize {
+		return nil, fmt.Errorf("%w: expected gradient size %d, got %d", ErrInputSizeMismatch, d.outSize, len(grad))
+	}
+
 	outSize := d.outSize
 	inSize := d.inSize
 	weights := d.weights
@@ -431,41 +458,54 @@ func (d *Dense) Backward(grad []float32) []float32 {
 		}
 	}
 
-	return gradIn[:inSize]
+	return gradIn[:inSize], nil
 }
 
-func (d *Dense) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (d *Dense) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return d.Backward(grad)
 	}
 	inSize := d.inSize
 	outSize := d.outSize
 
+	if len(grad) != batchSize*outSize {
+		return nil, fmt.Errorf("%w: expected gradient size %d, got %d", ErrInputSizeMismatch, batchSize*outSize, len(grad))
+	}
+
 	if len(d.gradInBuf) < batchSize*inSize {
 		d.gradInBuf = make([]float32, batchSize*inSize)
 	}
 
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := d.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := d.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(d.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return d.gradInBuf[:batchSize*inSize]
+	return d.gradInBuf[:batchSize*inSize], nil
 }
 
-func (d *Dense) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (d *Dense) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return d.AccumulateBackward(grad)
 	}
 	inSize := d.inSize
 	outSize := d.outSize
+	if len(grad) != batchSize*outSize {
+		return nil, fmt.Errorf("%w: expected gradient size %d, got %d", ErrInputSizeMismatch, batchSize*outSize, len(grad))
+	}
 	if len(d.gradInBuf) < batchSize*inSize {
 		d.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := d.AccumulateBackward(grad[i*outSize : (i+1)*outSize])
+		dx, err := d.AccumulateBackward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(d.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return d.gradInBuf[:batchSize*inSize]
+	return d.gradInBuf[:batchSize*inSize], nil
 }
 
 func (d *Dense) Params() []float32 {
@@ -706,7 +746,11 @@ func (d *Dense) savePreAct(preAct []float32) {
 	d.savedPreActOffsets = append(d.savedPreActOffsets[:0], offset)
 }
 
-func (d *Dense) AccumulateBackward(grad []float32) []float32 {
+func (d *Dense) AccumulateBackward(grad []float32) ([]float32, error) {
+	if len(grad) != d.outSize {
+		return nil, fmt.Errorf("%w: expected gradient size %d, got %d", ErrInputSizeMismatch, d.outSize, len(grad))
+	}
+
 	outSize := d.outSize
 	inSize := d.inSize
 	weights := d.weights
@@ -717,7 +761,7 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 
 	numSaved := len(d.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, fmt.Errorf("%w: no saved input for backward pass", ErrInvalidInput)
 	}
 
 	s := numSaved - 1
@@ -818,5 +862,5 @@ func (d *Dense) AccumulateBackward(grad []float32) []float32 {
 	d.savedInputOffsets = d.savedInputOffsets[:s]
 	d.savedPreActOffsets = d.savedPreActOffsets[:s]
 
-	return gradIn[:inSize]
+	return gradIn[:inSize], nil
 }

@@ -148,7 +148,7 @@ func (l *LayerNorm) SetTraining(training bool) {
 	l.training = training
 }
 
-func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	numSamples := len(x) / l.normalizedShape
 
 	if len(l.outputBuf) < len(x) {
@@ -256,19 +256,19 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		}
 	}
 
-	return output[:len(x)]
+	return output[:len(x)], nil
 }
 
 // Forward performs a forward pass through the layer normalization layer.
-func (l *LayerNorm) Forward(x []float32) []float32 {
+func (l *LayerNorm) Forward(x []float32) ([]float32, error) {
 	return l.ForwardWithArena(x, nil, nil)
 }
 
-func (l *LayerNorm) ForwardBatch(x []float32, batchSize int) []float32 {
+func (l *LayerNorm) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return l.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (l *LayerNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (l *LayerNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return l.ForwardWithArena(x, arena, offset)
 	}
@@ -278,16 +278,19 @@ func (l *LayerNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]f
 		l.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := l.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := l.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(l.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return l.outputBuf[:batchSize*outSize]
+	return l.outputBuf[:batchSize*outSize], nil
 }
 
-func (l *LayerNorm) Backward(grad []float32) []float32 {
+func (l *LayerNorm) Backward(grad []float32) ([]float32, error) {
 	numSaved := len(l.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, nil
 	}
 
 	ts := numSaved - 1
@@ -390,10 +393,10 @@ func (l *LayerNorm) Backward(grad []float32) []float32 {
 	l.savedMeanOffsets = l.savedMeanOffsets[:ts]
 	l.savedStdOffsets = l.savedStdOffsets[:ts]
 
-	return l.gradInBuf[:len(grad)]
+	return l.gradInBuf[:len(grad)], nil
 }
 
-func (l *LayerNorm) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (l *LayerNorm) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return l.Backward(grad)
 	}
@@ -403,13 +406,16 @@ func (l *LayerNorm) BackwardBatch(grad []float32, batchSize int) []float32 {
 		l.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := l.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := l.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(l.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return l.gradInBuf[:batchSize*inSize]
+	return l.gradInBuf[:batchSize*inSize], nil
 }
 
-func (l *LayerNorm) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (l *LayerNorm) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return l.BackwardBatch(grad, batchSize)
 }
 
@@ -582,6 +588,6 @@ func (l *LayerNorm) GetEps() float32 {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For LayerNorm, gradients are already accumulated in Backward, so this just calls Backward.
-func (l *LayerNorm) AccumulateBackward(grad []float32) []float32 {
+func (l *LayerNorm) AccumulateBackward(grad []float32) ([]float32, error) {
 	return l.Backward(grad)
 }

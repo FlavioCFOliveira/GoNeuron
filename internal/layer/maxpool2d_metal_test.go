@@ -31,8 +31,8 @@ func TestMetalMaxPool2D(t *testing.T) {
 	}
 
 	// Forward
-	outCPU := poolCPU.Forward(input)
-	outMetal := poolMetal.Forward(input)
+	outCPU, _ := poolCPU.Forward(input)
+	outMetal, _ := poolMetal.Forward(input)
 
 	if len(outCPU) != len(outMetal) {
 		t.Fatalf("Output length mismatch: cpu=%d, metal=%d", len(outCPU), len(outMetal))
@@ -52,8 +52,8 @@ func TestMetalMaxPool2D(t *testing.T) {
 		gradOut[i] = rng.RandFloat()*2 - 1
 	}
 
-	gradInCPU := poolCPU.Backward(gradOut)
-	gradInMetal := poolMetal.Backward(gradOut)
+	gradInCPU, _ := poolCPU.Backward(gradOut)
+	gradInMetal, _ := poolMetal.Backward(gradOut)
 
 	if len(gradInCPU) != len(gradInMetal) {
 		t.Fatalf("GradIn length mismatch: cpu=%d, metal=%d", len(gradInCPU), len(gradInMetal))
@@ -93,8 +93,8 @@ func TestMetalMaxPool2DBatch(t *testing.T) {
 	}
 
 	// Forward Batch
-	outCPU := poolCPU.ForwardBatch(input, batchSize)
-	outMetal := poolMetal.ForwardBatch(input, batchSize)
+	outCPU, _ := poolCPU.ForwardBatch(input, batchSize)
+	outMetal, _ := poolMetal.ForwardBatch(input, batchSize)
 
 	if len(outCPU) != len(outMetal) {
 		t.Fatalf("Forward batch output length mismatch: cpu=%d, metal=%d", len(outCPU), len(outMetal))
@@ -118,8 +118,8 @@ func TestMetalMaxPool2DBatch(t *testing.T) {
 		gradOut[i] = rng.RandFloat()
 	}
 
-	gradInCPU := poolCPU.BackwardBatch(gradOut, batchSize)
-	gradInMetal := poolMetal.BackwardBatch(gradOut, batchSize)
+	gradInCPU, _ := poolCPU.BackwardBatch(gradOut, batchSize)
+	gradInMetal, _ := poolMetal.BackwardBatch(gradOut, batchSize)
 
 	for i := range gradInCPU {
 		if math.Abs(float64(gradInCPU[i]-gradInMetal[i])) > 1e-5 {

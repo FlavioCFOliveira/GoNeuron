@@ -182,7 +182,8 @@ func main() {
 	var mse float32
 	network.SetTraining(false)
 	for i := range xTest {
-		pred := network.Forward(xTest[i])[0]
+		out, _ := network.Forward(xTest[i])
+		pred := out[0]
 		// Denormalize
 		actualPred := pred*(normParams[closeIdx].Max-normParams[closeIdx].Min) + normParams[closeIdx].Min
 		actualTrue := yTest[i][0]*(normParams[closeIdx].Max-normParams[closeIdx].Min) + normParams[closeIdx].Min

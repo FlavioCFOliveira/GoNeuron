@@ -91,10 +91,10 @@ func (m *MaxPool2D) SetTraining(training bool) {
 	m.training = training
 }
 
-func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
+func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) ([]float32, error) {
 	totalInput := len(input)
 	if totalInput == 0 {
-		return make([]float32, 0)
+		return make([]float32, 0), nil
 	}
 
 	if m.inChannels <= 0 {
@@ -164,10 +164,8 @@ func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		met.MaxPool2DPersistent(inBuf, outBuf, argBuf, 1, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
 		outBuf.Read(m.outputBuf[:requiredOutput])
 		argBuf.ReadInt(m.argmaxBuf[:requiredOutput])
-		return m.outputBuf[:requiredOutput]
+		return m.outputBuf[:requiredOutput], nil
 	}
-
-	// Max pooling logic
 	outH := m.outputHeight
 	outW := m.outputWidth
 	kernelSize := m.kernelSize
@@ -210,19 +208,19 @@ func (m *MaxPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		}
 	}
 
-	return m.outputBuf[:requiredOutput]
+	return m.outputBuf[:requiredOutput], nil
 }
 
 // Forward performs a forward pass through the max pooling layer.
-func (m *MaxPool2D) Forward(input []float32) []float32 {
+func (m *MaxPool2D) Forward(input []float32) ([]float32, error) {
 	return m.ForwardWithArena(input, nil, nil)
 }
 
-func (m *MaxPool2D) ForwardBatch(input []float32, batchSize int) []float32 {
+func (m *MaxPool2D) ForwardBatch(input []float32, batchSize int) ([]float32, error) {
 	return m.ForwardBatchWithArena(input, batchSize, nil, nil)
 }
 
-func (m *MaxPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (m *MaxPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return m.ForwardWithArena(input, arena, offset)
 	}
@@ -286,7 +284,7 @@ func (m *MaxPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena 
 		met.MaxPool2DPersistent(inBuf, outBuf, argBuf, batchSize, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
 		outBuf.Read(m.outputBuf[:requiredOutput])
 		argBuf.ReadInt(m.argmaxBuf[:requiredOutput])
-		return m.outputBuf[:requiredOutput]
+		return m.outputBuf[:requiredOutput], nil
 	}
 
 	for i := 0; i < batchSize; i++ {
@@ -340,14 +338,14 @@ func (m *MaxPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena 
 			}
 		}
 	}
-	return m.outputBuf[:requiredOutput]
+	return m.outputBuf[:requiredOutput], nil
 }
 
 // Backward performs backpropagation through the max pooling layer.
-func (m *MaxPool2D) Backward(grad []float32) []float32 {
+func (m *MaxPool2D) Backward(grad []float32) ([]float32, error) {
 	totalInput := len(m.savedInput)
 	if totalInput == 0 {
-		return nil
+		return nil, nil
 	}
 	if len(m.gradInBuf) < totalInput {
 		m.gradInBuf = make([]float32, totalInput)
@@ -369,8 +367,8 @@ func (m *MaxPool2D) Backward(grad []float32) []float32 {
 
 		met.MaxPool2DBackwardPersistent(gOutBuf, gInBuf, argBuf, 1, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
 		gInBuf.Read(gradIn)
-		return gradIn
-	}
+		return gradIn, nil
+}
 
 	// Clear gradient buffer
 	for i := range gradIn {
@@ -396,10 +394,10 @@ func (m *MaxPool2D) Backward(grad []float32) []float32 {
 		}
 	}
 
-	return gradIn
+	return gradIn, nil
 }
 
-func (m *MaxPool2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (m *MaxPool2D) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return m.Backward(grad)
 	}
@@ -428,8 +426,8 @@ func (m *MaxPool2D) BackwardBatch(grad []float32, batchSize int) []float32 {
 
 		met.MaxPool2DBackwardPersistent(gOutBuf, gInBuf, argBuf, batchSize, m.inChannels, m.inputHeight, m.inputWidth, m.outputHeight, m.outputWidth, m.kernelSize, m.stride, m.padding)
 		gInBuf.Read(gradIn)
-		return gradIn
-	}
+		return gradIn, nil
+}
 
 	for i := 0; i < batchSize; i++ {
 		sampleGrad := grad[i*outSize : (i+1)*outSize]
@@ -443,10 +441,10 @@ func (m *MaxPool2D) BackwardBatch(grad []float32, batchSize int) []float32 {
 			}
 		}
 	}
-	return gradIn
+	return gradIn, nil
 }
 
-func (m *MaxPool2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (m *MaxPool2D) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return m.BackwardBatch(grad, batchSize)
 }
 
@@ -556,6 +554,6 @@ func (m *MaxPool2D) GetOutputDimensions() (int, int) {
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
-func (m *MaxPool2D) AccumulateBackward(grad []float32) []float32 {
+func (m *MaxPool2D) AccumulateBackward(grad []float32) ([]float32, error) {
 	return m.Backward(grad)
 }

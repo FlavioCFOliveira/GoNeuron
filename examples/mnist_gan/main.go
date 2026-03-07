@@ -55,16 +55,26 @@ func loadMNISTImages(filename string) ([][]float32, error) {
 	defer gz.Close()
 
 	var magic, numImages, rows, cols int32
-	binary.Read(gz, binary.BigEndian, &magic)
-	binary.Read(gz, binary.BigEndian, &numImages)
-	binary.Read(gz, binary.BigEndian, &rows)
-	binary.Read(gz, binary.BigEndian, &cols)
+	if err := binary.Read(gz, binary.BigEndian, &magic); err != nil {
+		return nil, fmt.Errorf("failed to read magic number: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &numImages); err != nil {
+		return nil, fmt.Errorf("failed to read number of images: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &rows); err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &cols); err != nil {
+		return nil, fmt.Errorf("failed to read columns: %w", err)
+	}
 
 	images := make([][]float32, numImages)
 	pixelCount := int(rows * cols)
 	for i := 0; i < int(numImages); i++ {
 		pixels := make([]uint8, pixelCount)
-		gz.Read(pixels)
+		if _, err := io.ReadFull(gz, pixels); err != nil {
+			return nil, fmt.Errorf("failed to read image %d: %w", i, err)
+		}
 		floatPixels := make([]float32, pixelCount)
 		for j := 0; j < pixelCount; j++ {
 			// Normalize to [-1, 1] for Tanh activation in Generator
@@ -152,11 +162,17 @@ func main() {
 			if realIdx >= len(xTrain) { realIdx = len(xTrain) - 1 }
 			realImg := xTrain[realIdx]
 
-			dRealPred := discNet.Forward(realImg)
-			dRealLoss := discNet.Loss().Forward(dRealPred, ones)
+			dRealPred, _ := discNet.Forward(realImg)
+			dRealLoss, err := discNet.Loss().Forward(dRealPred, ones)
+			if err != nil {
+				continue
+			}
 			epochDRealLoss += dRealLoss
 
-			dRealGrad := discNet.Loss().Backward(dRealPred, ones)
+			dRealGrad, err := discNet.Loss().Backward(dRealPred, ones)
+			if err != nil {
+				continue
+			}
 			discNet.Backward(dRealGrad)
 
 			// 2. Fake Images
@@ -164,13 +180,19 @@ func main() {
 			for i := range noise {
 				noise[i] = rng.RandFloat()*2.0 - 1.0 // Latent space [-1, 1]
 			}
-			fakeImg := genNet.Forward(noise)
+			fakeImg, _ := genNet.Forward(noise)
 
-			dFakePred := discNet.Forward(fakeImg)
-			dFakeLoss := discNet.Loss().Forward(dFakePred, zeros)
+			dFakePred, _ := discNet.Forward(fakeImg)
+			dFakeLoss, err := discNet.Loss().Forward(dFakePred, zeros)
+			if err != nil {
+				continue
+			}
 			epochDFakeLoss += dFakeLoss
 
-			dFakeGrad := discNet.Loss().Backward(dFakePred, zeros)
+			dFakeGrad, err := discNet.Loss().Backward(dFakePred, zeros)
+			if err != nil {
+				continue
+			}
 			discNet.Backward(dFakeGrad)
 
 			// Update Discriminator weights
@@ -181,14 +203,20 @@ func main() {
 			discNet.ClearGradients() // Don't let D grads interfere
 
 			// We want D(G(z)) to be 1
-			fakeImgForG := genNet.Forward(noise)
-			gDiscPred := discNet.Forward(fakeImgForG)
-			gLoss := discNet.Loss().Forward(gDiscPred, ones)
+			fakeImgForG, _ := genNet.Forward(noise)
+			gDiscPred, _ := discNet.Forward(fakeImgForG)
+			gLoss, err := discNet.Loss().Forward(gDiscPred, ones)
+			if err != nil {
+				continue
+			}
 			epochGLoss += gLoss
 
 			// Backward through D to get gradients w.r.t input (fake image)
-			gDiscGrad := discNet.Loss().Backward(gDiscPred, ones)
-			gInputGrad := discNet.Backward(gDiscGrad)
+			gDiscGrad, err := discNet.Loss().Backward(gDiscPred, ones)
+			if err != nil {
+				continue
+			}
+			gInputGrad, _ := discNet.Backward(gDiscGrad)
 
 			// Backward through G using gradients from D
 			genNet.Backward(gInputGrad)
@@ -209,7 +237,7 @@ func main() {
 		for i := range noise {
 			noise[i] = rng.RandFloat()*2.0 - 1.0
 		}
-		sample := genNet.Forward(noise)
+		sample, _ := genNet.Forward(noise)
 		saveGeneratedImage(sample, fmt.Sprintf("output/epoch_%d.png", epoch+1))
 	}
 

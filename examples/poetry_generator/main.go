@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"sort"
@@ -77,7 +76,7 @@ func (t *CharTokenizer) Decode(indices []int) string {
 
 func main() {
 	// 1. Load Dataset
-	content, err := ioutil.ReadFile("examples/poetry_generator/datasets/camoes.txt")
+	content, err := os.ReadFile("examples/poetry_generator/datasets/camoes.txt")
 	if err != nil {
 		fmt.Printf("Error reading dataset: %v\n", err)
 		os.Exit(1)
@@ -137,9 +136,9 @@ func main() {
 
 			// Forward Pass
 			x := input
-			x = emb.Forward(x)
-			x = pos.Forward(x)
-			x = block.Forward(x)
+			x, _ = emb.Forward(x)
+			x, _ = pos.Forward(x)
+			x, _ = block.Forward(x)
 
 			// The Transformer output is [seqLen * embeddingDim]
 			// We need to apply the head to each position
@@ -151,7 +150,7 @@ func main() {
 			for t := 0; t < seqLen; t++ {
 				start := t * embeddingDim
 				end := start + embeddingDim
-				predLogits := head.Forward(x[start:end])
+				predLogits, _ := head.Forward(x[start:end])
 
 				softmax := activations.Softmax{}
 				allPredProbs[t] = softmax.ActivateBatch(predLogits)
@@ -162,10 +161,17 @@ func main() {
 				targetOneHot := make([]float32, tokenizer.vocabSize)
 				targetOneHot[targetIndices[t]] = 1.0
 
-				lossSum += criterion.Forward(allPredProbs[t], targetOneHot)
+				l, err := criterion.Forward(allPredProbs[t], targetOneHot)
+				if err != nil {
+					continue
+				}
+				lossSum += l
 
-				gradOut := criterion.Backward(allPredProbs[t], targetOneHot)
-				gradIn := head.AccumulateBackward(gradOut)
+				gradOut, err := criterion.Backward(allPredProbs[t], targetOneHot)
+				if err != nil {
+					continue
+				}
+				gradIn, _ := head.AccumulateBackward(gradOut)
 				copy(gradsHead[t*embeddingDim:(t+1)*embeddingDim], gradIn)
 			}
 
@@ -174,9 +180,9 @@ func main() {
 
 			// Backward Pass through other layers
 			grad := gradsHead
-			grad = block.Backward(grad)
-			grad = pos.Backward(grad)
-			emb.Backward(grad)
+			grad, _ = block.Backward(grad)
+			grad, _ = pos.Backward(grad)
+			_, _ = emb.Backward(grad)
 
 			// Optimizer Step
 			optimizer.NewStep()
@@ -222,9 +228,9 @@ func main() {
 
 	for i := 0; i < 100; i++ {
 		// Forward
-		x := emb.Forward(input)
-		x = pos.Forward(x)
-		x = block.Forward(x)
+		x, _ := emb.Forward(input)
+		x, _ = pos.Forward(x)
+		x, _ = block.Forward(x)
 
 		// Predict next char from the LAST non-padding position or simply the last position if we use causal mask
 		lastIdx := len(currIndices) - 1
@@ -232,7 +238,7 @@ func main() {
 		if lastIdx >= seqLen { lastIdx = seqLen - 1 }
 
 		lastPosStart := lastIdx * embeddingDim
-		logits := head.Forward(x[lastPosStart : lastPosStart+embeddingDim])
+		logits, _ := head.Forward(x[lastPosStart : lastPosStart+embeddingDim])
 
 		// Sample from distribution
 		softmax := activations.Softmax{}

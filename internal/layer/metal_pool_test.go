@@ -18,7 +18,7 @@ func TestMetalAvgPool2D(t *testing.T) {
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
 	// Forward Batch
-	output := pool.ForwardBatch(input, 1)
+	output, _ := pool.ForwardBatch(input, 1)
 
 	expected := []float32{3.5, 5.5, 11.5, 13.5}
 	for i := range expected {
@@ -29,7 +29,7 @@ func TestMetalAvgPool2D(t *testing.T) {
 
 	// Backward Batch
 	grad := []float32{1, 1, 1, 1}
-	gradIn := pool.BackwardBatch(grad, 1)
+	gradIn, _ := pool.BackwardBatch(grad, 1)
 
 	expectedGrad := float32(0.25)
 	for i := range gradIn {
@@ -54,7 +54,7 @@ func TestMetalDropout(t *testing.T) {
 		input[i] = 1.0
 	}
 
-	output := dropout.ForwardBatch(input, 1)
+	output, _ := dropout.ForwardBatch(input, 1)
 
 	// Check if some are zero and others are scaled (1/0.5 = 2.0)
 	zeros := 0
@@ -78,7 +78,7 @@ func TestMetalDropout(t *testing.T) {
 	for i := range grad {
 		grad[i] = 1.0
 	}
-	gradIn := dropout.BackwardBatch(grad, 1)
+	gradIn, _ := dropout.BackwardBatch(grad, 1)
 
 	for i, v := range gradIn {
 		if output[i] == 0 {

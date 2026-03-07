@@ -28,7 +28,7 @@ func TestDenseForward(t *testing.T) {
 
 	// Test input
 	input := []float32{1.0, 2.0}
-	output := d.Forward(input)
+	output, _ := d.Forward(input)
 
 	// With identity weights and zero biases, output should be close to input (tanh applied)
 	// tanh(1) ≈ 0.7616, tanh(2) ≈ 0.9640
@@ -62,7 +62,10 @@ func TestDenseBackward(t *testing.T) {
 	grad := []float32{1.0, 1.0}
 
 	// Backward pass
-	inputGrad := d.Backward(grad)
+	inputGrad, err := d.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// For identity weights and tanh activation:
 	// dy/dz = 1 - tanh(z)^2 = 1 - output^2
@@ -114,7 +117,10 @@ func TestDenseGradients(t *testing.T) {
 
 	// Compute gradients
 	grad := []float32{1.0, 1.0}
-	_ = d.Backward(grad)
+	_, err := d.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Get gradients
 	gradients := d.Gradients()
@@ -196,7 +202,7 @@ func TestDenseIdentityMapping(t *testing.T) {
 		d.ClearGradients()
 		input := []float32{0.5, 0.5}
 		// Forward
-		output := d.Forward(input)
+		output, _ := d.Forward(input)
 
 		// Backward with target = input (identity)
 		target := []float32{0.5, 0.5}
@@ -207,7 +213,7 @@ func TestDenseIdentityMapping(t *testing.T) {
 			grad[j] = output[j] - target[j]
 		}
 
-		_ = d.Backward(grad)
+		_, _ = d.Backward(grad)
 
 		// Simple gradient step
 		params := d.Params()
@@ -221,7 +227,7 @@ func TestDenseIdentityMapping(t *testing.T) {
 
 	// Test after training
 	input := []float32{0.5, 0.5}
-	output := d.Forward(input)
+	output, _ := d.Forward(input)
 
 	// Output should be close to input for identity
 	if float32(math.Abs(float64(output[0]-0.5))) > 0.1 || float32(math.Abs(float64(output[1]-0.5))) > 0.1 {
@@ -237,7 +243,7 @@ func TestConv2DForward(t *testing.T) {
 	// Input: 2x2
 	input := []float32{1.0, 2.0, 3.0, 4.0} // 2x2 flattened
 
-	output := c.Forward(input)
+	output, _ := c.Forward(input)
 
 	// With 1x1 kernel, no padding, no stride: output = (2-1+1)x(2-1+1) = 2x2
 	// With 1 output channel: 1 * 2 * 2 = 4 elements
@@ -266,7 +272,7 @@ func TestConv2DBackward(t *testing.T) {
 	}
 
 	// Backward
-	_ = c.Backward(grad)
+	_, _ = c.Backward(grad)
 
 	// Get weight gradients
 	gradients := c.Gradients()
@@ -310,7 +316,7 @@ func TestConv2DOutputShape(t *testing.T) {
 
 	// Input: 4x4 -> should output 4x4 with padding
 	input := make([]float32, 16)
-	output := c.Forward(input)
+	output, _ := c.Forward(input)
 
 	// With padding=1 and stride=1, output should be same size as input
 	// 1 channel, 4x4 = 16 elements
@@ -336,7 +342,7 @@ func TestLSTMForward(t *testing.T) {
 	l := NewLSTM(2, 3) // 2 input features, 3 hidden units
 
 	input := []float32{1.0, 2.0}
-	output := l.Forward(input)
+	output, _ := l.Forward(input)
 
 	// Output should have correct size
 	if len(output) != 3 {
@@ -353,7 +359,7 @@ func TestLSTMForwardMultipleSteps(t *testing.T) {
 	// Multiple timesteps
 	outputs := make([][]float32, 5)
 	for i := range outputs {
-		outputs[i] = l.Forward(input)
+		outputs[i], _ = l.Forward(input)
 	}
 
 	// All outputs should have correct size
@@ -372,10 +378,10 @@ func TestLSTMBackward(t *testing.T) {
 	grad := []float32{0.1, 0.1, 0.1}
 
 	// Forward
-	l.Forward(input)
+	_, _ = l.Forward(input)
 
 	// Backward
-	output := l.Backward(grad)
+	output, _ := l.Backward(grad)
 
 	// Output gradient should match input size
 	if len(output) != 2 {
@@ -390,8 +396,8 @@ func TestLSTMGradients(t *testing.T) {
 	input := []float32{1.0, 2.0}
 	grad := []float32{0.1, 0.1, 0.1}
 
-	l.Forward(input)
-	_ = l.Backward(grad)
+	_, _ = l.Forward(input)
+	_, _ = l.Backward(grad)
 
 	gradients := l.Gradients()
 
@@ -414,19 +420,19 @@ func TestLSTMReset(t *testing.T) {
 	input := []float32{1.0, 2.0}
 
 	// Get initial output (first forward pass)
-	output0 := l.Forward(input)
+	output0, _ := l.Forward(input)
 
 	// Process a few timesteps
-	l.Forward(input)
-	l.Forward(input)
-	l.Forward(input)
+	_, _ = l.Forward(input)
+	_, _ = l.Forward(input)
+	_, _ = l.Forward(input)
 
 	// Reset clears internal state but keeps weights
 	l.Reset()
 
 	// After reset, first input should produce same output as initial output0
 	// (since weights haven't changed, only internal state was reset)
-	output1 := l.Forward(input)
+	output1, _ := l.Forward(input)
 
 	// Should be similar (reset should produce same output as initial forward with same weights)
 	for i := range output0 {
@@ -484,14 +490,14 @@ func TestDenseLayerInterface(t *testing.T) {
 	d := NewDense(2, 2, activations.Tanh{})
 
 	x := []float32{1.0, 2.0}
-	y := d.Forward(x)
+	y, _ := d.Forward(x)
 
 	if len(y) != 2 {
 		t.Errorf("Forward output length wrong")
 	}
 
 	grad := []float32{1.0, 1.0}
-	_ = d.Backward(grad)
+	_, _ = d.Backward(grad)
 
 	_ = d.Params()
 	_ = d.Gradients()
@@ -516,10 +522,10 @@ func TestConv2DLayerInterface(t *testing.T) {
 	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
 
 	input := make([]float32, 9)
-	output := c.Forward(input)
+	output, _ := c.Forward(input)
 
 	grad := make([]float32, len(output))
-	_ = c.Backward(grad)
+	_, _ = c.Backward(grad)
 
 	_ = c.Params()
 	_ = c.Gradients()
@@ -533,8 +539,8 @@ func TestLSTMLayerInterface(t *testing.T) {
 	l := NewLSTM(2, 3)
 
 	input := []float32{1.0, 2.0}
-	output := l.Forward(input)
-	_ = l.Backward(output)
+	output, _ := l.Forward(input)
+	_, _ = l.Backward(output)
 
 	_ = l.Params()
 	_ = l.Gradients()
@@ -548,7 +554,7 @@ func TestDenseZeroInput(t *testing.T) {
 	d := NewDense(3, 2, activations.Tanh{})
 
 	input := []float32{0.0, 0.0, 0.0}
-	output := d.Forward(input)
+	output, _ := d.Forward(input)
 
 	// Output should be small (close to tanh of small bias values)
 	// Biases are initialized in range [-0.1, 0.1], so output should be in similar range
@@ -566,7 +572,7 @@ func TestDenseLargeValues(t *testing.T) {
 
 	// Large input values
 	input := []float32{100.0, 100.0}
-	output := d.Forward(input)
+	output, _ := d.Forward(input)
 
 	// tanh saturates at ±1
 	for i := range output {
@@ -586,7 +592,7 @@ func TestConv2DMultipleChannels(t *testing.T) {
 		input[i] = 1.0
 	}
 
-	output := c.Forward(input)
+	output, _ := c.Forward(input)
 
 	// Output: 2 channels, (4-2+1)x(4-2+1) = 3x3 = 18 per channel
 	// Total: 2 * 9 = 18 elements
@@ -601,7 +607,7 @@ func TestConv2DPadding(t *testing.T) {
 	// Without padding: 4x4 input, 3x3 kernel -> 2x2 output
 	c1 := NewConv2D(1, 1, 3, 1, 0, activations.Tanh{})
 	input := make([]float32, 16)
-	output1 := c1.Forward(input)
+	output1, _ := c1.Forward(input)
 
 	if len(output1) != 4 { // 2x2
 		t.Errorf("No padding output length = %d, want 4", len(output1))
@@ -609,7 +615,7 @@ func TestConv2DPadding(t *testing.T) {
 
 	// With padding: 4x4 input, 3x3 kernel, padding=1 -> 4x4 output
 	c2 := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
-	output2 := c2.Forward(input)
+	output2, _ := c2.Forward(input)
 
 	if len(output2) != 16 { // 4x4
 		t.Errorf("With padding output length = %d, want 16", len(output2))
@@ -621,7 +627,7 @@ func TestConv2DStride(t *testing.T) {
 	// Stride=2: 4x4 input, 3x3 kernel, no padding -> 1x1 output
 	c := NewConv2D(1, 1, 3, 2, 0, activations.Tanh{})
 	input := make([]float32, 16)
-	output := c.Forward(input)
+	output, _ := c.Forward(input)
 
 	if len(output) != 1 { // 1x1 with stride=2
 		t.Errorf("Stride=2 output length = %d, want 1", len(output))

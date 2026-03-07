@@ -16,7 +16,7 @@ func TestDropoutForwardTraining(t *testing.T) {
 		input[i] = 1.0
 	}
 
-	output := dropout.Forward(input)
+	output, _ := dropout.Forward(input)
 
 	// Count non-zero outputs
 	nonZero := 0
@@ -43,7 +43,7 @@ func TestDropoutForwardInference(t *testing.T) {
 		input[i] = float32(i)
 	}
 
-	output := dropout.Forward(input)
+	output, _ := dropout.Forward(input)
 
 	// Should be identical to input
 	for i := range input {
@@ -71,7 +71,10 @@ func TestDropoutBackward(t *testing.T) {
 		grad[i] = 1.0
 	}
 
-	outputGrad := dropout.Backward(grad)
+	outputGrad, err := dropout.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Check that gradient flows only through non-zero positions
 	keepProb := float32(1.0 - 0.5)
@@ -168,7 +171,7 @@ func TestDropoutPValue(t *testing.T) {
 			input[i] = 1.0
 		}
 
-		output := dropout.Forward(input)
+		output, _ := dropout.Forward(input)
 
 		nonZero := 0
 		for _, v := range output {

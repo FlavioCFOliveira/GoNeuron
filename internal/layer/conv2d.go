@@ -184,7 +184,7 @@ func (c *Conv2D) initMetal(batchSize, inH, inW, outH, outW int) {
 	c.bufGradB = mDevice.CreateEmptyBuffer(len(c.biases))
 }
 
-func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
+func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// Infer input dimensions from length
 	totalInput := len(input)
 	if totalInput%c.inChannels != 0 {
@@ -298,7 +298,7 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 			c.outputBuf[i] = c.activation.Activate(c.outputBuf[i])
 		}
 
-		return c.outputBuf[:requiredOutput]
+		return c.outputBuf[:requiredOutput], nil
 	}
 
 	outSize := outH * outW
@@ -364,19 +364,19 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		}
 	}
 
-	return c.outputBuf[:requiredOutput]
+	return c.outputBuf[:requiredOutput], nil
 }
 
 // Forward performs a forward pass through the convolutional layer.
-func (c *Conv2D) Forward(input []float32) []float32 {
+func (c *Conv2D) Forward(input []float32) ([]float32, error) {
 	return c.ForwardWithArena(input, nil, nil)
 }
 
-func (c *Conv2D) ForwardBatch(input []float32, batchSize int) []float32 {
+func (c *Conv2D) ForwardBatch(input []float32, batchSize int) ([]float32, error) {
 	return c.ForwardBatchWithArena(input, batchSize, nil, nil)
 }
 
-func (c *Conv2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (c *Conv2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return c.ForwardWithArena(input, arena, offset)
 	}
@@ -391,20 +391,23 @@ func (c *Conv2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]
 		c.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := c.ForwardWithArena(input[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := c.ForwardWithArena(input[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(c.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return c.outputBuf[:batchSize*outSize]
+	return c.outputBuf[:batchSize*outSize], nil
 }
 
 
 // Backward performs backpropagation through the convolutional layer.
 // grad: gradient of loss w.r.t. activated output (shape: [outChannels, outH, outW] flattened)
 // Returns: gradient of loss w.r.t. input
-func (c *Conv2D) Backward(grad []float32) []float32 {
+func (c *Conv2D) Backward(grad []float32) ([]float32, error) {
 	numSaved := len(c.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Use last saved input
@@ -483,8 +486,8 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 		// Pop the last saved input offset
 		c.savedInputOffsets = c.savedInputOffsets[:ts]
 
-		return gradInput
-	}
+		return gradInput, nil
+}
 
 	// Clear input gradient buffer
 	for i := range gradInput {
@@ -546,7 +549,7 @@ func (c *Conv2D) Backward(grad []float32) []float32 {
 	// Pop the last saved input offset
 	c.savedInputOffsets = c.savedInputOffsets[:ts]
 
-	return gradInput
+	return gradInput, nil
 }
 
 // Params returns layer parameters flattened.
@@ -610,11 +613,11 @@ func (c *Conv2D) updateGradViews() {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For Conv2D, gradients are already accumulated in Backward, so this just calls Backward.
-func (c *Conv2D) AccumulateBackward(grad []float32) []float32 {
+func (c *Conv2D) AccumulateBackward(grad []float32) ([]float32, error) {
 	return c.Backward(grad)
 }
 
-func (c *Conv2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (c *Conv2D) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return c.Backward(grad)
 	}
@@ -624,13 +627,16 @@ func (c *Conv2D) BackwardBatch(grad []float32, batchSize int) []float32 {
 		c.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := c.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := c.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(c.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return c.gradInBuf[:batchSize*inSize]
+	return c.gradInBuf[:batchSize*inSize], nil
 }
 
-func (c *Conv2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (c *Conv2D) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return c.BackwardBatch(grad, batchSize)
 }
 

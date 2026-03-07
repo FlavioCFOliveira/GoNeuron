@@ -79,7 +79,7 @@ func TestConv1DForward(t *testing.T) {
 	// pos1: 0*1 + 1*0 + 2*1 = 2
 	// etc.
 	x := []float32{0, 1, 2, 3, 4}
-	output := c.Forward(x)
+	output, _ := c.Forward(x)
 
 	if len(output) != 5 {
 		t.Errorf("Output length = %d, want 5", len(output))
@@ -105,7 +105,7 @@ func TestConv1DForwardWithActivation(t *testing.T) {
 
 	// Input that should produce negative intermediate results
 	x := []float32{1, 2, 3, 2, 1}
-	output := c.Forward(x)
+	output, _ := c.Forward(x)
 
 	// All outputs should be >= 0 due to ReLU
 	for i, v := range output {
@@ -125,7 +125,10 @@ func TestConv1DBackward(t *testing.T) {
 	c.biases = []float32{1}
 
 	x := []float32{1, 2, 3, 4, 5}
-	_ = c.Forward(x)
+	_, err := c.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 
 	// Gradient from next layer
 	grad := make([]float32, 5)
@@ -133,7 +136,10 @@ func TestConv1DBackward(t *testing.T) {
 		grad[i] = 1.0
 	}
 
-	gradIn := c.Backward(grad)
+	gradIn, err := c.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Check gradient input shape
 	if len(gradIn) != len(x) {
@@ -169,7 +175,7 @@ func TestConv1DMultiChannel(t *testing.T) {
 		x[i] = float32(i)
 	}
 
-	output := c.Forward(x)
+	output, _ := c.Forward(x)
 
 	expectedLen := 3 * inputLength // 3 output channels
 	if len(output) != expectedLen {
@@ -207,13 +213,19 @@ func TestConv1DGradients(t *testing.T) {
 
 	// Do forward and backward to get gradients
 	x := []float32{1, 2, 3, 4, 5}
-	_ = c.Forward(x)
+	_, err := c.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 
 	grad := make([]float32, 5)
 	for i := range grad {
 		grad[i] = 0.5
 	}
-	_ = c.Backward(grad)
+	_, err = c.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Get gradients
 	grads := c.Gradients()
@@ -256,7 +268,7 @@ func TestConv1DStride(t *testing.T) {
 		x[i] = float32(i)
 	}
 
-	output := c.Forward(x)
+	output, _ := c.Forward(x)
 	expectedLen := c.OutputLength(inputLength)
 
 	if len(output) != expectedLen {
@@ -273,10 +285,16 @@ func TestConv1DAccumulateBackward(t *testing.T) {
 	c.biases = []float32{0}
 
 	x1 := []float32{1, 2, 3, 4, 5}
-	_ = c.Forward(x1)
+	_, err := c.Forward(x1)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 
 	grad := []float32{0.1, 0.1, 0.1, 0.1, 0.1}
-	_ = c.Backward(grad)
+	_, err = c.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	firstGrads := make([]float32, len(c.gradWeights))
 	copy(firstGrads, c.gradWeights)
@@ -317,7 +335,10 @@ func BenchmarkConv1DBackward(b *testing.B) {
 	x := make([]float32, 3*inputLength)
 	grad := make([]float32, 64*inputLength)
 
-	_ = c.Forward(x)
+	_, err := c.Forward(x)
+	if err != nil {
+		b.Fatalf("Forward failed: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

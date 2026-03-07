@@ -104,7 +104,7 @@ func (r *RBF) SetTraining(training bool) {
 	r.training = training
 }
 
-func (r *RBF) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (r *RBF) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	if len(r.inputBuf) < r.inSize {
 		r.inputBuf = make([]float32, r.inSize)
 	}
@@ -151,18 +151,27 @@ func (r *RBF) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 		copy(savedPhi, r.phiBuf)
 		r.phiBuf = savedPhi
 		*offset += phiSize
+	} else {
+		// Save to internal buffers when arena is nil
+		copy(r.inputBuf, x)
+		// phiBuf is already populated above
 	}
 
-	return r.outputBuf[:r.outSize]
+	return r.outputBuf[:r.outSize], nil
 }
 
 // Forward performs a forward pass.
-func (r *RBF) Forward(x []float32) []float32 {
+func (r *RBF) Forward(x []float32) ([]float32, error) {
 	return r.ForwardWithArena(x, nil, nil)
 }
 
 // Backward performs a backward pass.
-func (r *RBF) Backward(grad []float32) []float32 {
+func (r *RBF) Backward(grad []float32) ([]float32, error) {
+	// Clear gradInBuf before accumulation
+	for i := range r.gradInBuf {
+		r.gradInBuf[i] = 0
+	}
+
 	// 1. Gradients for Linear part (weights and biases)
 	// dL/db_o = grad_o
 	// dL/dW_{oj} = grad_o * phi_j
@@ -195,19 +204,19 @@ func (r *RBF) Backward(grad []float32) []float32 {
 		}
 	}
 
-	return r.gradInBuf[:r.inSize]
+	return r.gradInBuf[:r.inSize], nil
 }
 
 // AccumulateBackward is like Backward but specifically for accumulation.
-func (r *RBF) AccumulateBackward(grad []float32) []float32 {
+func (r *RBF) AccumulateBackward(grad []float32) ([]float32, error) {
 	return r.Backward(grad)
 }
 
-func (r *RBF) ForwardBatch(x []float32, batchSize int) []float32 {
+func (r *RBF) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return r.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (r *RBF) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (r *RBF) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return r.ForwardWithArena(x, arena, offset)
 	}
@@ -217,13 +226,16 @@ func (r *RBF) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32
 		r.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := r.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := r.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(r.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return r.outputBuf[:batchSize*outSize]
+	return r.outputBuf[:batchSize*outSize], nil
 }
 
-func (r *RBF) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (r *RBF) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return r.Backward(grad)
 	}
@@ -231,13 +243,16 @@ func (r *RBF) BackwardBatch(grad []float32, batchSize int) []float32 {
 	outSize := r.outSize
 	dx := make([]float32, batchSize*inSize)
 	for i := batchSize - 1; i >= 0; i-- {
-		out := r.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := r.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(dx[i*inSize:(i+1)*inSize], out)
 	}
-	return dx
+	return dx, nil
 }
 
-func (r *RBF) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (r *RBF) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return r.BackwardBatch(grad, batchSize)
 }
 

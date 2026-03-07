@@ -47,7 +47,7 @@ func main() {
 	fmt.Println("\n=== Sample Predictions ===")
 	totalMSE := float32(0.0)
 	for i := range testInputs {
-		output := network.Forward(testInputs[i])
+		output, _ := network.Forward(testInputs[i])
 		target := testTargets[i][0]
 		diff := output[0] - target
 		totalMSE += diff * diff

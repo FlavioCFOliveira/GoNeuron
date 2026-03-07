@@ -27,7 +27,7 @@ func TestNetworkForward(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	input := []float32{1.0, 2.0}
-	output := network.Forward(input)
+	output, _ := network.Forward((input))
 
 	if len(output) != 1 {
 		t.Errorf("Output length = %d, want 1", len(output))
@@ -46,13 +46,16 @@ func TestNetworkBackward(t *testing.T) {
 	target := []float32{1.0}
 
 	// Forward
-	yPred := network.Forward(input)
+	yPred, _ := network.Forward((input))
 
 	// Compute loss gradient
-	grad := loss.MSE{}.Backward(yPred, target)
+	grad, err := loss.MSE{}.Backward(yPred, target)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Backward
-	outputGrad := network.Backward(grad)
+	outputGrad, _ := network.Backward((grad))
 
 	if len(outputGrad) != 2 {
 		t.Errorf("Output gradient length = %d, want 2", len(outputGrad))
@@ -109,7 +112,7 @@ func TestNetworkXOR(t *testing.T) {
 	}
 
 	for _, tt := range tolerances {
-		output := network.Forward(tt.input)
+		output, _ := network.Forward((tt.input))
 		pred := output[0]
 		if float32(math.Abs(float64(pred-tt.target))) > 0.1 {
 			t.Errorf("XOR(%v) = %v, want ~%v", tt.input, pred, tt.target)
@@ -131,8 +134,12 @@ func TestNetworkMultipleEpochs(t *testing.T) {
 	// Store initial loss
 	initialLoss := float32(0.0)
 	for i := range trainX {
-		yPred := network.Forward(trainX[i])
-		initialLoss += loss.MSE{}.Forward(yPred, trainY[i])
+		yPred, _ := network.Forward((trainX[i]))
+		l, err := loss.MSE{}.Forward(yPred, trainY[i])
+		if err != nil {
+			t.Fatalf("Forward failed: %v", err)
+		}
+		initialLoss += l
 	}
 	initialLoss /= float32(len(trainX))
 
@@ -146,8 +153,12 @@ func TestNetworkMultipleEpochs(t *testing.T) {
 	// Check that loss decreased
 	finalLoss := float32(0.0)
 	for i := range trainX {
-		yPred := network.Forward(trainX[i])
-		finalLoss += loss.MSE{}.Forward(yPred, trainY[i])
+		yPred, _ := network.Forward((trainX[i]))
+		l, err := loss.MSE{}.Forward(yPred, trainY[i])
+		if err != nil {
+			t.Fatalf("Forward failed: %v", err)
+		}
+		finalLoss += l
 	}
 	finalLoss /= float32(len(trainX))
 
@@ -299,8 +310,14 @@ func TestNetworkTrainBatchConsistency(t *testing.T) {
 	// Train one epoch with sequential (looping over samples)
 	for i := range trainX {
 		// Manual sequential accumulation for exact match
-		yPred := network1.Forward(trainX[i])
-		grad := network1.loss.Backward(yPred, trainY[i])
+		yPred, err := network1.Forward(trainX[i])
+		if err != nil {
+			t.Fatalf("Forward failed: %v", err)
+		}
+		grad, err := network1.loss.Backward(yPred, trainY[i])
+		if err != nil {
+			t.Fatalf("Backward failed: %v", err)
+		}
 		network1.Backward(grad)
 	}
 	// Average and step manually to match TrainBatch behavior
@@ -357,7 +374,7 @@ func TestNetworkGradientDescent(t *testing.T) {
 	// Test predictions
 	for i := 0; i < 10; i++ {
 		x := float32(i) / 10.0
-		output := network.Forward([]float32{x})
+		output, _ := network.Forward(([]float32{x}))
 		pred := output[0]
 		target := float32(2*x + 1)
 
@@ -406,7 +423,7 @@ func TestNetworkLayerOrdering(t *testing.T) {
 	}
 
 	// Forward pass
-	output := network.Forward([]float32{1.0, 1.0})
+	output, _ := network.Forward(([]float32{1.0, 1.0}))
 	if len(output) != 1 {
 		t.Errorf("Output length = %d, want 1", len(output))
 	}
@@ -433,7 +450,7 @@ func TestNetworkDifferentActivations(t *testing.T) {
 			network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 			// Just verify it doesn't panic
-			output := network.Forward([]float32{1.0, 1.0})
+			output, _ := network.Forward(([]float32{1.0, 1.0}))
 			if len(output) != 1 {
 				t.Errorf("Output length = %d, want 1", len(output))
 			}
@@ -450,14 +467,14 @@ func TestNetworkForwardBackwardShape(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	input := []float32{1.0, 1.0, 1.0}
-	output := network.Forward(input)
+	output, _ := network.Forward((input))
 
 	grad := make([]float32, len(output))
 	for i := range grad {
 		grad[i] = 1.0
 	}
 
-	outputGrad := network.Backward(grad)
+	outputGrad, _ := network.Backward((grad))
 
 	if len(outputGrad) != 3 {
 		t.Errorf("Input gradient length = %d, want 3", len(outputGrad))
@@ -538,7 +555,7 @@ func TestNetworkZeroInput(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Zero input should produce some output (due to biases)
-	output := network.Forward([]float32{0, 0})
+	output, _ := network.Forward(([]float32{0, 0}))
 
 	// Output should be in [-1, 1] for Tanh
 	for i := range output {
@@ -556,7 +573,7 @@ func TestNetworkLargeInput(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	// Large input values
-	output := network.Forward([]float32{100, 100})
+	output, _ := network.Forward(([]float32{100, 100}))
 
 	// Tanh should saturate at ±1
 	for i := range output {
@@ -573,7 +590,7 @@ func TestNetworkSingleLayer(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	output := network.Forward([]float32{1, 2, 3})
+	output, _ := network.Forward(([]float32{1, 2, 3}))
 	if len(output) != 2 {
 		t.Errorf("Output length = %d, want 2", len(output))
 	}
@@ -590,7 +607,7 @@ func TestNetworkDeepNetwork(t *testing.T) {
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
-	output := network.Forward([]float32{1, 2, 3, 4})
+	output, _ := network.Forward(([]float32{1, 2, 3, 4}))
 	if len(output) != 2 {
 		t.Errorf("Output length = %d, want 2", len(output))
 	}
@@ -651,11 +668,19 @@ func TestNetworkSequentialVsParallelConsistency(t *testing.T) {
 	testLossPar := float32(0.0)
 
 	for i := range trainX {
-		yPredSeq := sequentialNet.Forward(trainX[i])
-		yPredPar := parallelNet.Forward(trainX[i])
+		yPredSeq, _ := sequentialNet.Forward((trainX[i]))
+		yPredPar, _ := parallelNet.Forward((trainX[i]))
 
-		testLossSeq += loss.MSE{}.Forward(yPredSeq, trainY[i])
-		testLossPar += loss.MSE{}.Forward(yPredPar, trainY[i])
+		lSeq, err := loss.MSE{}.Forward(yPredSeq, trainY[i])
+		if err != nil {
+			t.Fatalf("Forward failed: %v", err)
+		}
+		lPar, err := loss.MSE{}.Forward(yPredPar, trainY[i])
+		if err != nil {
+			t.Fatalf("Forward failed: %v", err)
+		}
+		testLossSeq += lSeq
+		testLossPar += lPar
 	}
 
 	// Losses should be similar (both are minimizing the same objective)
@@ -674,10 +699,10 @@ func TestNetworkBackwardGradientShape(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	input := []float32{1, 2, 3}
-	output := network.Forward(input)
+	output, _ := network.Forward((input))
 
 	grad := make([]float32, len(output))
-	outputGrad := network.Backward(grad)
+	outputGrad, _ := network.Backward((grad))
 
 	if len(outputGrad) != len(input) {
 		t.Errorf("Input gradient length = %d, want %d", len(outputGrad), len(input))
@@ -693,8 +718,8 @@ func TestNetworkForwardIdempotent(t *testing.T) {
 
 	input := []float32{1.0, 2.0}
 
-	output1 := network.Forward(input)
-	output2 := network.Forward(input)
+	output1, _ := network.Forward((input))
+	output2, _ := network.Forward((input))
 
 	for i := range output1 {
 		if float32(math.Abs(float64(output1[i]-output2[i]))) > 1e-6 {
@@ -771,10 +796,10 @@ func TestNetworkBackwardChain(t *testing.T) {
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
 	input := []float32{1, 2}
-	_ = network.Forward(input) // Forward pass to populate states
+	_, _ = network.Forward(input) // Forward pass to populate states
 
 	grad := []float32{1.0}
-	outputGrad := network.Backward(grad)
+	outputGrad, _ := network.Backward(grad)
 
 	// Input gradient should have same length as input
 	if len(outputGrad) != 2 {
@@ -895,7 +920,10 @@ func TestNetworkGobEncodingAdam(t *testing.T) {
 	}
 
 	// Verify forward pass works
-	output := loadedNetwork.Forward([]float32{0.5, 0.5})
+	output, err := loadedNetwork.Forward([]float32{0.5, 0.5})
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 	if len(output) != 1 {
 		t.Errorf("Loaded network output length = %d, want 1", len(output))
 	}
@@ -1096,15 +1124,15 @@ func TestNetworkLSTMResetBetweenSamples(t *testing.T) {
 	// Store outputs for comparison
 	outputs := make([][]float32, len(trainX))
 	for i := range trainX {
-		outputs[i] = network.Forward(trainX[i])
+		outputs[i], _ = network.Forward(trainX[i])
 	}
 
 	// After reset, same input should produce same output (same weights, no state)
 	lstm.Reset()
-	output1 := network.Forward(trainX[0])
+	output1, _ := network.Forward((trainX[0]))
 
 	lstm.Reset()
-	output2 := network.Forward(trainX[0])
+	output2, _ := network.Forward((trainX[0]))
 
 	for i := range output1 {
 		if float32(math.Abs(float64(output1[i]-output2[i]))) > 1e-6 {
@@ -1136,7 +1164,7 @@ func TestNetworkTrainBatchWithLSTM(t *testing.T) {
 	}
 
 	// Verify forward pass works after batch training
-	output := network.Forward([]float32{1, 2})
+	output, _ := network.Forward(([]float32{1, 2}))
 	if len(output) != 2 {
 		t.Errorf("Output length = %d, want 2", len(output))
 	}
@@ -1158,7 +1186,7 @@ func TestNetworkTrainWithLSTMReset(t *testing.T) {
 	// Without proper reset, outputs would differ due to accumulated state
 	outputs := make([][]float32, 5)
 	for i := range outputs {
-		outputs[i] = network.Forward([]float32{1, 2})
+		outputs[i], _ = network.Forward([]float32{1, 2})
 	}
 
 	// Outputs should be identical (same weights, no accumulated state)

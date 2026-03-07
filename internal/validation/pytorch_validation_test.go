@@ -186,7 +186,10 @@ func TestPyTorchValidation_Dense(t *testing.T) {
 		dense.SetParams(params)
 
 		// Forward pass
-		output := dense.Forward(input)
+		output, err := dense.Forward(input)
+		if err != nil {
+			t.Fatalf("Forward failed: %v", err)
+		}
 
 		// Compare
 		if !slicesEqual(output, expected, 1e-4) {

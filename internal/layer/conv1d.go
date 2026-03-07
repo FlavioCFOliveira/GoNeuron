@@ -100,12 +100,12 @@ func (c *Conv1D) OutputLength(inputLength int) int {
 // Forward performs forward pass
 // Input shape: [batchSize, inChannels, inputLength]
 // Output shape: [batchSize, outChannels, outputLength]
-func (c *Conv1D) Forward(x []float32) []float32 {
+func (c *Conv1D) Forward(x []float32) ([]float32, error) {
 	return c.ForwardWithArena(x, nil, nil)
 }
 
 // ForwardWithArena performs forward pass with arena allocation
-func (c *Conv1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (c *Conv1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// Assuming batch size 1 for simplicity
 	// Full implementation would handle batches
 	batchSize := 1
@@ -149,7 +149,7 @@ func (c *Conv1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []
 		}
 	}
 
-	return c.outputBuf[:outputSize]
+	return c.outputBuf[:outputSize], nil
 }
 
 // conv1DForward performs the core convolution operation
@@ -193,8 +193,9 @@ func (c *Conv1D) conv1DForward(input, output []float32, batchSize, inputLength, 
 }
 
 // Backward performs backward pass
-func (c *Conv1D) Backward(grad []float32) []float32 {
-	return c.BackwardInPlace(grad, nil)
+func (c *Conv1D) Backward(grad []float32) ([]float32, error) {
+	gradIn := c.BackwardInPlace(grad, nil)
+	return gradIn, nil
 }
 
 // BackwardInPlace performs backward pass with optional gradient accumulation
@@ -297,8 +298,9 @@ func (c *Conv1D) ClearGradients() {
 }
 
 // AccumulateBackward accumulates gradients without clearing previous values
-func (c *Conv1D) AccumulateBackward(grad []float32) []float32 {
-	return c.BackwardInPlace(grad, nil)
+func (c *Conv1D) AccumulateBackward(grad []float32) ([]float32, error) {
+	gradIn := c.BackwardInPlace(grad, nil)
+	return gradIn, nil
 }
 
 // SetTraining sets training mode

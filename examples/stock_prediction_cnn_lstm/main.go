@@ -50,7 +50,11 @@ func minMaxScale(prices []float32) ([]float32, NormalizationParams) {
 	}
 	scaled := make([]float32, len(prices))
 	for i, p := range prices {
-		scaled[i] = (p - minVal) / (maxVal - minVal)
+		if maxVal == minVal {
+			scaled[i] = 0
+		} else {
+			scaled[i] = (p - minVal) / (maxVal - minVal)
+		}
 	}
 	return scaled, NormalizationParams{Min: minVal, Max: maxVal}
 }
@@ -102,7 +106,8 @@ func main() {
 	// Evaluation
 	var mse float32
 	for i := range xTest {
-		pred := network.Forward(xTest[i])[0]
+		out, _ := network.Forward(xTest[i])
+		pred := out[0]
 		diff := (pred - yTest[i][0]) * (normParams.Max - normParams.Min)
 		mse += diff * diff
 	}

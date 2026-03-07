@@ -40,7 +40,7 @@ func (s *SequenceUnroller) SetTraining(training bool) {
 	s.base.SetTraining(training)
 }
 
-func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	inSize := s.base.InSize()
 	outSize := s.base.OutSize()
 
@@ -88,10 +88,17 @@ func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offse
 			copy(s.storedInput[t], x[t*inSize:(t+1)*inSize])
 
 			var out []float32
+			var err error
 			if al, ok := s.base.(ArenaLayer); ok && arena != nil && offset != nil {
-				out = al.ForwardWithArena(s.storedInput[t], arena, offset)
+				out, err = al.ForwardWithArena(s.storedInput[t], arena, offset)
+				if err != nil {
+					return nil, err
+				}
 			} else {
-				out = s.base.Forward(s.storedInput[t])
+				out, err = s.base.Forward(s.storedInput[t])
+				if err != nil {
+					return nil, err
+				}
 			}
 
 			if s.returnSeq {
@@ -102,14 +109,14 @@ func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offse
 		}
 	}
 
-	return s.outputBuf
+	return s.outputBuf[:s.timeSteps*s.base.OutSize()], nil
 }
 
-func (s *SequenceUnroller) Forward(x []float32) []float32 {
+func (s *SequenceUnroller) Forward(x []float32) ([]float32, error) {
 	return s.ForwardWithArena(x, nil, nil)
 }
 
-func (s *SequenceUnroller) Backward(grad []float32) []float32 {
+func (s *SequenceUnroller) Backward(grad []float32) ([]float32, error) {
 	outSize := s.base.OutSize()
 	inSize := s.base.InSize()
 
@@ -134,7 +141,10 @@ func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 					currentGrad[i] += grad[i]
 				}
 			}
-			dx := bi.forward.Backward(currentGrad)
+			dx, err := bi.forward.Backward(currentGrad)
+			if err != nil {
+				return nil, err
+			}
 			copy(s.gradInBuf[t*inSize:(t+1)*inSize], dx)
 			copy(fGradNext, currentGrad)
 		}
@@ -152,7 +162,10 @@ func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 					currentGrad[i] += grad[fOutSize+i]
 				}
 			}
-			dx := bi.backward.Backward(currentGrad)
+			dx, err := bi.backward.Backward(currentGrad)
+			if err != nil {
+				return nil, err
+			}
 			// Add to gradInBuf (accumulate from both directions)
 			for i := 0; i < inSize; i++ {
 				s.gradInBuf[t*inSize+i] += dx[i]
@@ -173,20 +186,23 @@ func (s *SequenceUnroller) Backward(grad []float32) []float32 {
 					currentGrad[i] += grad[i]
 				}
 			}
-			dx := s.base.Backward(currentGrad)
+			dx, err := s.base.Backward(currentGrad)
+			if err != nil {
+				return nil, err
+			}
 			copy(s.gradInBuf[t*inSize:(t+1)*inSize], dx)
 			copy(dhNext, currentGrad)
 		}
 	}
 
-	return s.gradInBuf
+	return s.gradInBuf[:s.timeSteps*inSize], nil
 }
 
-func (s *SequenceUnroller) ForwardBatch(x []float32, batchSize int) []float32 {
+func (s *SequenceUnroller) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return s.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (s *SequenceUnroller) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (s *SequenceUnroller) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return s.ForwardWithArena(x, arena, offset)
 	}
@@ -196,13 +212,16 @@ func (s *SequenceUnroller) ForwardBatchWithArena(x []float32, batchSize int, are
 		s.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := s.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := s.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(s.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return s.outputBuf[:batchSize*outSize]
+	return s.outputBuf[:batchSize*outSize], nil
 }
 
-func (s *SequenceUnroller) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (s *SequenceUnroller) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return s.Backward(grad)
 	}
@@ -212,13 +231,16 @@ func (s *SequenceUnroller) BackwardBatch(grad []float32, batchSize int) []float3
 		s.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := s.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := s.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(s.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return s.gradInBuf[:batchSize*inSize]
+	return s.gradInBuf[:batchSize*inSize], nil
 }
 
-func (s *SequenceUnroller) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (s *SequenceUnroller) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return s.BackwardBatch(grad, batchSize)
 }
 
@@ -254,4 +276,4 @@ func (s *SequenceUnroller) OutSize() int {
 	}
 	return s.base.OutSize()
 }
-func (s *SequenceUnroller) AccumulateBackward(grad []float32) []float32 { return s.Backward(grad) }
+func (s *SequenceUnroller) AccumulateBackward(grad []float32) ([]float32, error) { return s.Backward(grad) }

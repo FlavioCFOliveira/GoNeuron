@@ -26,7 +26,7 @@ func TestAvgPool2DBatch(t *testing.T) {
 			}
 
 			// Forward Batch
-			output := pool.ForwardBatch(input, batchSize)
+			output, _ := pool.ForwardBatch(input, batchSize)
 
 			expectedSample := []float32{3.5, 5.5, 11.5, 13.5}
 			expected := append(expectedSample, expectedSample...)
@@ -46,7 +46,7 @@ func TestAvgPool2DBatch(t *testing.T) {
 			for i := range grad {
 				grad[i] = 1.0
 			}
-			gradIn := pool.BackwardBatch(grad, batchSize)
+			gradIn, _ := pool.BackwardBatch(grad, batchSize)
 
 			expectedGradVal := float32(0.25)
 			if len(gradIn) != len(input) {
@@ -85,7 +85,7 @@ func TestDropoutBatch(t *testing.T) {
 			// Use arena to test that path
 			arena := make([]float32, 1000)
 			offset := 0
-			output := dropout.ForwardBatchWithArena(input, batchSize, &arena, &offset)
+			output, _ := dropout.ForwardBatchWithArena(input, batchSize, &arena, &offset)
 
 			if len(output) != inSize*batchSize {
 				t.Fatalf("Output length mismatch: got %d, want %d", len(output), inSize*batchSize)
@@ -103,7 +103,7 @@ func TestDropoutBatch(t *testing.T) {
 			for i := range grad {
 				grad[i] = 1.0
 			}
-			gradIn := dropout.BackwardBatch(grad, batchSize)
+			gradIn, _ := dropout.BackwardBatch(grad, batchSize)
 
 			if len(gradIn) != inSize*batchSize {
 				t.Fatalf("GradIn length mismatch: got %d, want %d", len(gradIn), inSize*batchSize)

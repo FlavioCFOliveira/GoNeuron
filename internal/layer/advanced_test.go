@@ -11,7 +11,7 @@ func TestBidirectionalForward(t *testing.T) {
 	bi := NewBidirectional(f)
 
 	input := []float32{1.0, 0.5, -0.5}
-	output := bi.Forward(input)
+	output, _ := bi.Forward(input)
 
 	if len(output) != outSize*2 {
 		t.Errorf("Expected output length %d, got %d", outSize*2, len(output))
@@ -52,7 +52,7 @@ func TestAttentionForward(t *testing.T) {
 		input[i] = float32(i) * 0.1
 	}
 
-	output := att.Forward(input)
+	output, _ := att.Forward(input)
 	if len(output) != inSize {
 		t.Errorf("Expected output length %d, got %d", inSize, len(output))
 	}

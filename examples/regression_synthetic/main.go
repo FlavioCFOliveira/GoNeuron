@@ -46,7 +46,7 @@ func main() {
 	// 4. Evaluate
 	fmt.Println("\n=== Sample Predictions ===")
 	for i := 0; i < 5; i++ {
-		output := model.Forward(inputs[i])
+		output, _ := model.Forward(inputs[i])
 		fmt.Printf("Target: %8.3f, Prediction: %8.3f, Diff: %8.3f\n",
 			targets[i][0], output[0], output[0]-targets[i][0])
 	}

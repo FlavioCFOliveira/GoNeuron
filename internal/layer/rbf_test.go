@@ -29,7 +29,7 @@ func TestRBFForward(t *testing.T) {
 	// phi1 = exp(-1.0 * 2) = exp(-2) ≈ 0.135335
 	// y = 1*1 + 1*exp(-2) + 0 = 1 + exp(-2) ≈ 1.135335
 	input := []float32{0, 0}
-	output := r.Forward(input)
+	output, _ := r.Forward(input)
 
 	expected := float32(1.0 + math.Exp(-2.0))
 	if float32(math.Abs(float64(output[0]-expected))) > 1e-6 {
@@ -42,14 +42,14 @@ func TestRBFFlow(t *testing.T) {
 	input := []float32{0.5, -0.5}
 
 	// Forward pass
-	out := r.Forward(input)
+	out, _ := r.Forward(input)
 	if len(out) != 2 {
 		t.Errorf("expected output len 2, got %d", len(out))
 	}
 
 	// Backward pass
 	grad := []float32{0.1, -0.1}
-	inGrad := r.Backward(grad)
+	inGrad, _ := r.Backward(grad)
 	if len(inGrad) != 2 {
 		t.Errorf("expected input grad len 2, got %d", len(inGrad))
 	}
@@ -76,9 +76,10 @@ func TestRBFNumericalGradient(t *testing.T) {
 
 	// Get analytical gradient w.r.t input
 	r.ClearGradients()
-	r.Forward(input)
+	_, _ = r.Forward(input)
 	analyticalInGrad := make([]float32, 2)
-	copy(analyticalInGrad, r.Backward([]float32{1.0}))
+	gradResult, _ := r.Backward([]float32{1.0})
+	copy(analyticalInGrad, gradResult)
 
 	// Numerical gradient w.r.t input
 	numericalInGrad := make([]float32, 2)
@@ -86,13 +87,17 @@ func TestRBFNumericalGradient(t *testing.T) {
 		old := input[i]
 
 		input[i] = old + eps
-		outPlus := r.Forward(input)[0]
+		outPlusRaw, _ := r.Forward(input)
+		outPlus := make([]float32, len(outPlusRaw))
+		copy(outPlus, outPlusRaw)
 
 		input[i] = old - eps
-		outMinus := r.Forward(input)[0]
+		outMinus, _ := r.Forward(input)
 
-		numericalInGrad[i] = (outPlus - outMinus) / (2 * eps)
+		numericalInGrad[i] = (outPlus[0] - outMinus[0]) / (2 * eps)
 		input[i] = old
+
+		t.Logf("Dim %d: outPlus=%v, outMinus=%v, numerical=%v", i, outPlus[0], outMinus[0], numericalInGrad[i])
 	}
 
 	for i := range analyticalInGrad {

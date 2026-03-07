@@ -18,7 +18,7 @@ func TestRMSNorm(t *testing.T) {
 	sumSq := float32(1*1 + 2*2 + 3*3 + 4*4)
 	expectedRMS := float32(math.Sqrt(float64(sumSq/4.0 + eps)))
 
-	y := ln.Forward(x)
+	y, _ := ln.Forward(x)
 
 	for i := range x {
 		expected := x[i] / expectedRMS
@@ -29,7 +29,7 @@ func TestRMSNorm(t *testing.T) {
 
 	// Test backward
 	grad := []float32{0.1, 0.2, 0.3, 0.4}
-	dx := ln.Backward(grad)
+	dx, _ := ln.Backward(grad)
 
 	if len(dx) != dim {
 		t.Errorf("Expected gradient length %d, got %d", dim, len(dx))
@@ -46,14 +46,14 @@ func TestRMSNormBackward(t *testing.T) {
 		x[i] = float32(i + 1)
 	}
 
-	_ = l.Forward(x)
+	_, _ = l.Forward(x)
 
 	grad := make([]float32, dim)
 	for i := range grad {
 		grad[i] = 1.0
 	}
 
-	dx := l.Backward(grad)
+	dx, _ := l.Backward(grad)
 
 	// Numerical gradient check would be better but for now just check it's not zero
 	hasNonZero := false

@@ -30,7 +30,7 @@ func main() {
 		// Encoder
 		goneuron.Dense(2, goneuron.ReLU),
 		// Decoder
-		goneuron.Dense(10, goneuron.Sigmoid), // Using Sigmoid assuming input normalized to [0,1]
+		goneuron.Dense(10, goneuron.Tanh), // Using Tanh for unnormalized data (data is in [0,1) range from rand.Float32)
 	)
 
 	model.Compile(goneuron.Adam(0.01), goneuron.MSE)
@@ -43,12 +43,12 @@ func main() {
 	// 4. Demonstrate compression
 	fmt.Println("\n=== Sample Reconstruction ===")
 	sample := data[0]
-	reconstructed := model.Forward(sample)
+	reconstructed, _ := model.Forward(sample)
 
 	fmt.Printf("Original:      %.3f\n", sample[:5])
 	fmt.Printf("Reconstructed: %.3f\n", reconstructed[:5])
 
 	// Latent space (encoder output)
-	latent := model.Layers()[0].Forward(sample)
+	latent, _ := model.Layers()[0].Forward(sample)
 	fmt.Printf("Latent (2D):   %.3f\n", latent)
 }

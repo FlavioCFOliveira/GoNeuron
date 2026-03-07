@@ -178,7 +178,7 @@ func (g *GRU) SetTraining(training bool) {
 	g.training = training
 }
 
-func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// Copy input to buffer
 	copy(g.inputBuf, x)
 
@@ -277,7 +277,7 @@ func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 
 	// Copy output
 	copy(g.outputBuf, g.cellBuf)
-	return g.outputBuf
+	return g.outputBuf, nil
 }
 
 func (g *GRU) saveState(h, pre []float32) {
@@ -299,15 +299,15 @@ func (g *GRU) saveState(h, pre []float32) {
 }
 
 // Forward performs a forward pass for one time step.
-func (g *GRU) Forward(x []float32) []float32 {
+func (g *GRU) Forward(x []float32) ([]float32, error) {
 	return g.ForwardWithArena(x, nil, nil)
 }
 
-func (g *GRU) ForwardBatch(x []float32, batchSize int) []float32 {
+func (g *GRU) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return g.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (g *GRU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (g *GRU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return g.ForwardWithArena(x, arena, offset)
 	}
@@ -318,13 +318,13 @@ func (g *GRU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32
 	}
 	for i := 0; i < batchSize; i++ {
 		g.Reset()
-		out := g.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, _ := g.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
 		copy(g.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return g.outputBuf[:batchSize*outSize]
+	return g.outputBuf[:batchSize*outSize], nil
 }
 
-func (g *GRU) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (g *GRU) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return g.Backward(grad)
 	}
@@ -332,20 +332,23 @@ func (g *GRU) BackwardBatch(grad []float32, batchSize int) []float32 {
 	outSize := g.outSize
 	dx := make([]float32, batchSize*inSize)
 	for i := batchSize - 1; i >= 0; i-- {
-		out := g.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := g.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(dx[i*inSize:(i+1)*inSize], out)
 	}
-	return dx
+	return dx, nil
 }
 
-func (g *GRU) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (g *GRU) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return g.BackwardBatch(grad, batchSize)
 }
 
 // Params returns all GRU parameters flattened.
 // grad: gradient of loss w.r.t. output (length outSize)
 // Returns: gradient of loss w.r.t. input (length inSize)
-func (g *GRU) Backward(grad []float32) []float32 {
+func (g *GRU) Backward(grad []float32) ([]float32, error) {
 	outSize := g.outSize
 	inSize := g.inSize
 
@@ -355,7 +358,7 @@ func (g *GRU) Backward(grad []float32) []float32 {
 		for i := range g.inputBuf {
 			g.inputBuf[i] = 0
 		}
-		return g.inputBuf
+		return g.inputBuf, nil
 	}
 
 	// Get saved states from arena
@@ -511,7 +514,7 @@ func (g *GRU) Backward(grad []float32) []float32 {
 	}
 
 	g.timeStep--
-	return dx
+	return dx, nil
 }
 
 // Params returns all GRU parameters flattened.
@@ -673,6 +676,6 @@ func (g *GRU) LightweightClone(params []float32, grads []float32) Layer {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For GRU, gradients are already accumulated in Backward, so this just calls Backward.
-func (g *GRU) AccumulateBackward(grad []float32) []float32 {
+func (g *GRU) AccumulateBackward(grad []float32) ([]float32, error) {
 	return g.Backward(grad)
 }

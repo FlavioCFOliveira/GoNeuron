@@ -16,7 +16,7 @@ func TestAvgPool2DForward(t *testing.T) {
 	// 13 14 15 16
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
-	output := pool.Forward(input)
+	output, _ := pool.Forward(input)
 
 	// Expected output: 2x2 = 4 values
 	// (1+2+5+6)/4 = 3.5, (3+4+7+8)/4 = 5.5
@@ -44,7 +44,7 @@ func TestAvgPool2DForwardStride(t *testing.T) {
 	// 7 8 9
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-	output := pool.Forward(input)
+	output, _ := pool.Forward(input)
 
 	// With stride 1 and kernel 2: output = 2x2 = 4
 	// Position (0,0): (1+2+4+5)/4 = 3
@@ -71,7 +71,7 @@ func TestAvgPool2DForwardPadding(t *testing.T) {
 	// Input: 3x3 = 9 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-	output := pool.Forward(input)
+	output, _ := pool.Forward(input)
 
 	// With padding 1: effective input is 5x5 (padded with zeros)
 	// Output size: (3 + 2*1 - 2) / 2 + 1 = 2
@@ -86,11 +86,11 @@ func TestAvgPool2DBackward(t *testing.T) {
 
 	// Input: 4x4 = 16 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	pool.Forward(input)
+	_, _ = pool.Forward(input)
 
 	// Pass gradient of all ones
 	grad := []float32{1, 1, 1, 1}
-	outputGrad := pool.Backward(grad)
+	outputGrad, _ := pool.Backward(grad)
 
 	// Each input in a 2x2 pool should get 1/4 of the gradient
 	// Position (0,0) contributes to output (0,0): grad = 0.25
@@ -143,7 +143,7 @@ func TestAvgPool2DInOutSize(t *testing.T) {
 	for i := range input {
 		input[i] = float32(i)
 	}
-	pool.Forward(input)
+	_, _ = pool.Forward(input)
 
 	if pool.InSize() != 16 {
 		t.Errorf("InSize = %d, expected 16", pool.InSize())
@@ -174,7 +174,7 @@ func TestAvgPool2DBackwardLarge(t *testing.T) {
 	for i := range input {
 		input[i] = float32(i)
 	}
-	pool.Forward(input)
+	_, _ = pool.Forward(input)
 
 	grad := make([]float32, 1024)
 	for i := range grad {

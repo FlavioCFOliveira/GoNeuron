@@ -105,14 +105,18 @@ func Normalize(data [][]float32) ([][]float32, []struct{ Min, Max float32 }) {
 	return normalized, params
 }
 
-// Denormalize reverses normalization
+// Denormalize reverses normalization for flattened multi-feature data
+// data is organized as [t0_f0, t0_f1, ..., t0_fN, t1_f0, t1_f1, ...]
+// params has one entry per feature
 func Denormalize(data []float32, params []struct{ Min, Max float32 }) []float32 {
+	numFeatures := len(params)
 	result := make([]float32, len(data))
 	for i := 0; i < len(data); i++ {
-		if params[i].Max-params[i].Min != 0 {
-			result[i] = data[i]*(params[i].Max-params[i].Min) + params[i].Min
+		featureIdx := i % numFeatures
+		if params[featureIdx].Max-params[featureIdx].Min != 0 {
+			result[i] = data[i]*(params[featureIdx].Max-params[featureIdx].Min) + params[featureIdx].Min
 		} else {
-			result[i] = params[i].Min
+			result[i] = params[featureIdx].Min
 		}
 	}
 	return result
@@ -242,7 +246,7 @@ func main() {
 	// Calculate RMSE
 	var totalMSE float32
 	for i := 0; i < len(XTest); i++ {
-		pred := network.Forward(XTest[i])
+		pred, _ := network.Forward(XTest[i])
 		trueVal := yTest[i]
 
 		for j := 0; j < len(pred); j++ {
@@ -258,7 +262,7 @@ func main() {
 	var actualMSE float32
 	testSubsetSize := min(len(XTest), 100)
 	for i := 0; i < testSubsetSize; i++ {
-		pred := network.Forward(XTest[i])
+		pred, _ := network.Forward(XTest[i])
 
 		// Denormalize predictions and actuals
 		predDenorm := Denormalize(pred, normParams)
@@ -276,7 +280,7 @@ func main() {
 	// 9. Sample predictions
 	fmt.Println("\nSample Predictions (first 3 test samples):")
 	for i := 0; i < 3; i++ {
-		pred := network.Forward(XTest[i])
+		pred, _ := network.Forward(XTest[i])
 		trueVal := yTest[i]
 
 		fmt.Printf("\nSample %d:\n", i+1)

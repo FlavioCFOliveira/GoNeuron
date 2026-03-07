@@ -46,7 +46,7 @@ func (b *Bidirectional) SetTraining(training bool) {
 	b.backward.SetTraining(training)
 }
 
-func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// Store input for backward pass
 	var input []float32
 	if arena != nil && offset != nil {
@@ -67,10 +67,17 @@ func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *
 
 	// Forward pass for forward layer
 	var fOut []float32
+	var err error
 	if arenaLayer, ok := b.forward.(ArenaLayer); ok && arena != nil && offset != nil {
-		fOut = arenaLayer.ForwardWithArena(x, arena, offset)
+		fOut, err = arenaLayer.ForwardWithArena(x, arena, offset)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		fOut = b.forward.Forward(x)
+		fOut, err = b.forward.Forward(x)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Store forward output history
@@ -99,12 +106,12 @@ func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *
 	}
 
 	b.timeStep++
-	return b.outputBuf
+	return b.outputBuf, nil
 }
 
 // Forward performs a forward pass. Note: In bidirectional layers, the full sequence
 // is accumulated to allow the backward layer to process it later.
-func (b *Bidirectional) Forward(x []float32) []float32 {
+func (b *Bidirectional) Forward(x []float32) ([]float32, error) {
 	return b.ForwardWithArena(x, nil, nil)
 }
 
@@ -113,7 +120,7 @@ func (b *Bidirectional) Forward(x []float32) []float32 {
 // Backward performs backpropagation.
 // When Backward is called, we assume the sequence has ended, and we first
 // run the backward layer's forward pass over the accumulated history if not already done.
-func (b *Bidirectional) Backward(grad []float32) []float32 {
+func (b *Bidirectional) Backward(grad []float32) ([]float32, error) {
 	outSize := b.forward.OutSize()
 	inSize := b.forward.InSize()
 
@@ -124,7 +131,7 @@ func (b *Bidirectional) Backward(grad []float32) []float32 {
 
 	ts := b.timeStep - 1
 	if ts < 0 {
-		return make([]float32, inSize)
+		return make([]float32, inSize), nil
 	}
 
 	// Split gradient
@@ -132,10 +139,16 @@ func (b *Bidirectional) Backward(grad []float32) []float32 {
 	bGrad := grad[outSize:]
 
 	// Backward for forward layer
-	fInGrad := b.forward.Backward(fGrad)
+	fInGrad, err := b.forward.Backward(fGrad)
+	if err != nil {
+		return nil, err
+	}
 
 	// Backward for backward layer (it was fed inputs in reverse order)
-	bInGrad := b.backward.Backward(bGrad)
+	bInGrad, err := b.backward.Backward(bGrad)
+	if err != nil {
+		return nil, err
+	}
 
 	// Combine input gradients
 	combinedInGrad := make([]float32, inSize)
@@ -150,7 +163,7 @@ func (b *Bidirectional) Backward(grad []float32) []float32 {
 		b.backwardHistory = b.backwardHistory[:0]
 	}
 
-	return combinedInGrad
+	return combinedInGrad, nil
 }
 
 // Params returns concatenated parameters.
@@ -215,7 +228,7 @@ func (b *Bidirectional) ComputeBackwardHiddenStates() {
 
 	// Process input history in reverse
 	for i := seqLen - 1; i >= 0; i-- {
-		out := b.backward.Forward(b.inputHistory[i])
+		out, _ := b.backward.Forward(b.inputHistory[i])
 		outCopy := make([]float32, len(out))
 		copy(outCopy, out)
 		b.backwardHistory[i] = outCopy
@@ -234,7 +247,7 @@ func (b *Bidirectional) GetForwardOutputAt(t int) []float32 {
 func (b *Bidirectional) GetBackwardOutputAt(t int) []float32 {
 	if t < 0 || t >= len(b.backwardHistory) {
 		return nil
-	}
+}
 	return b.backwardHistory[t]
 }
 
@@ -265,11 +278,11 @@ func (b *Bidirectional) LightweightClone(params []float32, grads []float32) Laye
 	return newB
 }
 
-func (b *Bidirectional) ForwardBatch(x []float32, batchSize int) []float32 {
+func (b *Bidirectional) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return b.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (b *Bidirectional) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (b *Bidirectional) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return b.ForwardWithArena(x, arena, offset)
 	}
@@ -279,13 +292,16 @@ func (b *Bidirectional) ForwardBatchWithArena(x []float32, batchSize int, arena 
 		b.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := b.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := b.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(b.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return b.outputBuf[:batchSize*outSize]
+	return b.outputBuf[:batchSize*outSize], nil
 }
 
-func (b *Bidirectional) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (b *Bidirectional) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return b.Backward(grad)
 	}
@@ -293,13 +309,16 @@ func (b *Bidirectional) BackwardBatch(grad []float32, batchSize int) []float32 {
 	outSize := b.OutSize()
 	dx := make([]float32, batchSize*inSize)
 	for i := batchSize - 1; i >= 0; i-- {
-		out := b.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := b.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(dx[i*inSize:(i+1)*inSize], out)
 	}
-	return dx
+	return dx, nil
 }
 
-func (b *Bidirectional) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (b *Bidirectional) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return b.BackwardBatch(grad, batchSize)
 }
 
@@ -314,7 +333,7 @@ func (b *Bidirectional) OutSize() int {
 }
 
 // AccumulateBackward accumulates gradients.
-func (b *Bidirectional) AccumulateBackward(grad []float32) []float32 {
+func (b *Bidirectional) AccumulateBackward(grad []float32) ([]float32, error) {
 	return b.Backward(grad)
 }
 
@@ -333,7 +352,7 @@ func (b *Bidirectional) ProcessSequence(seq [][]float32) [][]float32 {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < seqLen; i++ {
-			out := b.forward.Forward(seq[i])
+			out, _ := b.forward.Forward(seq[i])
 			outCopy := make([]float32, len(out))
 			copy(outCopy, out)
 			fOuts[i] = outCopy
@@ -343,7 +362,7 @@ func (b *Bidirectional) ProcessSequence(seq [][]float32) [][]float32 {
 	go func() {
 		defer wg.Done()
 		for i := seqLen - 1; i >= 0; i-- {
-			out := b.backward.Forward(seq[i])
+			out, _ := b.backward.Forward(seq[i])
 			outCopy := make([]float32, len(out))
 			copy(outCopy, out)
 			bOuts[i] = outCopy

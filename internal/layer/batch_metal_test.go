@@ -31,7 +31,7 @@ func TestMetalAvgPool2DBatch(t *testing.T) {
 	}
 
 	// Forward Batch
-	output := pool.ForwardBatch(input, batchSize)
+	output, _ := pool.ForwardBatch(input, batchSize)
 
 	outH, outW := pool.computeOutputSize(inputHeight, inputWidth)
 	outSize := outH * outW
@@ -69,7 +69,7 @@ func TestMetalAvgPool2DBatch(t *testing.T) {
 	for i := range grad {
 		grad[i] = 1.0
 	}
-	gradIn := pool.BackwardBatch(grad, batchSize)
+	gradIn, _ := pool.BackwardBatch(grad, batchSize)
 
 	if len(gradIn) != batchSize*inSize {
 		t.Fatalf("Expected gradIn size %d, got %d", batchSize*inSize, len(gradIn))
@@ -105,7 +105,7 @@ func TestMetalDropoutBatch(t *testing.T) {
 		input[i] = 1.0
 	}
 
-	output := dropout.ForwardBatch(input, batchSize)
+	output, _ := dropout.ForwardBatch(input, batchSize)
 
 	if len(output) != batchSize*inSize {
 		t.Fatalf("Expected output size %d, got %d", batchSize*inSize, len(output))
@@ -134,7 +134,7 @@ func TestMetalDropoutBatch(t *testing.T) {
 	for i := range grad {
 		grad[i] = 1.0
 	}
-	gradIn := dropout.BackwardBatch(grad, batchSize)
+	gradIn, _ := dropout.BackwardBatch(grad, batchSize)
 
 	for i, v := range gradIn {
 		if output[i] == 0 {

@@ -143,7 +143,7 @@ func main() {
 	fmt.Println("\nTesting Model:")
 	for _, s := range testSentences {
 		tokens := tokenize(s)
-		pred := model.Forward(tokens)
+		pred, _ := model.Forward(tokens)
 		sentiment := "Positive"
 		if pred[1] > pred[0] {
 			sentiment = "Negative"

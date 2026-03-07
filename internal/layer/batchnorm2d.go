@@ -180,9 +180,9 @@ func (b *BatchNorm2D) SetDevice(device Device) {
 	}
 }
 
-func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	if len(x) == 0 {
-		return make([]float32, 0)
+		return make([]float32, 0), nil
 	}
 
 	total := len(x)
@@ -296,8 +296,8 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 
 			md.BatchNorm2DForwardPersistent(b.bufIn, b.bufOut, b.bufRunningMean, b.bufRunningVar, b.bufSavedMean, b.bufSavedStd, b.bufGamma, b.bufBeta, batchSize, b.numFeatures, spatialSize, b.eps, b.momentum, true, b.affine)
 			b.bufOut.Read(output)
-			return output
-		}
+			return output, nil
+}
 
 		// CPU normalization
 		for i := 0; i < batchSize; i++ {
@@ -334,8 +334,8 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 			}
 			md.BatchNorm2DForwardPersistent(b.bufIn, b.bufOut, b.bufRunningMean, b.bufRunningVar, b.bufSavedMean, b.bufSavedStd, b.bufGamma, b.bufBeta, batchSize, b.numFeatures, spatialSize, b.eps, b.momentum, false, b.affine)
 			b.bufOut.Read(output)
-			return output
-		}
+			return output, nil
+}
 
 		for i := 0; i < batchSize; i++ {
 			for f := 0; f < b.numFeatures; f++ {
@@ -353,22 +353,22 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 			}
 		}
 	}
-	return output
+	return output, nil
 }
 
-func (b *BatchNorm2D) Forward(x []float32) []float32 {
+func (b *BatchNorm2D) Forward(x []float32) ([]float32, error) {
 	return b.ForwardWithArena(x, nil, nil)
 }
 
-func (b *BatchNorm2D) ForwardBatch(x []float32, batchSize int) []float32 {
+func (b *BatchNorm2D) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return b.ForwardWithArena(x, nil, nil)
 }
 
-func (b *BatchNorm2D) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (b *BatchNorm2D) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	return b.ForwardWithArena(x, arena, offset)
 }
 
-func (b *BatchNorm2D) Backward(grad []float32) []float32 {
+func (b *BatchNorm2D) Backward(grad []float32) ([]float32, error) {
 	if !b.training {
 		total := len(grad)
 		if len(b.gradInBuf) < total {
@@ -394,12 +394,12 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 				}
 			}
 		}
-		return gradIn
-	}
+		return gradIn, nil
+}
 
 	numSaved := len(b.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, nil
 	}
 	ts := numSaved - 1
 	inOff := b.savedInputOffsets[ts]
@@ -463,8 +463,8 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 		b.savedInputOffsets = b.savedInputOffsets[:ts]
 		b.savedMeanOffsets = b.savedMeanOffsets[:ts]
 		b.savedStdOffsets = b.savedStdOffsets[:ts]
-		return gradIn
-	}
+		return gradIn, nil
+}
 
 	// CPU backward
 	m := float32(batchSize * spatialSize)
@@ -504,14 +504,14 @@ func (b *BatchNorm2D) Backward(grad []float32) []float32 {
 	b.savedInputOffsets = b.savedInputOffsets[:ts]
 	b.savedMeanOffsets = b.savedMeanOffsets[:ts]
 	b.savedStdOffsets = b.savedStdOffsets[:ts]
-	return gradIn
+	return gradIn, nil
 }
 
-func (b *BatchNorm2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (b *BatchNorm2D) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return b.Backward(grad)
 }
 
-func (b *BatchNorm2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (b *BatchNorm2D) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return b.Backward(grad)
 }
 
@@ -665,7 +665,7 @@ func (b *BatchNorm2D) GetGamma() []float32          { if !b.affine { return nil 
 func (b *BatchNorm2D) GetBeta() []float32           { if !b.affine { return nil }; return b.beta }
 func (b *BatchNorm2D) GetRunningMean() []float32    { return b.runningMean }
 func (b *BatchNorm2D) GetRunningVar() []float32     { return b.runningVar }
-func (b *BatchNorm2D) AccumulateBackward(grad []float32) []float32 { return b.Backward(grad) }
+func (b *BatchNorm2D) AccumulateBackward(grad []float32) ([]float32, error) { return b.Backward(grad) }
 func (b *BatchNorm2D) GetEps() float32              { return b.eps }
 func (b *BatchNorm2D) GetMomentum() float32         { return b.momentum }
 func (b *BatchNorm2D) SetTraining(training bool)    { b.training = training }

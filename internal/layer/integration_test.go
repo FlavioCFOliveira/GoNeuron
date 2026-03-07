@@ -15,7 +15,7 @@ func TestBatchNormIntegration(t *testing.T) {
 		input[i] = float32(i)
 	}
 
-	output := bn.Forward(input)
+	output, _ := bn.Forward(input)
 	params := bn.Params()
 
 	fmt.Printf("BatchNorm2D test: OutputLen=%d, Params=%d\n", len(output), len(params))
@@ -30,7 +30,7 @@ func TestLayerNormIntegration(t *testing.T) {
 		input[i] = float32(i)
 	}
 
-	output := ln.Forward(input)
+	output, _ := ln.Forward(input)
 
 	fmt.Printf("LayerNorm test: OutputLen=%d\n", len(output))
 }
@@ -40,7 +40,7 @@ func TestEmbeddingIntegration(t *testing.T) {
 	emb := NewEmbedding(100, 16)
 
 	input := []float32{0, 5, 10, 15}
-	output := emb.Forward(input)
+	output, _ := emb.Forward(input)
 
 	fmt.Printf("Embedding test: OutputLen=%d\n", len(output))
 }
@@ -54,7 +54,7 @@ func TestGRUIntegration(t *testing.T) {
 		input[i] = float32(i) * 0.1
 	}
 
-	output := gru.Forward(input)
+	output, _ := gru.Forward(input)
 
 	fmt.Printf("GRU test: OutputLen=%d\n", len(output))
 }
@@ -67,7 +67,10 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	for i := range input1 {
 		input1[i] = float32(i)
 	}
-	out1 := dropout.Forward(input1)
+	out1, err := dropout.Forward(input1)
+	if err != nil {
+		t.Fatalf("Dropout Forward failed: %v", err)
+	}
 	for _, v := range out1 {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Errorf("Dropout output contains invalid value: %f", v)
@@ -80,7 +83,10 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	for i := range input2 {
 		input2[i] = float32(i % 16)
 	}
-	out2 := maxPool.Forward(input2)
+	out2, err := maxPool.Forward(input2)
+	if err != nil {
+		t.Fatalf("MaxPool2D Forward failed: %v", err)
+	}
 	for _, v := range out2 {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Errorf("MaxPool2D output contains invalid value: %f", v)
@@ -93,7 +99,10 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	for i := range input3 {
 		input3[i] = float32(i)
 	}
-	out3 := bn.Forward(input3)
+	out3, err := bn.Forward(input3)
+	if err != nil {
+		t.Fatalf("BatchNorm2D Forward failed: %v", err)
+	}
 	for _, v := range out3 {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Errorf("BatchNorm2D output contains invalid value: %f", v)
@@ -106,7 +115,10 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	for i := range input4 {
 		input4[i] = float32(i)
 	}
-	out4 := ln.Forward(input4)
+	out4, err := ln.Forward(input4)
+	if err != nil {
+		t.Fatalf("LayerNorm Forward failed: %v", err)
+	}
 	for _, v := range out4 {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Errorf("LayerNorm output contains invalid value: %f", v)
@@ -116,7 +128,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	// Test Embedding
 	emb := NewEmbedding(100, 16)
 	input5 := []float32{0, 5, 10, 15}
-	out5 := emb.Forward(input5)
+	out5, _ := emb.Forward(input5)
 	for _, v := range out5 {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Errorf("Embedding output contains invalid value: %f", v)
@@ -129,7 +141,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	for i := range input6 {
 		input6[i] = float32(i) * 0.1
 	}
-	out6 := gru.Forward(input6)
+	out6, _ := gru.Forward(input6)
 	for _, v := range out6 {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Errorf("GRU output contains invalid value: %f", v)

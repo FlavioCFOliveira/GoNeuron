@@ -14,7 +14,7 @@ func TestPositionalEncoding(t *testing.T) {
 		input[i] = 1.0
 	}
 
-	output := pe.Forward(input)
+	output, _ := pe.Forward(input)
 	if len(output) != seqLen*dim {
 		t.Errorf("Expected output length %d, got %d", seqLen*dim, len(output))
 	}
@@ -44,7 +44,7 @@ func TestMultiHeadAttention(t *testing.T) {
 		input[i] = float32(i) * 0.1
 	}
 
-	output := mha.Forward(input)
+	output, _ := mha.Forward(input)
 	if len(output) != seqLen*dim {
 		t.Errorf("Expected output length %d, got %d", seqLen*dim, len(output))
 	}
@@ -93,7 +93,7 @@ func TestTransformerBlock(t *testing.T) {
 		input[i] = float32(i) * 0.1
 	}
 
-	output := tb.Forward(input)
+	output, _ := tb.Forward(input)
 	if len(output) != seqLen*dim {
 		t.Errorf("Expected output length %d, got %d", seqLen*dim, len(output))
 	}
@@ -109,7 +109,7 @@ func TestGlobalAveragePooling1D(t *testing.T) {
 	// Expected: [(1+3+5+7)/4, (2+4+6+8)/4] = [4, 5]
 	expected := []float32{4, 5}
 
-	output := gap.Forward(input)
+	output, _ := gap.Forward(input)
 	if len(output) != dim {
 		t.Errorf("Expected output length %d, got %d", dim, len(output))
 	}

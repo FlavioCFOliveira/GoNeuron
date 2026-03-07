@@ -14,7 +14,7 @@ func TestBatchNorm2DForward(t *testing.T) {
 	// Layout: [1, 5, 2, 6] (channel-major NCHW)
 	input := []float32{1, 5, 2, 6}
 
-	output := bn.Forward(input)
+	output, _ := bn.Forward(input)
 
 	// Feature 0: mean=3, std=sqrt(4)=2
 	// Normalized: [(1-3)/2, (5-3)/2] = [-1, 1]
@@ -65,7 +65,7 @@ func TestBatchNorm2DWithoutAffine(t *testing.T) {
 	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
 	input := []float32{1, 5, 2, 6}
-	output := bn.Forward(input)
+	output, _ := bn.Forward(input)
 
 	// Should be same as normalized
 	expected := []float32{-1, 1, -1, 1}
@@ -87,11 +87,17 @@ func TestBatchNorm2DBackward(t *testing.T) {
 	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
 	input := []float32{1, 5, 2, 6}
-	bn.Forward(input)
+	_, err := bn.Forward(input)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 
 	// Pass gradient of all ones
 	grad := []float32{1, 1, 1, 1}
-	outputGrad := bn.Backward(grad)
+	outputGrad, err := bn.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// For batch norm with all ones gradient and no affine,
 	// the gradient should sum to zero per channel
@@ -204,7 +210,7 @@ func TestBatchNorm2DNumFeatures(t *testing.T) {
 	// Input: 2 batches x 3 features = 6 values
 	input := []float32{1, 2, 3, 4, 5, 6}
 
-	output := bn.Forward(input)
+	output, _ := bn.Forward(input)
 
 	if len(output) != 6 {
 		t.Errorf("Output length = %d, expected 6", len(output))

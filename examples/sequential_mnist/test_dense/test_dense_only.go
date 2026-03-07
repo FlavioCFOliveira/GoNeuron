@@ -168,7 +168,7 @@ func main() {
 	fmt.Printf("\nTraining finished in %v\n", time.Since(start))
 	correct := 0
 	for i := 0; i < len(xTest); i++ {
-		pred := network.Forward(xTest[i])
+		pred, _ := network.Forward(xTest[i])
 		if argmax(pred) == argmax(yTest[i]) {
 			correct++
 		}

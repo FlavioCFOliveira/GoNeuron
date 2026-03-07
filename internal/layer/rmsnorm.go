@@ -116,7 +116,7 @@ func (r *RMSNorm) SetTraining(training bool) {
 	r.training = training
 }
 
-func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	numSamples := len(x) / r.normalizedShape
 
 	if len(r.outputBuf) < len(x) {
@@ -199,17 +199,17 @@ func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) [
 		}
 	}
 
-	return output[:len(x)]
+	return output[:len(x)], nil
 }
 
-func (r *RMSNorm) Forward(x []float32) []float32 {
+func (r *RMSNorm) Forward(x []float32) ([]float32, error) {
 	return r.ForwardWithArena(x, nil, nil)
 }
 
-func (r *RMSNorm) Backward(grad []float32) []float32 {
+func (r *RMSNorm) Backward(grad []float32) ([]float32, error) {
 	numSaved := len(r.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, nil
 	}
 
 	ts := numSaved - 1
@@ -291,14 +291,14 @@ func (r *RMSNorm) Backward(grad []float32) []float32 {
 	r.savedInputOffsets = r.savedInputOffsets[:ts]
 	r.savedRMSOffsets = r.savedRMSOffsets[:ts]
 
-	return r.gradInBuf[:len(grad)]
+	return r.gradInBuf[:len(grad)], nil
 }
 
-func (r *RMSNorm) ForwardBatch(x []float32, batchSize int) []float32 {
+func (r *RMSNorm) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return r.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (r *RMSNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (r *RMSNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return r.ForwardWithArena(x, arena, offset)
 	}
@@ -308,13 +308,16 @@ func (r *RMSNorm) ForwardBatchWithArena(x []float32, batchSize int, arena *[]flo
 		r.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := r.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := r.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(r.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return r.outputBuf[:batchSize*outSize]
+	return r.outputBuf[:batchSize*outSize], nil
 }
 
-func (r *RMSNorm) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (r *RMSNorm) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return r.Backward(grad)
 	}
@@ -324,13 +327,16 @@ func (r *RMSNorm) BackwardBatch(grad []float32, batchSize int) []float32 {
 		r.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := r.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := r.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(r.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return r.gradInBuf[:batchSize*inSize]
+	return r.gradInBuf[:batchSize*inSize], nil
 }
 
-func (r *RMSNorm) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (r *RMSNorm) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return r.BackwardBatch(grad, batchSize)
 }
 
@@ -433,6 +439,6 @@ func (r *RMSNorm) LightweightClone(params []float32, grads []float32) Layer {
 	return newR
 }
 
-func (r *RMSNorm) AccumulateBackward(grad []float32) []float32 {
+func (r *RMSNorm) AccumulateBackward(grad []float32) ([]float32, error) {
 	return r.Backward(grad)
 }

@@ -23,7 +23,7 @@ func BenchmarkMSEForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = mse.Forward(yPred, yTrue)
+		_, _ = mse.Forward(yPred, yTrue)
 	}
 }
 
@@ -37,7 +37,7 @@ func BenchmarkMSEBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = mse.Backward(yPred, yTrue)
+		_, _ = mse.Backward(yPred, yTrue)
 	}
 }
 
@@ -52,7 +52,7 @@ func BenchmarkMSEBackwardInPlace(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mse.BackwardInPlace(yPred, yTrue, grad)
+		_ = mse.BackwardInPlace(yPred, yTrue, grad)
 	}
 }
 
@@ -66,8 +66,8 @@ func BenchmarkMSEFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = mse.Forward(yPred, yTrue)
-		_ = mse.Backward(yPred, yTrue)
+		_, _ = mse.Forward(yPred, yTrue)
+		_, _ = mse.Backward(yPred, yTrue)
 	}
 }
 
@@ -87,7 +87,7 @@ func BenchmarkCrossEntropyForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ce.Forward(yPred, yTrue)
+		_, _ = ce.Forward(yPred, yTrue)
 	}
 }
 
@@ -101,7 +101,7 @@ func BenchmarkCrossEntropyBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ce.Backward(yPred, yTrue)
+		_, _ = ce.Backward(yPred, yTrue)
 	}
 }
 
@@ -115,8 +115,8 @@ func BenchmarkCrossEntropyFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ce.Forward(yPred, yTrue)
-		_ = ce.Backward(yPred, yTrue)
+		_, _ = ce.Forward(yPred, yTrue)
+		_, _ = ce.Backward(yPred, yTrue)
 	}
 }
 
@@ -130,7 +130,7 @@ func BenchmarkHuberForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = huber.Forward(yPred, yTrue)
+		_, _ = huber.Forward(yPred, yTrue)
 	}
 }
 
@@ -144,7 +144,7 @@ func BenchmarkHuberBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = huber.Backward(yPred, yTrue)
+		_, _ = huber.Backward(yPred, yTrue)
 	}
 }
 
@@ -158,8 +158,8 @@ func BenchmarkHuberFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = huber.Forward(yPred, yTrue)
-		_ = huber.Backward(yPred, yTrue)
+		_, _ = huber.Forward(yPred, yTrue)
+		_, _ = huber.Backward(yPred, yTrue)
 	}
 }
 
@@ -173,8 +173,8 @@ func BenchmarkHuberSmallDelta(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = huber.Forward(yPred, yTrue)
-		_ = huber.Backward(yPred, yTrue)
+		_, _ = huber.Forward(yPred, yTrue)
+		_, _ = huber.Backward(yPred, yTrue)
 	}
 }
 
@@ -188,8 +188,8 @@ func BenchmarkHuberLargeDelta(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = huber.Forward(yPred, yTrue)
-		_ = huber.Backward(yPred, yTrue)
+		_, _ = huber.Forward(yPred, yTrue)
+		_, _ = huber.Backward(yPred, yTrue)
 	}
 }
 
@@ -206,9 +206,9 @@ func BenchmarkLossComparison(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = mse.Forward(yPred, yTrue)
-		_ = ce.Forward(yPred, yTrue)
-		_ = huber.Forward(yPred, yTrue)
+		_, _ = mse.Forward(yPred, yTrue)
+		_, _ = ce.Forward(yPred, yTrue)
+		_, _ = huber.Forward(yPred, yTrue)
 	}
 }
 
@@ -222,7 +222,7 @@ func BenchmarkL1LossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l1.Forward(yPred, yTrue)
+		_, _ = l1.Forward(yPred, yTrue)
 	}
 }
 
@@ -236,7 +236,7 @@ func BenchmarkL1LossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l1.Backward(yPred, yTrue)
+		_, _ = l1.Backward(yPred, yTrue)
 	}
 }
 
@@ -250,8 +250,8 @@ func BenchmarkL1LossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l1.Forward(yPred, yTrue)
-		_ = l1.Backward(yPred, yTrue)
+		_, _ = l1.Forward(yPred, yTrue)
+		_, _ = l1.Backward(yPred, yTrue)
 	}
 }
 
@@ -275,7 +275,7 @@ func BenchmarkBCELossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = bce.Forward(yPred, yTrue)
+		_, _ = bce.Forward(yPred, yTrue)
 	}
 }
 
@@ -298,7 +298,7 @@ func BenchmarkBCELossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = bce.Backward(yPred, yTrue)
+		_, _ = bce.Backward(yPred, yTrue)
 	}
 }
 
@@ -321,8 +321,8 @@ func BenchmarkBCELossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = bce.Forward(yPred, yTrue)
-		_ = bce.Backward(yPred, yTrue)
+		_, _ = bce.Forward(yPred, yTrue)
+		_, _ = bce.Backward(yPred, yTrue)
 	}
 }
 
@@ -336,7 +336,7 @@ func BenchmarkBCEWithLogitsLossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = bce.Forward(yPred, yTrue)
+		_, _ = bce.Forward(yPred, yTrue)
 	}
 }
 
@@ -350,7 +350,7 @@ func BenchmarkBCEWithLogitsLossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = bce.Backward(yPred, yTrue)
+		_, _ = bce.Backward(yPred, yTrue)
 	}
 }
 
@@ -364,8 +364,8 @@ func BenchmarkBCEWithLogitsLossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = bce.Forward(yPred, yTrue)
-		_ = bce.Backward(yPred, yTrue)
+		_, _ = bce.Forward(yPred, yTrue)
+		_, _ = bce.Backward(yPred, yTrue)
 	}
 }
 
@@ -390,7 +390,7 @@ func BenchmarkNLLLossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = nll.Forward(yPred, yTrue)
+		_, _ = nll.Forward(yPred, yTrue)
 	}
 }
 
@@ -415,7 +415,7 @@ func BenchmarkNLLLossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = nll.Backward(yPred, yTrue)
+		_, _ = nll.Backward(yPred, yTrue)
 	}
 }
 
@@ -440,8 +440,8 @@ func BenchmarkNLLLossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = nll.Forward(yPred, yTrue)
-		_ = nll.Backward(yPred, yTrue)
+		_, _ = nll.Forward(yPred, yTrue)
+		_, _ = nll.Backward(yPred, yTrue)
 	}
 }
 
@@ -455,7 +455,7 @@ func BenchmarkCosineEmbeddingLossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l.Forward(yPred, yTrue)
+		_, _ = l.Forward(yPred, yTrue)
 	}
 }
 
@@ -469,7 +469,7 @@ func BenchmarkCosineEmbeddingLossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l.Backward(yPred, yTrue)
+		_, _ = l.Backward(yPred, yTrue)
 	}
 }
 
@@ -483,8 +483,8 @@ func BenchmarkCosineEmbeddingLossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l.Forward(yPred, yTrue)
-		_ = l.Backward(yPred, yTrue)
+		_, _ = l.Forward(yPred, yTrue)
+		_, _ = l.Backward(yPred, yTrue)
 	}
 }
 
@@ -498,7 +498,7 @@ func BenchmarkMarginRankingLossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l.Forward(yPred, yTrue)
+		_, _ = l.Forward(yPred, yTrue)
 	}
 }
 
@@ -512,7 +512,7 @@ func BenchmarkMarginRankingLossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l.Backward(yPred, yTrue)
+		_, _ = l.Backward(yPred, yTrue)
 	}
 }
 
@@ -526,8 +526,8 @@ func BenchmarkMarginRankingLossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = l.Forward(yPred, yTrue)
-		_ = l.Backward(yPred, yTrue)
+		_, _ = l.Forward(yPred, yTrue)
+		_, _ = l.Backward(yPred, yTrue)
 	}
 }
 
@@ -552,7 +552,7 @@ func BenchmarkKLDivLossForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = kld.Forward(yPred, yTrue)
+		_, _ = kld.Forward(yPred, yTrue)
 	}
 }
 
@@ -577,7 +577,7 @@ func BenchmarkKLDivLossBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = kld.Backward(yPred, yTrue)
+		_, _ = kld.Backward(yPred, yTrue)
 	}
 }
 
@@ -602,7 +602,7 @@ func BenchmarkKLDivLossFull(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = kld.Forward(yPred, yTrue)
-		_ = kld.Backward(yPred, yTrue)
+		_, _ = kld.Forward(yPred, yTrue)
+		_, _ = kld.Backward(yPred, yTrue)
 	}
 }

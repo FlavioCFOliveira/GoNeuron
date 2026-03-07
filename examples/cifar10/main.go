@@ -186,7 +186,7 @@ func evaluate(model *goneuron.Model, inputs, targets [][]float32) float32 {
 	model.SetTraining(false)
 
 	for i := range inputs {
-		pred := model.Forward(inputs[i])
+		pred, _ := model.Forward(inputs[i])
 		if argmax(pred) == argmax(targets[i]) {
 			correct++
 		}
@@ -196,6 +196,9 @@ func evaluate(model *goneuron.Model, inputs, targets [][]float32) float32 {
 }
 
 func argmax(probs []float32) int {
+	if len(probs) == 0 {
+		return 0
+	}
 	maxIdx := 0
 	maxVal := probs[0]
 	for i := 1; i < len(probs); i++ {

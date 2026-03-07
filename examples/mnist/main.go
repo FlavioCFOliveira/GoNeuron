@@ -63,10 +63,18 @@ func loadMNISTImages(filename string) ([][]float32, int, int, error) {
 	defer gz.Close()
 
 	var magic, numImages, rows, cols int32
-	binary.Read(gz, binary.BigEndian, &magic)
-	binary.Read(gz, binary.BigEndian, &numImages)
-	binary.Read(gz, binary.BigEndian, &rows)
-	binary.Read(gz, binary.BigEndian, &cols)
+	if err := binary.Read(gz, binary.BigEndian, &magic); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to read magic number: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &numImages); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to read number of images: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &rows); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to read rows: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &cols); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to read columns: %w", err)
+	}
 
 	if magic != 2051 {
 		return nil, 0, 0, fmt.Errorf("invalid magic number: %d", magic)
@@ -76,7 +84,9 @@ func loadMNISTImages(filename string) ([][]float32, int, int, error) {
 	pixelCount := int(rows * cols)
 	for i := 0; i < int(numImages); i++ {
 		pixels := make([]uint8, pixelCount)
-		gz.Read(pixels)
+		if _, err := io.ReadFull(gz, pixels); err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to read image %d: %w", i, err)
+		}
 		floatPixels := make([]float32, pixelCount)
 		for j := 0; j < pixelCount; j++ {
 			floatPixels[j] = float32(pixels[j]) / 255.0
@@ -101,8 +111,12 @@ func loadMNISTLabels(filename string) ([][]float32, error) {
 	defer gz.Close()
 
 	var magic, numLabels int32
-	binary.Read(gz, binary.BigEndian, &magic)
-	binary.Read(gz, binary.BigEndian, &numLabels)
+	if err := binary.Read(gz, binary.BigEndian, &magic); err != nil {
+		return nil, fmt.Errorf("failed to read magic number: %w", err)
+	}
+	if err := binary.Read(gz, binary.BigEndian, &numLabels); err != nil {
+		return nil, fmt.Errorf("failed to read number of labels: %w", err)
+	}
 
 	if magic != 2049 {
 		return nil, fmt.Errorf("invalid magic number: %d", magic)
@@ -111,9 +125,13 @@ func loadMNISTLabels(filename string) ([][]float32, error) {
 	labels := make([][]float32, numLabels)
 	for i := 0; i < int(numLabels); i++ {
 		var label uint8
-		binary.Read(gz, binary.BigEndian, &label)
+		if err := binary.Read(gz, binary.BigEndian, &label); err != nil {
+			return nil, fmt.Errorf("failed to read label %d: %w", i, err)
+		}
 		oneHot := make([]float32, 10)
-		oneHot[label] = 1.0
+		if label < 10 {
+			oneHot[label] = 1.0
+		}
 		labels[i] = oneHot
 	}
 
@@ -228,6 +246,9 @@ func main() {
 }
 
 func argmax(v []float32) int {
+	if len(v) == 0 {
+		return 0
+	}
 	maxIdx := 0
 	maxVal := v[0]
 	for i := 1; i < len(v); i++ {

@@ -189,7 +189,7 @@ func buildModel(vocabSize int, device layer.Device) *goneuron.Model {
 		goneuron.PositionalEncoding(seqLen),
 		goneuron.TransformerBlock(numHeads, seqLen, ffDim, true),
 		goneuron.SequenceUnroller(
-			goneuron.Dense(embeddingDim, vocabSize, goneuron.Softmax),
+			goneuron.Dense(embeddingDim, vocabSize, goneuron.Linear), // Linear, não Softmax (CrossEntropy já aplica Softmax)
 			seqLen,
 			true,
 		),
@@ -219,7 +219,7 @@ func trainModel(model *goneuron.Model, tokenizer *SimpleTokenizer, lines []strin
 			totalLoss += l
 
 			// Compute accuracy for this sample
-			pred := model.Forward(inputs[i])
+			pred, _ := model.Forward(inputs[i])
 			vSize := tokenizer.VocabSize()
 			for s := 0; s < seqLen-1; s++ {
 				targetID := -1
@@ -266,8 +266,12 @@ func evaluate(model *net.Network, tokenizer *SimpleTokenizer, lines []string) (f
 	vSize := tokenizer.VocabSize()
 
 	for i := 0; i < len(inputs); i++ {
-		pred := model.Forward(inputs[i])
-		totalLoss += model.Loss().Forward(pred, targets[i])
+		pred, _ := model.Forward(inputs[i])
+		l, err := model.Loss().Forward(pred, targets[i])
+		if err != nil {
+			continue
+		}
+		totalLoss += l
 
 		for s := 0; s < seqLen-1; s++ {
 			targetID := -1
@@ -432,7 +436,7 @@ func generateText(model *net.Network, tokenizer *SimpleTokenizer, seed string, m
 				resettable.Reset()
 			}
 		}
-		pred := model.Forward(input)
+		pred, _ := model.Forward(input)
 
 		lastIdx := len(seedTokens) - 1
 		if lastIdx >= seqLen { break }

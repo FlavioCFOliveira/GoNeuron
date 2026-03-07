@@ -53,7 +53,7 @@ func (g *GlobalAttention) SetTraining(training bool) {
 	g.training = training
 }
 
-func (g *GlobalAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (g *GlobalAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	var saved []float32
 	if arena != nil && offset != nil {
 		inSize := len(x)
@@ -72,11 +72,11 @@ func (g *GlobalAttention) ForwardWithArena(x []float32, arena *[]float32, offset
 	g.inputHistory = append(g.inputHistory, saved)
 
 	g.timeStep++
-	return x
+	return x, nil
 }
 
 // Forward accumulates inputs and returns zeros (or current input) until end of sequence.
-func (g *GlobalAttention) Forward(x []float32) []float32 {
+func (g *GlobalAttention) Forward(x []float32) ([]float32, error) {
 	return g.ForwardWithArena(x, nil, nil)
 }
 
@@ -120,7 +120,7 @@ func (g *GlobalAttention) ComputeContext() []float32 {
 }
 
 // Backward performs backpropagation.
-func (g *GlobalAttention) Backward(grad []float32) []float32 {
+func (g *GlobalAttention) Backward(grad []float32) ([]float32, error) {
 	// grad is dL/dOutputBuf
 	seqLen := len(g.inputHistory)
 	if seqLen == 0 {
@@ -128,7 +128,7 @@ func (g *GlobalAttention) Backward(grad []float32) []float32 {
 			g.gradInBuf = make([]float32, g.inSize)
 		}
 		for i := 0; i < g.inSize; i++ { g.gradInBuf[i] = 0 }
-		return g.gradInBuf[:g.inSize]
+		return g.gradInBuf[:g.inSize], nil
 	}
 
 	// If scores haven't been computed (Sequence hasn't finished properly), compute them
@@ -142,7 +142,7 @@ func (g *GlobalAttention) Backward(grad []float32) []float32 {
 			g.gradInBuf = make([]float32, g.inSize)
 		}
 		for i := 0; i < g.inSize; i++ { g.gradInBuf[i] = 0 }
-		return g.gradInBuf[:g.inSize]
+		return g.gradInBuf[:g.inSize], nil
 	}
 
 	// This is a complex backward pass because each timestep grad depends on all previous inputs.
@@ -161,7 +161,7 @@ func (g *GlobalAttention) Backward(grad []float32) []float32 {
 	}
 
 	g.timeStep--
-	return g.gradInBuf[:g.inSize]
+	return g.gradInBuf[:g.inSize], nil
 }
 
 // Params returns the learnable context vector.
@@ -236,11 +236,11 @@ func (g *GlobalAttention) LightweightClone(params []float32, grads []float32) La
 	return newG
 }
 
-func (g *GlobalAttention) ForwardBatch(x []float32, batchSize int) []float32 {
+func (g *GlobalAttention) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return g.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (g *GlobalAttention) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (g *GlobalAttention) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return g.ForwardWithArena(x, arena, offset)
 	}
@@ -250,13 +250,16 @@ func (g *GlobalAttention) ForwardBatchWithArena(x []float32, batchSize int, aren
 	}
 	for i := 0; i < batchSize; i++ {
 		g.Reset()
-		out := g.ForwardWithArena(x[i*g.inSize:(i+1)*g.inSize], arena, offset)
+		out, err := g.ForwardWithArena(x[i*g.inSize:(i+1)*g.inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(g.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return g.outputBuf[:batchSize*outSize]
+	return g.outputBuf[:batchSize*outSize], nil
 }
 
-func (g *GlobalAttention) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (g *GlobalAttention) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return g.Backward(grad)
 	}
@@ -264,13 +267,16 @@ func (g *GlobalAttention) BackwardBatch(grad []float32, batchSize int) []float32
 		g.gradInBuf = make([]float32, batchSize*g.inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		out := g.Backward(grad[i*g.inSize : (i+1)*g.inSize])
+		out, err := g.Backward(grad[i*g.inSize : (i+1)*g.inSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(g.gradInBuf[i*g.inSize:(i+1)*g.inSize], out)
 	}
-	return g.gradInBuf[:batchSize*g.inSize]
+	return g.gradInBuf[:batchSize*g.inSize], nil
 }
 
-func (g *GlobalAttention) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (g *GlobalAttention) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return g.BackwardBatch(grad, batchSize)
 }
 
@@ -298,6 +304,6 @@ func (g *GlobalAttention) NamedParams() []NamedParam {
 }
 
 // AccumulateBackward accumulates gradients.
-func (g *GlobalAttention) AccumulateBackward(grad []float32) []float32 {
+func (g *GlobalAttention) AccumulateBackward(grad []float32) ([]float32, error) {
 	return g.Backward(grad)
 }

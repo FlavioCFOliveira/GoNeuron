@@ -85,7 +85,7 @@ func (s *SwiGLU) Build(in int) {
 	s.gradInBuf = make([]float32, in)
 }
 
-func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	copy(s.inputBuf, x)
 
 	inSize := s.inSize
@@ -153,17 +153,17 @@ func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) []
 		s.outputBuf[i] = (g * sig) * s.upBuf[i]
 	}
 
-	return s.outputBuf
+	return s.outputBuf[:s.outSize], nil
 }
 
-func (s *SwiGLU) Forward(x []float32) []float32 {
+func (s *SwiGLU) Forward(x []float32) ([]float32, error) {
 	return s.ForwardWithArena(x, nil, nil)
 }
 
-func (s *SwiGLU) Backward(grad []float32) []float32 {
+func (s *SwiGLU) Backward(grad []float32) ([]float32, error) {
 	numSaved := len(s.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, nil
 	}
 
 	ts := numSaved - 1
@@ -220,7 +220,7 @@ func (s *SwiGLU) Backward(grad []float32) []float32 {
 	s.savedGateOffsets = s.savedGateOffsets[:ts]
 	s.savedUpOffsets = s.savedUpOffsets[:ts]
 
-	return s.gradInBuf
+	return s.gradInBuf[:s.inSize], nil
 }
 
 func (s *SwiGLU) Params() []float32 {
@@ -327,15 +327,15 @@ func (s *SwiGLU) LightweightClone(params []float32, grads []float32) Layer {
 	return newS
 }
 
-func (s *SwiGLU) AccumulateBackward(grad []float32) []float32 {
+func (s *SwiGLU) AccumulateBackward(grad []float32) ([]float32, error) {
 	return s.Backward(grad)
 }
 
-func (s *SwiGLU) ForwardBatch(x []float32, batchSize int) []float32 {
+func (s *SwiGLU) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return s.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (s *SwiGLU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (s *SwiGLU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return s.ForwardWithArena(x, arena, offset)
 	}
@@ -345,13 +345,16 @@ func (s *SwiGLU) ForwardBatchWithArena(x []float32, batchSize int, arena *[]floa
 		s.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := s.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := s.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(s.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return s.outputBuf[:batchSize*outSize]
+	return s.outputBuf[:batchSize*outSize], nil
 }
 
-func (s *SwiGLU) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (s *SwiGLU) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return s.Backward(grad)
 	}
@@ -359,13 +362,16 @@ func (s *SwiGLU) BackwardBatch(grad []float32, batchSize int) []float32 {
 	outSize := s.outSize
 	dx := make([]float32, batchSize*inSize)
 	for i := batchSize - 1; i >= 0; i-- {
-		out := s.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := s.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(dx[i*inSize:(i+1)*inSize], out)
 	}
-	return dx
+	return dx, nil
 }
 
-func (s *SwiGLU) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (s *SwiGLU) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return s.BackwardBatch(grad, batchSize)
 }
 

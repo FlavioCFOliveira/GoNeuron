@@ -35,8 +35,8 @@ func TestMetalConv2D(t *testing.T) {
 	}
 
 	// Forward
-	outCPU := convCPU.Forward(input)
-	outMetal := convMetal.Forward(input)
+	outCPU, _ := convCPU.Forward(input)
+	outMetal, _ := convMetal.Forward(input)
 
 	if len(outCPU) != len(outMetal) {
 		t.Fatalf("Output length mismatch: cpu=%d, metal=%d", len(outCPU), len(outMetal))
@@ -59,8 +59,8 @@ func TestMetalConv2D(t *testing.T) {
 	convCPU.ClearGradients()
 	convMetal.ClearGradients()
 
-	gradInCPU := convCPU.Backward(gradOut)
-	gradInMetal := convMetal.Backward(gradOut)
+	gradInCPU, _ := convCPU.Backward(gradOut)
+	gradInMetal, _ := convMetal.Backward(gradOut)
 
 	// Compare gradIn
 	for i := range gradInCPU {
@@ -109,8 +109,8 @@ func TestMetalConv2DBatch(t *testing.T) {
 	}
 
 	// Forward Batch
-	outCPU := convCPU.ForwardBatch(input, batchSize)
-	outMetal := convMetal.ForwardBatch(input, batchSize)
+	outCPU, _ := convCPU.ForwardBatch(input, batchSize)
+	outMetal, _ := convMetal.ForwardBatch(input, batchSize)
 
 	for i := range outCPU {
 		if math.Abs(float64(outCPU[i]-outMetal[i])) > 1e-3 {
@@ -128,8 +128,8 @@ func TestMetalConv2DBatch(t *testing.T) {
 	convCPU.ClearGradients()
 	convMetal.ClearGradients()
 
-	gradInCPU := convCPU.BackwardBatch(gradOut, batchSize)
-	gradInMetal := convMetal.BackwardBatch(gradOut, batchSize)
+	gradInCPU, _ := convCPU.BackwardBatch(gradOut, batchSize)
+	gradInMetal, _ := convMetal.BackwardBatch(gradOut, batchSize)
 
 	for i := range gradInCPU {
 		if math.Abs(float64(gradInCPU[i]-gradInMetal[i])) > 1e-3 {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"sort"
@@ -61,7 +60,7 @@ func (t *CharTokenizer) Decode(indices []int) string {
 }
 
 func main() {
-	content, err := ioutil.ReadFile("examples/code_generator/datasets/go_code.txt")
+	content, err := os.ReadFile("examples/code_generator/datasets/go_code.txt")
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
@@ -104,14 +103,14 @@ func main() {
 			input := make([]float32, seqLen)
 			for j, idx := range inputIndices { input[j] = float32(idx) }
 
-			x := emb.Forward(input)
-			x = pos.Forward(x)
-			x = block.Forward(x)
+			x, _ := emb.Forward(input)
+			x, _ = pos.Forward(x)
+			x, _ = block.Forward(x)
 
 			gradsHead := make([]float32, seqLen*embeddingDim)
 			allPredProbs := make([][]float32, seqLen)
 			for t := 0; t < seqLen; t++ {
-				logits := head.Forward(x[t*embeddingDim : (t+1)*embeddingDim])
+				logits, _ := head.Forward(x[t*embeddingDim : (t+1)*embeddingDim])
 				allPredProbs[t] = activations.Softmax{}.ActivateBatch(logits)
 			}
 
@@ -119,17 +118,24 @@ func main() {
 			for t := seqLen - 1; t >= 0; t-- {
 				targetOneHot := make([]float32, tokenizer.vocabSize)
 				targetOneHot[targetIndices[t]] = 1.0
-				lossSum += criterion.Forward(allPredProbs[t], targetOneHot)
-				gradOut := criterion.Backward(allPredProbs[t], targetOneHot)
-				gradIn := head.AccumulateBackward(gradOut)
+				l, err := criterion.Forward(allPredProbs[t], targetOneHot)
+				if err != nil {
+					continue
+				}
+				lossSum += l
+				gradOut, err := criterion.Backward(allPredProbs[t], targetOneHot)
+				if err != nil {
+					continue
+				}
+				gradIn, _ := head.AccumulateBackward(gradOut)
 				copy(gradsHead[t*embeddingDim:(t+1)*embeddingDim], gradIn)
 			}
 			totalLoss += lossSum / float32(seqLen)
 			numBatches++
 
-			grad := block.Backward(gradsHead)
-			grad = pos.Backward(grad)
-			emb.Backward(grad)
+			grad, _ := block.Backward(gradsHead)
+			grad, _ = pos.Backward(grad)
+			_, _ = emb.Backward(grad)
 
 			optimizer.NewStep()
 			updateParams(head, optimizer)
@@ -157,13 +163,13 @@ func main() {
 	}
 
 	for i := 0; i < 150; i++ {
-		x := emb.Forward(input)
-		x = pos.Forward(x)
-		x = block.Forward(x)
+		x, _ := emb.Forward(input)
+		x, _ = pos.Forward(x)
+		x, _ = block.Forward(x)
 		lastIdx := len(currIndices) - 1
 		if lastIdx < 0 { lastIdx = 0 }
 		if lastIdx >= seqLen { lastIdx = seqLen - 1 }
-		logits := head.Forward(x[lastIdx*embeddingDim : (lastIdx+1)*embeddingDim])
+		logits, _ := head.Forward(x[lastIdx*embeddingDim : (lastIdx+1)*embeddingDim])
 		nextIdx := sample(activations.Softmax{}.ActivateBatch(logits))
 		nextChar := tokenizer.idxToChar[nextIdx]
 		generated += string(nextChar)

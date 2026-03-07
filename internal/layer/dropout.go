@@ -69,13 +69,13 @@ func (d *Dropout) IsTraining() bool {
 	return d.training
 }
 
-func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	if !d.training {
 		if len(d.outputBuf) < len(x) {
 			d.outputBuf = make([]float32, len(x))
 		}
 		copy(d.outputBuf, x)
-		return d.outputBuf[:len(x)]
+		return d.outputBuf[:len(x)], nil
 	}
 
 	inSize := len(x)
@@ -115,7 +115,7 @@ func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) [
 		m.DropoutPersistent(inBuf, outBuf, mBuf, inSize, d.p, true, d.rng.RandUint64())
 		outBuf.Read(d.outputBuf[:inSize])
 		mBuf.Read(mask)
-		return d.outputBuf[:inSize]
+		return d.outputBuf[:inSize], nil
 	}
 
 	keepProb := 1.0 - d.p
@@ -131,19 +131,19 @@ func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) [
 		}
 	}
 
-	return d.outputBuf[:inSize]
+	return d.outputBuf[:inSize], nil
 }
 
 // Forward performs a forward pass through the dropout layer.
-func (d *Dropout) Forward(x []float32) []float32 {
+func (d *Dropout) Forward(x []float32) ([]float32, error) {
 	return d.ForwardWithArena(x, nil, nil)
 }
 
-func (d *Dropout) ForwardBatch(x []float32, batchSize int) []float32 {
+func (d *Dropout) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return d.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return d.ForwardWithArena(x, arena, offset)
 	}
@@ -156,7 +156,7 @@ func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]flo
 
 	if !d.training {
 		copy(d.outputBuf[:requiredSize], x)
-		return d.outputBuf[:requiredSize]
+		return d.outputBuf[:requiredSize], nil
 	}
 
 	var mask []float32
@@ -197,7 +197,7 @@ func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]flo
 		m.DropoutPersistent(inBuf, outBuf, mBuf, requiredSize, d.p, true, d.rng.RandUint64())
 		outBuf.Read(d.outputBuf[:requiredSize])
 		mBuf.Read(mask)
-		return d.outputBuf[:requiredSize]
+		return d.outputBuf[:requiredSize], nil
 	}
 
 	keepProb := 1.0 - d.p
@@ -213,22 +213,22 @@ func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]flo
 		}
 	}
 
-	return d.outputBuf[:requiredSize]
+	return d.outputBuf[:requiredSize], nil
 }
 
 // Backward performs backpropagation through the dropout layer.
-func (d *Dropout) Backward(grad []float32) []float32 {
+func (d *Dropout) Backward(grad []float32) ([]float32, error) {
 	if !d.training {
 		if len(d.gradInBuf) < len(grad) {
 			d.gradInBuf = make([]float32, len(grad))
 		}
 		copy(d.gradInBuf, grad)
-		return d.gradInBuf[:len(grad)]
+		return d.gradInBuf[:len(grad)], nil
 	}
 
 	numSaved := len(d.savedMaskOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, nil
 	}
 
 	ts := numSaved - 1
@@ -253,7 +253,7 @@ func (d *Dropout) Backward(grad []float32) []float32 {
 		gInBuf.Read(d.gradInBuf[:inSize])
 
 		d.savedMaskOffsets = d.savedMaskOffsets[:ts]
-		return d.gradInBuf[:inSize]
+		return d.gradInBuf[:inSize], nil
 	}
 
 	keepProb := 1.0 - d.p
@@ -268,10 +268,10 @@ func (d *Dropout) Backward(grad []float32) []float32 {
 	}
 
 	d.savedMaskOffsets = d.savedMaskOffsets[:ts]
-	return d.gradInBuf[:inSize]
+	return d.gradInBuf[:inSize], nil
 }
 
-func (d *Dropout) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (d *Dropout) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return d.Backward(grad)
 	}
@@ -284,17 +284,17 @@ func (d *Dropout) BackwardBatch(grad []float32, batchSize int) []float32 {
 
 	if !d.training {
 		copy(d.gradInBuf[:requiredSize], grad)
-		return d.gradInBuf[:requiredSize]
+		return d.gradInBuf[:requiredSize], nil
 	}
 
 	numSaved := len(d.savedMaskOffsets)
 	if numSaved < batchSize {
 		// Fallback to sequential if not enough masks
 		for i := batchSize - 1; i >= 0; i-- {
-			dx := d.Backward(grad[i*inSize : (i+1)*inSize])
+			dx, _ := d.Backward(grad[i*inSize : (i+1)*inSize])
 			copy(d.gradInBuf[i*inSize:(i+1)*inSize], dx)
 		}
-		return d.gradInBuf[:requiredSize]
+		return d.gradInBuf[:requiredSize], nil
 	}
 
 	ts := numSaved - batchSize
@@ -314,7 +314,7 @@ func (d *Dropout) BackwardBatch(grad []float32, batchSize int) []float32 {
 		gInBuf.Read(d.gradInBuf[:requiredSize])
 
 		d.savedMaskOffsets = d.savedMaskOffsets[:ts]
-		return d.gradInBuf[:requiredSize]
+		return d.gradInBuf[:requiredSize], nil
 	}
 
 	keepProb := 1.0 - d.p
@@ -329,14 +329,14 @@ func (d *Dropout) BackwardBatch(grad []float32, batchSize int) []float32 {
 	}
 
 	d.savedMaskOffsets = d.savedMaskOffsets[:ts]
-	return d.gradInBuf[:requiredSize]
+	return d.gradInBuf[:requiredSize], nil
 }
 
-func (d *Dropout) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (d *Dropout) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return d.BackwardBatch(grad, batchSize)
 }
 
-func (d *Dropout) AccumulateBackward(grad []float32) []float32 {
+func (d *Dropout) AccumulateBackward(grad []float32) ([]float32, error) {
 	return d.Backward(grad)
 }
 

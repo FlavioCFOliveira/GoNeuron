@@ -191,8 +191,7 @@ func main() {
 
 	model := goneuron.NewSequential(
 		goneuron.Embedding(vocab.nextIdx, embeddingDim),
-		goneuron.Flatten(),
-		goneuron.SequenceUnroller(goneuron.Bidirectional(goneuron.LSTM(lstmUnits, embeddingDim)), maxLen, true),
+		goneuron.SequenceUnroller(goneuron.Bidirectional(goneuron.LSTM(lstmUnits, embeddingDim)), maxLen, false),
 		goneuron.GlobalAttention(lstmUnits*2),
 		goneuron.Dense(lstmUnits*2, 2, goneuron.LogSoftmax),
 	)
@@ -218,7 +217,7 @@ func main() {
 
 	correct := 0
 	for i := 0; i < len(xTest); i++ {
-		pred := model.Forward(xTest[i])
+		pred, _ := model.Forward(xTest[i])
 		if argmax(pred) == argmax(yTest[i]) {
 			correct++
 		}

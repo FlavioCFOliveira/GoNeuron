@@ -62,7 +62,7 @@ func (p *PositionalEncoding) SetTraining(training bool) {
 	p.training = training
 }
 
-func (p *PositionalEncoding) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (p *PositionalEncoding) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// x is [seqLen * dim]
 	if len(p.outputBuf) < len(x) {
 		p.outputBuf = make([]float32, len(x))
@@ -70,18 +70,18 @@ func (p *PositionalEncoding) ForwardWithArena(x []float32, arena *[]float32, off
 	for i := range x {
 		p.outputBuf[i] = x[i] + p.weights[i]
 	}
-	return p.outputBuf[:len(x)]
+	return p.outputBuf[:len(x)], nil
 }
 
-func (p *PositionalEncoding) Forward(x []float32) []float32 {
+func (p *PositionalEncoding) Forward(x []float32) ([]float32, error) {
 	return p.ForwardWithArena(x, nil, nil)
 }
 
-func (p *PositionalEncoding) ForwardBatch(x []float32, batchSize int) []float32 {
+func (p *PositionalEncoding) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return p.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (p *PositionalEncoding) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (p *PositionalEncoding) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return p.ForwardWithArena(x, arena, offset)
 	}
@@ -91,26 +91,29 @@ func (p *PositionalEncoding) ForwardBatchWithArena(x []float32, batchSize int, a
 		p.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := p.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := p.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(p.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return p.outputBuf[:batchSize*outSize]
+	return p.outputBuf[:batchSize*outSize], nil
 }
 
-func (p *PositionalEncoding) Backward(grad []float32) []float32 {
+func (p *PositionalEncoding) Backward(grad []float32) ([]float32, error) {
 	// Gradient w.r.t. parameters is same as gradient w.r.t. output
 	// Gradient w.r.t. input is also same as gradient w.r.t. output
 	for i := range grad {
 		p.gradBuf[i] += grad[i]
 	}
-	return grad
+	return grad, nil
 }
 
-func (p *PositionalEncoding) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (p *PositionalEncoding) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return p.Backward(grad)
 }
 
-func (p *PositionalEncoding) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (p *PositionalEncoding) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return p.Backward(grad)
 }
 
@@ -173,7 +176,7 @@ func (p *PositionalEncoding) LightweightClone(params []float32, grads []float32)
 	}
 	return newP
 }
-func (p *PositionalEncoding) AccumulateBackward(grad []float32) []float32 { return p.Backward(grad) }
+func (p *PositionalEncoding) AccumulateBackward(grad []float32) ([]float32, error) { return p.Backward(grad) }
 
 type ActivationType int
 
@@ -341,7 +344,7 @@ func (m *MultiHeadAttention) SetTraining(training bool) {
 	m.wOut.SetTraining(training)
 }
 
-func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// x is [seqLen * dim]
 	seqLen := m.seqLen
 	dim := m.dim
@@ -355,14 +358,33 @@ func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, off
 		start := t * dim
 		end := start + dim
 		var q, k, v []float32
+		var err error
 		if arena != nil && offset != nil {
-			q = m.wQ.ForwardWithArena(x[start:end], arena, offset)
-			k = m.wK.ForwardWithArena(x[start:end], arena, offset)
-			v = m.wV.ForwardWithArena(x[start:end], arena, offset)
+			q, err = m.wQ.ForwardWithArena(x[start:end], arena, offset)
+			if err != nil {
+				return nil, err
+			}
+			k, err = m.wK.ForwardWithArena(x[start:end], arena, offset)
+			if err != nil {
+				return nil, err
+			}
+			v, err = m.wV.ForwardWithArena(x[start:end], arena, offset)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			q = m.wQ.Forward(x[start:end])
-			k = m.wK.Forward(x[start:end])
-			v = m.wV.Forward(x[start:end])
+			q, err = m.wQ.Forward(x[start:end])
+			if err != nil {
+				return nil, err
+			}
+			k, err = m.wK.Forward(x[start:end])
+			if err != nil {
+				return nil, err
+			}
+			v, err = m.wV.Forward(x[start:end])
+			if err != nil {
+				return nil, err
+			}
 		}
 		copy(m.qBuf[start:end], q)
 		copy(m.kBuf[start:end], k)
@@ -423,27 +445,34 @@ func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, off
 		start := t * dim
 		end := start + dim
 		var out []float32
+		var err error
 		if arena != nil && offset != nil {
-			out = m.wOut.ForwardWithArena(m.finalOutBuf[start:end], arena, offset)
+			out, err = m.wOut.ForwardWithArena(m.finalOutBuf[start:end], arena, offset)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			out = m.wOut.Forward(m.finalOutBuf[start:end])
+			out, err = m.wOut.Forward(m.finalOutBuf[start:end])
+			if err != nil {
+				return nil, err
+			}
 		}
 		copy(m.outputBuf[start:end], out)
 	}
 
-	return m.outputBuf
+	return m.outputBuf[:seqLen*dim], nil
 }
 
 // Forward performs self-attention.
-func (m *MultiHeadAttention) Forward(x []float32) []float32 {
+func (m *MultiHeadAttention) Forward(x []float32) ([]float32, error) {
 	return m.ForwardWithArena(x, nil, nil)
 }
 
-func (m *MultiHeadAttention) ForwardBatch(x []float32, batchSize int) []float32 {
+func (m *MultiHeadAttention) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return m.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (m *MultiHeadAttention) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (m *MultiHeadAttention) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return m.ForwardWithArena(x, arena, offset)
 	}
@@ -453,13 +482,16 @@ func (m *MultiHeadAttention) ForwardBatchWithArena(x []float32, batchSize int, a
 		m.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := m.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := m.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(m.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return m.outputBuf[:batchSize*outSize]
+	return m.outputBuf[:batchSize*outSize], nil
 }
 
-func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
+func (m *MultiHeadAttention) Backward(grad []float32) ([]float32, error) {
 	// grad is [seqLen * dim]
 	seqLen := m.seqLen
 	dim := m.dim
@@ -472,7 +504,11 @@ func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
 	for t := 0; t < seqLen; t++ {
 		start := t * dim
 		end := start + dim
-		copy(gradFinalOut[start:end], m.wOut.Backward(grad[start:end]))
+		gOut, err := m.wOut.Backward(grad[start:end])
+		if err != nil {
+			return nil, err
+		}
+		copy(gradFinalOut[start:end], gOut)
 	}
 
 	// 2. Backprop through Multi-Head Attention
@@ -569,19 +605,28 @@ func (m *MultiHeadAttention) Backward(grad []float32) []float32 {
 	for t := 0; t < seqLen; t++ {
 		start := t * dim
 		end := start + dim
-		dq := m.wQ.Backward(gradQ[start:end])
-		dk := m.wK.Backward(gradK[start:end])
-		dv := m.wV.Backward(gradV[start:end])
+		dq, err := m.wQ.Backward(gradQ[start:end])
+		if err != nil {
+			return nil, err
+		}
+		dk, err := m.wK.Backward(gradK[start:end])
+		if err != nil {
+			return nil, err
+		}
+		dv, err := m.wV.Backward(gradV[start:end])
+		if err != nil {
+			return nil, err
+		}
 
 		for i := 0; i < dim; i++ {
 			gradIn[start+i] = dq[i] + dk[i] + dv[i]
 		}
 	}
 
-	return gradIn
+	return gradIn[:seqLen*dim], nil
 }
 
-func (m *MultiHeadAttention) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (m *MultiHeadAttention) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return m.Backward(grad)
 	}
@@ -591,13 +636,16 @@ func (m *MultiHeadAttention) BackwardBatch(grad []float32, batchSize int) []floa
 		m.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		out := m.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := m.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(m.gradInBuf[i*inSize:(i+1)*inSize], out)
 	}
-	return m.gradInBuf[:batchSize*inSize]
+	return m.gradInBuf[:batchSize*inSize], nil
 }
 
-func (m *MultiHeadAttention) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (m *MultiHeadAttention) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return m.BackwardBatch(grad, batchSize)
 }
 
@@ -731,7 +779,7 @@ func (m *MultiHeadAttention) LightweightClone(params []float32, grads []float32)
 
 	return newM
 }
-func (m *MultiHeadAttention) AccumulateBackward(grad []float32) []float32 { return m.Backward(grad) }
+func (m *MultiHeadAttention) AccumulateBackward(grad []float32) ([]float32, error) { return m.Backward(grad) }
 
 type TransformerBlock struct {
 	mha   *MultiHeadAttention
@@ -900,13 +948,20 @@ func (t *TransformerBlock) SetTraining(training bool) {
 	t.ff2.SetTraining(training)
 }
 
-func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// 1. Multi-Head Attention + Residual Connection + LayerNorm
 	var attOut []float32
+	var err error
 	if arena != nil && offset != nil {
-		attOut = t.mha.ForwardWithArena(x, arena, offset)
+		attOut, err = t.mha.ForwardWithArena(x, arena, offset)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		attOut = t.mha.Forward(x)
+		attOut, err = t.mha.Forward(x)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Add & Norm 1
@@ -918,12 +973,21 @@ func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offse
 	var norm1Out []float32
 	if arena != nil && offset != nil {
 		if al, ok := t.norm1.(ArenaLayer); ok {
-			norm1Out = al.ForwardWithArena(t.res1Buf, arena, offset)
+			norm1Out, err = al.ForwardWithArena(t.res1Buf, arena, offset)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			norm1Out = t.norm1.Forward(t.res1Buf)
+			norm1Out, err = t.norm1.Forward(t.res1Buf)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
-		norm1Out = t.norm1.Forward(t.res1Buf)
+		norm1Out, err = t.norm1.Forward(t.res1Buf)
+		if err != nil {
+			return nil, err
+		}
 	}
 	copy(t.norm1OutBuf, norm1Out)
 
@@ -934,19 +998,34 @@ func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offse
 		var mid []float32
 		if arena != nil && offset != nil {
 			if al, ok := t.ff1.(ArenaLayer); ok {
-				mid = al.ForwardWithArena(t.norm1OutBuf[start:end], arena, offset)
+				mid, err = al.ForwardWithArena(t.norm1OutBuf[start:end], arena, offset)
+				if err != nil {
+					return nil, err
+				}
 			} else {
-				mid = t.ff1.Forward(t.norm1OutBuf[start:end])
+				mid, err = t.ff1.Forward(t.norm1OutBuf[start:end])
+				if err != nil {
+					return nil, err
+				}
 			}
 		} else {
-			mid = t.ff1.Forward(t.norm1OutBuf[start:end])
+			mid, err = t.ff1.Forward(t.norm1OutBuf[start:end])
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		var ffOut []float32
 		if arena != nil && offset != nil {
-			ffOut = t.ff2.ForwardWithArena(mid, arena, offset)
+			ffOut, err = t.ff2.ForwardWithArena(mid, arena, offset)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			ffOut = t.ff2.Forward(mid)
+			ffOut, err = t.ff2.Forward(mid)
+			if err != nil {
+				return nil, err
+			}
 		}
 		copy(t.ffOutBuf[start:end], ffOut)
 	}
@@ -960,27 +1039,36 @@ func (t *TransformerBlock) ForwardWithArena(x []float32, arena *[]float32, offse
 	var output []float32
 	if arena != nil && offset != nil {
 		if al, ok := t.norm2.(ArenaLayer); ok {
-			output = al.ForwardWithArena(t.res2Buf, arena, offset)
+			output, err = al.ForwardWithArena(t.res2Buf, arena, offset)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			output = t.norm2.Forward(t.res2Buf)
+			output, err = t.norm2.Forward(t.res2Buf)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
-		output = t.norm2.Forward(t.res2Buf)
+		output, err = t.norm2.Forward(t.res2Buf)
+		if err != nil {
+			return nil, err
+		}
 	}
 	copy(t.outputBuf, output)
 
-	return t.outputBuf
+	return t.outputBuf[:t.seqLen*t.dim], nil
 }
 
-func (t *TransformerBlock) Forward(x []float32) []float32 {
+func (t *TransformerBlock) Forward(x []float32) ([]float32, error) {
 	return t.ForwardWithArena(x, nil, nil)
 }
 
-func (t *TransformerBlock) ForwardBatch(x []float32, batchSize int) []float32 {
+func (t *TransformerBlock) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return t.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (t *TransformerBlock) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (t *TransformerBlock) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return t.ForwardWithArena(x, arena, offset)
 	}
@@ -990,20 +1078,27 @@ func (t *TransformerBlock) ForwardBatchWithArena(x []float32, batchSize int, are
 		t.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := t.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := t.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(t.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return t.outputBuf[:batchSize*outSize]
+	return t.outputBuf[:batchSize*outSize], nil
 }
 
-func (t *TransformerBlock) Backward(grad []float32) []float32 {
+func (t *TransformerBlock) Backward(grad []float32) ([]float32, error) {
 	// grad is [seqLen * dim]
 	seqLen := t.seqLen
 	dim := t.dim
 
 	// Backprop through LayerNorm 2
 	gradRes2 := t.gradRes2Buf
-	copy(gradRes2, t.norm2.Backward(grad))
+	g, err := t.norm2.Backward(grad)
+	if err != nil {
+		return nil, err
+	}
+	copy(gradRes2, g)
 
 	// Residual: gradNorm1Out = gradRes2, gradFFOut = gradRes2
 	gradFFOut := gradRes2
@@ -1013,8 +1108,15 @@ func (t *TransformerBlock) Backward(grad []float32) []float32 {
 	for s := 0; s < seqLen; s++ {
 		start := s * dim
 		end := start + dim
-		midGrad := t.ff2.Backward(gradFFOut[start:end])
-		copy(gradNorm1Out_FF[start:end], t.ff1.Backward(midGrad))
+		midGrad, err := t.ff2.Backward(gradFFOut[start:end])
+		if err != nil {
+			return nil, err
+		}
+		g, err := t.ff1.Backward(midGrad)
+		if err != nil {
+			return nil, err
+		}
+		copy(gradNorm1Out_FF[start:end], g)
 	}
 
 	// Backprop through LayerNorm 1 and Add & Norm 1
@@ -1024,11 +1126,18 @@ func (t *TransformerBlock) Backward(grad []float32) []float32 {
 	for i := 0; i < seqLen*dim; i++ {
 		combinedGrad[i] = gradRes2[i] + gradNorm1Out_FF[i]
 	}
-	copy(gradRes1, t.norm1.Backward(combinedGrad))
+	g, err = t.norm1.Backward(combinedGrad)
+	if err != nil {
+		return nil, err
+	}
+	copy(gradRes1, g)
 
 	// Backprop through Multi-Head Attention
 	gradAttOut := gradRes1
-	gradIn_Att := t.mha.Backward(gradAttOut)
+	gradIn_Att, err := t.mha.Backward(gradAttOut)
+	if err != nil {
+		return nil, err
+	}
 
 	// Final residual grad
 	gradIn := t.gradInBuf
@@ -1036,10 +1145,10 @@ func (t *TransformerBlock) Backward(grad []float32) []float32 {
 		gradIn[i] = gradRes1[i] + gradIn_Att[i]
 	}
 
-	return gradIn
+	return gradIn[:seqLen*dim], nil
 }
 
-func (t *TransformerBlock) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (t *TransformerBlock) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return t.Backward(grad)
 	}
@@ -1049,13 +1158,16 @@ func (t *TransformerBlock) BackwardBatch(grad []float32, batchSize int) []float3
 		t.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		out := t.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := t.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(t.gradInBuf[i*inSize:(i+1)*inSize], out)
 	}
-	return t.gradInBuf[:batchSize*inSize]
+	return t.gradInBuf[:batchSize*inSize], nil
 }
 
-func (t *TransformerBlock) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (t *TransformerBlock) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return t.BackwardBatch(grad, batchSize)
 }
 
@@ -1252,7 +1364,7 @@ func (t *TransformerBlock) LightweightClone(params []float32, grads []float32) L
 
 	return newT
 }
-func (t *TransformerBlock) AccumulateBackward(grad []float32) []float32 { return t.Backward(grad) }
+func (t *TransformerBlock) AccumulateBackward(grad []float32) ([]float32, error) { return t.Backward(grad) }
 
 // GlobalAveragePooling1D pools across the sequence dimension.
 type GlobalAveragePooling1D struct {
@@ -1279,7 +1391,7 @@ func (g *GlobalAveragePooling1D) SetTraining(training bool) {
 	g.training = training
 }
 
-func (g *GlobalAveragePooling1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (g *GlobalAveragePooling1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	if len(g.outputBuf) < g.dim {
 		g.outputBuf = make([]float32, g.dim)
 	}
@@ -1290,18 +1402,18 @@ func (g *GlobalAveragePooling1D) ForwardWithArena(x []float32, arena *[]float32,
 		}
 		g.outputBuf[i] = sum / float32(g.seqLen)
 	}
-	return g.outputBuf[:g.dim]
+	return g.outputBuf[:g.dim], nil
 }
 
-func (g *GlobalAveragePooling1D) Forward(x []float32) []float32 {
+func (g *GlobalAveragePooling1D) Forward(x []float32) ([]float32, error) {
 	return g.ForwardWithArena(x, nil, nil)
 }
 
-func (g *GlobalAveragePooling1D) ForwardBatch(x []float32, batchSize int) []float32 {
+func (g *GlobalAveragePooling1D) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return g.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (g *GlobalAveragePooling1D) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (g *GlobalAveragePooling1D) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return g.ForwardWithArena(x, arena, offset)
 	}
@@ -1311,13 +1423,16 @@ func (g *GlobalAveragePooling1D) ForwardBatchWithArena(x []float32, batchSize in
 		g.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := g.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := g.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(g.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return g.outputBuf[:batchSize*outSize]
+	return g.outputBuf[:batchSize*outSize], nil
 }
 
-func (g *GlobalAveragePooling1D) Backward(grad []float32) []float32 {
+func (g *GlobalAveragePooling1D) Backward(grad []float32) ([]float32, error) {
 	if len(g.gradInBuf) < g.seqLen*g.dim {
 		g.gradInBuf = make([]float32, g.seqLen*g.dim)
 	}
@@ -1326,10 +1441,10 @@ func (g *GlobalAveragePooling1D) Backward(grad []float32) []float32 {
 			g.gradInBuf[s*g.dim+i] = grad[i] / float32(g.seqLen)
 		}
 	}
-	return g.gradInBuf[:g.seqLen*g.dim]
+	return g.gradInBuf[:g.seqLen*g.dim], nil
 }
 
-func (g *GlobalAveragePooling1D) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (g *GlobalAveragePooling1D) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return g.Backward(grad)
 	}
@@ -1339,13 +1454,16 @@ func (g *GlobalAveragePooling1D) BackwardBatch(grad []float32, batchSize int) []
 		g.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		out := g.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := g.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(g.gradInBuf[i*inSize:(i+1)*inSize], out)
 	}
-	return g.gradInBuf[:batchSize*inSize]
+	return g.gradInBuf[:batchSize*inSize], nil
 }
 
-func (g *GlobalAveragePooling1D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (g *GlobalAveragePooling1D) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return g.BackwardBatch(grad, batchSize)
 }
 
@@ -1365,7 +1483,7 @@ func (g *GlobalAveragePooling1D) Clone() Layer {
 func (g *GlobalAveragePooling1D) LightweightClone(params []float32, grads []float32) Layer {
 	return NewGlobalAveragePooling1D(g.seqLen, g.dim)
 }
-func (g *GlobalAveragePooling1D) AccumulateBackward(grad []float32) []float32 { return g.Backward(grad) }
+func (g *GlobalAveragePooling1D) AccumulateBackward(grad []float32) ([]float32, error) { return g.Backward(grad) }
 
 // CLSPooling extracts the first vector (CLS token) from a sequence.
 type CLSPooling struct {
@@ -1392,24 +1510,24 @@ func (c *CLSPooling) SetTraining(training bool) {
 	c.training = training
 }
 
-func (c *CLSPooling) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (c *CLSPooling) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// x is [seqLen * dim]
 	if len(c.outputBuf) < c.dim {
 		c.outputBuf = make([]float32, c.dim)
 	}
 	copy(c.outputBuf, x[0:c.dim])
-	return c.outputBuf[:c.dim]
+	return c.outputBuf[:c.dim], nil
 }
 
-func (c *CLSPooling) Forward(x []float32) []float32 {
+func (c *CLSPooling) Forward(x []float32) ([]float32, error) {
 	return c.ForwardWithArena(x, nil, nil)
 }
 
-func (c *CLSPooling) ForwardBatch(x []float32, batchSize int) []float32 {
+func (c *CLSPooling) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return c.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (c *CLSPooling) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (c *CLSPooling) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return c.ForwardWithArena(x, arena, offset)
 	}
@@ -1419,13 +1537,16 @@ func (c *CLSPooling) ForwardBatchWithArena(x []float32, batchSize int, arena *[]
 		c.outputBuf = make([]float32, batchSize*outSize)
 	}
 	for i := 0; i < batchSize; i++ {
-		out := c.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := c.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(c.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return c.outputBuf[:batchSize*outSize]
+	return c.outputBuf[:batchSize*outSize], nil
 }
 
-func (c *CLSPooling) Backward(grad []float32) []float32 {
+func (c *CLSPooling) Backward(grad []float32) ([]float32, error) {
 	// grad is [dim]
 	if len(c.gradInBuf) < c.seqLen*c.dim {
 		c.gradInBuf = make([]float32, c.seqLen*c.dim)
@@ -1434,10 +1555,10 @@ func (c *CLSPooling) Backward(grad []float32) []float32 {
 		c.gradInBuf[i] = 0
 	}
 	copy(c.gradInBuf[0:c.dim], grad)
-	return c.gradInBuf[:c.seqLen*c.dim]
+	return c.gradInBuf[:c.seqLen*c.dim], nil
 }
 
-func (c *CLSPooling) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (c *CLSPooling) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return c.Backward(grad)
 	}
@@ -1447,13 +1568,16 @@ func (c *CLSPooling) BackwardBatch(grad []float32, batchSize int) []float32 {
 		c.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		out := c.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := c.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(c.gradInBuf[i*inSize:(i+1)*inSize], out)
 	}
-	return c.gradInBuf[:batchSize*inSize]
+	return c.gradInBuf[:batchSize*inSize], nil
 }
 
-func (c *CLSPooling) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (c *CLSPooling) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return c.BackwardBatch(grad, batchSize)
 }
 
@@ -1473,4 +1597,4 @@ func (c *CLSPooling) Clone() Layer {
 func (c *CLSPooling) LightweightClone(params []float32, grads []float32) Layer {
 	return NewCLSPooling(c.seqLen, c.dim)
 }
-func (c *CLSPooling) AccumulateBackward(grad []float32) []float32 { return c.Backward(grad) }
+func (c *CLSPooling) AccumulateBackward(grad []float32) ([]float32, error) { return c.Backward(grad) }

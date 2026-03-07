@@ -79,15 +79,13 @@ func NewMoE(inSize, outSize, numExperts, k int) *MoE {
 func (m *MoE) Build(inSize int) {
 	m.inSize = inSize
 
-	// Build sub-layers if they are deferred
-	if m.gating.InSize() <= 0 {
-		m.gating.Build(inSize)
-	}
+	// Build gating network (always rebuild to ensure correct dimensions)
+	m.gating.Build(inSize)
+
+	// Build all experts (always rebuild to ensure correct dimensions)
 	for _, e := range m.experts {
-		if e.InSize() <= 0 {
-			if de, ok := e.(DeferredLayer); ok {
-				de.Build(inSize)
-			}
+		if de, ok := e.(DeferredLayer); ok {
+			de.Build(inSize)
 		}
 	}
 
@@ -114,15 +112,22 @@ func (m *MoE) Build(inSize int) {
 	m.gradInBuf = make([]float32, inSize)
 }
 
-func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	copy(m.inputBuf, x)
 
 	// 1. Gating Network
 	var logits []float32
+	var err error
 	if arena != nil && offset != nil {
-		logits = m.gating.ForwardWithArena(x, arena, offset)
+		logits, err = m.gating.ForwardWithArena(x, arena, offset)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		logits = m.gating.Forward(x)
+		logits, err = m.gating.Forward(x)
+		if err != nil {
+			return nil, err
+		}
 	}
 	copy(m.gateLogits, logits)
 
@@ -168,10 +173,17 @@ func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 		w := m.weightsBuf[i].weight
 
 		var expertOut []float32
+		var err error
 		if al, ok := m.experts[idx].(ArenaLayer); ok && arena != nil && offset != nil {
-			expertOut = al.ForwardWithArena(x, arena, offset)
+			expertOut, err = al.ForwardWithArena(x, arena, offset)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			expertOut = m.experts[idx].Forward(x)
+			expertOut, err = m.experts[idx].Forward(x)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if arena != nil && offset != nil {
@@ -193,14 +205,14 @@ func (m *MoE) ForwardWithArena(x []float32, arena *[]float32, offset *int) []flo
 		}
 	}
 
-	return m.outputBuf[:m.outSize]
+	return m.outputBuf[:m.outSize], nil
 }
 
-func (m *MoE) Forward(x []float32) []float32 {
+func (m *MoE) Forward(x []float32) ([]float32, error) {
 	return m.ForwardWithArena(x, nil, nil)
 }
 
-func (m *MoE) Backward(grad []float32) []float32 {
+func (m *MoE) Backward(grad []float32) ([]float32, error) {
 	// Reset buffers
 	for i := range m.dxTotalBuf {
 		m.dxTotalBuf[i] = 0
@@ -219,7 +231,10 @@ func (m *MoE) Backward(grad []float32) []float32 {
 		}
 
 		// Backward through expert
-		dxExpert := m.experts[idx].Backward(m.expertGradBuf)
+		dxExpert, err := m.experts[idx].Backward(m.expertGradBuf)
+		if err != nil {
+			return nil, err
+		}
 		for i := 0; i < m.inSize; i++ {
 			m.dxTotalBuf[i] += dxExpert[i]
 		}
@@ -257,12 +272,15 @@ func (m *MoE) Backward(grad []float32) []float32 {
 	}
 
 	// 5. Backprop through gating network (Linear)
-	dxGating := m.gating.Backward(m.gateGradBuf)
+	dxGating, err := m.gating.Backward(m.gateGradBuf)
+	if err != nil {
+		return nil, err
+	}
 	for i := 0; i < m.inSize; i++ {
 		m.dxTotalBuf[i] += dxGating[i]
 	}
 
-	return m.dxTotalBuf
+	return m.dxTotalBuf, nil
 }
 
 func (m *MoE) Params() []float32 {
@@ -394,11 +412,11 @@ func (m *MoE) LightweightClone(params []float32, grads []float32) Layer {
 	return newM
 }
 
-func (m *MoE) ForwardBatch(x []float32, batchSize int) []float32 {
+func (m *MoE) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return m.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (m *MoE) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (m *MoE) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return m.ForwardWithArena(x, arena, offset)
 	}
@@ -409,13 +427,16 @@ func (m *MoE) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32
 	}
 	for i := 0; i < batchSize; i++ {
 		m.Reset()
-		out := m.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := m.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(m.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return m.outputBuf[:batchSize*outSize]
+	return m.outputBuf[:batchSize*outSize], nil
 }
 
-func (m *MoE) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (m *MoE) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return m.Backward(grad)
 	}
@@ -425,13 +446,16 @@ func (m *MoE) BackwardBatch(grad []float32, batchSize int) []float32 {
 		m.gradInBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		out := m.Backward(grad[i*outSize : (i+1)*outSize])
+		out, err := m.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(m.gradInBuf[i*inSize:(i+1)*inSize], out)
 	}
-	return m.gradInBuf[:batchSize*inSize]
+	return m.gradInBuf[:batchSize*inSize], nil
 }
 
-func (m *MoE) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (m *MoE) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return m.BackwardBatch(grad, batchSize)
 }
 
@@ -453,6 +477,6 @@ func (m *MoE) SetTraining(t bool) {
 func (m *MoE) InSize() int  { return m.inSize }
 func (m *MoE) OutSize() int { return m.outSize }
 
-func (m *MoE) AccumulateBackward(grad []float32) []float32 {
+func (m *MoE) AccumulateBackward(grad []float32) ([]float32, error) {
 	return m.Backward(grad)
 }

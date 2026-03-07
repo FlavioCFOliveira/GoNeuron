@@ -60,7 +60,9 @@ func (s *Sequential) Build(firstInSize int) {
 			}
 		}
 
-		if dl, ok := l.(layer.DeferredLayer); ok && l.InSize() <= 0 {
+		if dl, ok := l.(layer.DeferredLayer); ok {
+			// Always build deferred layers to ensure correct dimensions
+			// This is important for complex layers like MoE that contain sub-layers
 			dl.Build(buildSize)
 		}
 		lastOutSize = l.OutSize()
@@ -83,7 +85,7 @@ func (s *Sequential) checkDeferredBuild(x []float32) {
 }
 
 // Forward performs a forward pass.
-func (s *Sequential) Forward(x []float32) []float32 {
+func (s *Sequential) Forward(x []float32) ([]float32, error) {
 	s.checkDeferredBuild(x)
 	return s.Network.Forward(x)
 }
@@ -107,11 +109,12 @@ func (s *Sequential) Fit(trainX, trainY [][]float32, epochs int, batchSize int, 
 // Predict performs a forward pass and returns the output.
 func (s *Sequential) Predict(x []float32) []float32 {
 	s.SetTraining(false)
-	return s.Forward(x)
+	pred, _ := s.Forward(x)
+	return pred
 }
 
 // PredictBatch performs forward pass on a batch of samples.
-func (s *Sequential) PredictBatch(x [][]float32) [][]float32 {
+func (s *Sequential) PredictBatch(x [][]float32) ([][]float32, error) {
 	s.SetTraining(false)
 	if len(x) > 0 {
 		s.checkDeferredBuild(x[0])
@@ -129,8 +132,11 @@ func (s *Sequential) Evaluate(x, y [][]float32) float32 {
 	s.SetTraining(false)
 	totalLoss := float32(0)
 	for i := range x {
-		pred := s.Forward(x[i])
-		totalLoss += s.loss.Forward(pred, y[i])
+		pred, err := s.Forward(x[i])
+		if err != nil {
+			continue
+		}
+		l, _ := s.loss.Forward(pred, y[i]); totalLoss += l
 	}
 	return totalLoss / float32(len(x))
 }

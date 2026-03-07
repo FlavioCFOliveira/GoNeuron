@@ -16,7 +16,7 @@ func TestMaxPool2DForward(t *testing.T) {
 	// 13 14 15 16
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
-	output := pool.Forward(input)
+	output, _ := pool.Forward(input)
 
 	// Expected output: 2x2 = 4 values
 	// max(1,2,5,6) = 6, max(3,4,7,8) = 8
@@ -44,7 +44,7 @@ func TestMaxPool2DForwardStride(t *testing.T) {
 	// 7 8 9
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-	output := pool.Forward(input)
+	output, _ := pool.Forward(input)
 
 	// With stride 1 and kernel 2: output = 2x2 = 4
 	// Position (0,0): max(1,2,4,5) = 5
@@ -71,7 +71,7 @@ func TestMaxPool2DForwardPadding(t *testing.T) {
 	// Input: 3x3 = 9 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-	output := pool.Forward(input)
+	output, _ := pool.Forward(input)
 
 	// With padding 1: effective input is 5x5 (padded with -inf for max)
 	// Output size: (3 + 2*1 - 2) / 2 + 1 = 2
@@ -91,7 +91,7 @@ func TestMaxPool2DBackward(t *testing.T) {
 
 	// Pass gradient of all ones
 	grad := []float32{1, 1, 1, 1}
-	outputGrad := pool.Backward(grad)
+	outputGrad, _ := pool.Backward(grad)
 
 	// Only the max positions should get gradient
 	// max(1,2,5,6) = 6 at index 5
@@ -203,6 +203,6 @@ func TestMaxPool2DBackwardLarge(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		pool.Backward(grad)
+		_, _ = pool.Backward(grad)
 	}
 }

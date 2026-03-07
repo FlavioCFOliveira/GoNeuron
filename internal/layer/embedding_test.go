@@ -12,7 +12,7 @@ func TestEmbeddingForward(t *testing.T) {
 	// Input indices
 	input := []float32{0, 2, 4}
 
-	output := emb.Forward(input)
+	output, _ := emb.Forward(input)
 
 	// Check output shape
 	if len(output) != 3*3 {
@@ -45,7 +45,10 @@ func TestEmbeddingBackward(t *testing.T) {
 		grad[i] = 1.0
 	}
 
-	outputGrad := emb.Backward(grad)
+	outputGrad, err := emb.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Check that gradient w.r.t. input is zero
 	for i := 0; i < 3; i++ {
@@ -165,7 +168,7 @@ func TestEmbeddingOutOfBounds(t *testing.T) {
 
 	// Use out-of-bounds index
 	input := []float32{100}
-	output := emb.Forward(input)
+	output, _ := emb.Forward(input)
 
 	// Should default to first embedding (index 0)
 	weights := emb.GetWeights()
@@ -181,7 +184,7 @@ func TestEmbeddingBatch(t *testing.T) {
 
 	// Batch of 4 indices
 	input := []float32{0, 1, 2, 3}
-	output := emb.Forward(input)
+	output, _ := emb.Forward(input)
 
 	// Check output shape
 	if len(output) != 4*3 {

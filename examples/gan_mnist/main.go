@@ -180,8 +180,15 @@ func main() {
 			for i := 0; i < batchSize; i++ {
 				idx := rand.Intn(len(xTrain))
 				yPred := disc.Predict(xTrain[idx])
-				totalDLoss += disc.Loss().Forward(yPred, realLabels)
-				grad := disc.Loss().Backward(yPred, realLabels)
+				l, err := disc.Loss().Forward(yPred, realLabels)
+				if err != nil {
+					continue
+				}
+				totalDLoss += l
+				grad, err := disc.Loss().Backward(yPred, realLabels)
+				if err != nil {
+					continue
+				}
 				disc.Backward(grad)
 			}
 
@@ -190,8 +197,15 @@ func main() {
 			for i := 0; i < batchSize; i++ {
 				fakeImg := gen.Predict(noise[i])
 				yPred := disc.Predict(fakeImg)
-				totalDLoss += disc.Loss().Forward(yPred, fakeLabels)
-				grad := disc.Loss().Backward(yPred, fakeLabels)
+				l, err := disc.Loss().Forward(yPred, fakeLabels)
+				if err != nil {
+					continue
+				}
+				totalDLoss += l
+				grad, err := disc.Loss().Backward(yPred, fakeLabels)
+				if err != nil {
+					continue
+				}
 				disc.Backward(grad)
 			}
 
@@ -212,11 +226,18 @@ func main() {
 				fakeImg := gen.Predict(noise[i])
 				yPred := disc.Predict(fakeImg) // D(G(noise))
 
-				totalGLoss += disc.Loss().Forward(yPred, realLabels)
-				grad := disc.Loss().Backward(yPred, realLabels)
+				l, err := disc.Loss().Forward(yPred, realLabels)
+				if err != nil {
+					continue
+				}
+				totalGLoss += l
+				grad, err := disc.Loss().Backward(yPred, realLabels)
+				if err != nil {
+					continue
+				}
 
 				// Backprop through Discriminator to get grad w.r.t fakeImg
-				gradFakeImg := disc.Backward(grad)
+				gradFakeImg, _ := disc.Backward(grad)
 				gen.Backward(gradFakeImg)
 			}
 

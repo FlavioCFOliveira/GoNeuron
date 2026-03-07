@@ -64,7 +64,7 @@ func (e *Embedding) SetTraining(training bool) {
 	e.training = training
 }
 
-func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	batchSize := len(x)
 	outputSize := batchSize * e.embedding_dim
 
@@ -120,16 +120,16 @@ func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		}
 	}
 
-	return output
+	return output, nil
 }
 
 // Forward performs a forward pass through the embedding layer.
-func (e *Embedding) Forward(x []float32) []float32 {
+func (e *Embedding) Forward(x []float32) ([]float32, error) {
 	return e.ForwardWithArena(x, nil, nil)
 }
 
 // Backward performs backpropagation through the embedding layer.
-func (e *Embedding) Backward(grad []float32) []float32 {
+func (e *Embedding) Backward(grad []float32) ([]float32, error) {
 	batchSize := len(e.savedIndices)
 	gradBatchSize := len(grad) / e.embedding_dim
 
@@ -164,22 +164,22 @@ func (e *Embedding) Backward(grad []float32) []float32 {
 		}
 	}
 
-	return gradInput
+	return gradInput, nil
 }
 
-func (e *Embedding) ForwardBatch(x []float32, batchSize int) []float32 {
+func (e *Embedding) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return e.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (e *Embedding) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (e *Embedding) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	return e.ForwardWithArena(x, arena, offset)
 }
 
-func (e *Embedding) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (e *Embedding) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return e.Backward(grad)
 }
 
-func (e *Embedding) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (e *Embedding) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return e.BackwardBatch(grad, batchSize)
 }
 
@@ -299,6 +299,6 @@ func (e *Embedding) SetWeight(idx int, values []float32) {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For Embedding, gradients are already accumulated in Backward, so this just calls Backward.
-func (e *Embedding) AccumulateBackward(grad []float32) []float32 {
+func (e *Embedding) AccumulateBackward(grad []float32) ([]float32, error) {
 	return e.Backward(grad)
 }

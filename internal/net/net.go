@@ -187,35 +187,46 @@ func (n *Network) Clone() *Network {
 }
 
 // Forward performs a forward pass through all layers.
-func (n *Network) Forward(x []float32) []float32 {
+func (n *Network) Forward(x []float32) ([]float32, error) {
 	// Reset arena index for forward pass if in training
 	n.arenaIndex = 0
 
 	curr := x
+	var err error
 	for i := range n.layers {
 		// Check if layer supports Arena saving
 		if saver, ok := n.layers[i].(layer.ArenaLayer); ok {
-			curr = saver.ForwardWithArena(curr, &n.arena, &n.arenaIndex)
+			curr, err = saver.ForwardWithArena(curr, &n.arena, &n.arenaIndex)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			curr = n.layers[i].Forward(curr)
+			curr, err = n.layers[i].Forward(curr)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-	return curr
+	return curr, nil
 }
 
 // Predict performs a forward pass through all layers in inference mode.
-func (n *Network) Predict(x []float32) []float32 {
+func (n *Network) Predict(x []float32) ([]float32, error) {
 	n.SetTraining(false)
 	return n.Forward(x)
 }
 
 // Backward performs a backward pass through all layers.
-func (n *Network) Backward(grad []float32) []float32 {
+func (n *Network) Backward(grad []float32) ([]float32, error) {
 	curr := grad
+	var err error
 	for i := len(n.layers) - 1; i >= 0; i-- {
-		curr = n.layers[i].Backward(curr)
+		curr, err = n.layers[i].Backward(curr)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return curr
+	return curr, nil
 }
 
 // Step performs one optimization step using the stored optimizer.
@@ -262,10 +273,16 @@ func (n *Network) Train(x []float32, y []float32) float32 {
 	}
 
 	// Forward pass
-	yPred := n.Forward(x)
+	yPred, err := n.Forward(x)
+	if err != nil {
+		return 0
+	}
 
 	// Compute loss
-	l := n.loss.Forward(yPred, y)
+	l, err := n.loss.Forward(yPred, y)
+	if err != nil {
+		return 0
+	}
 
 	// Compute gradient of loss w.r.t. prediction
 	// Use pre-allocated buffer if possible
@@ -277,13 +294,21 @@ func (n *Network) Train(x []float32, y []float32) float32 {
 
 	// Use BackwardInPlace if available to avoid allocation
 	if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
-		backwardInPlace.BackwardInPlace(yPred, y, grad)
+		if err := backwardInPlace.BackwardInPlace(yPred, y, grad); err != nil {
+			return 0
+		}
 	} else {
-		grad = n.loss.Backward(yPred, y)
+		var err error
+		grad, err = n.loss.Backward(yPred, y)
+		if err != nil {
+			return 0
+		}
 	}
 
 	// Backward pass
-	_ = n.Backward(grad)
+	if _, err := n.Backward(grad); err != nil {
+		return 0
+	}
 
 	// Optimization step
 	n.Step()
@@ -371,7 +396,7 @@ func (n *Network) TrainBatch(batchX [][]float32, batchY [][]float32) float32 {
 }
 
 // ForwardBatch performs forward pass on a batch of samples.
-func (n *Network) ForwardBatch(batchX [][]float32) [][]float32 {
+func (n *Network) ForwardBatch(batchX [][]float32) ([][]float32, error) {
 	n.SetTraining(false)
 	results := make([][]float32, len(batchX))
 	for i, x := range batchX {
@@ -381,11 +406,14 @@ func (n *Network) ForwardBatch(batchX [][]float32) [][]float32 {
 				resettable.Reset()
 			}
 		}
-		pred := n.Forward(x)
+		pred, err := n.Forward(x)
+		if err != nil {
+			return nil, err
+		}
 		results[i] = make([]float32, len(pred))
 		copy(results[i], pred)
 	}
-	return results
+	return results, nil
 }
 
 // TrainTriplet performs a training step using Triplet Margin Loss.
@@ -403,9 +431,18 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin floa
 	}
 
 	// 1. Forward passes
-	aPred := n.Forward(anchor)
-	pPred := n.Forward(positive)
-	nPred := n.Forward(negative)
+	aPred, err := n.Forward(anchor)
+	if err != nil {
+		return 0
+	}
+	pPred, err := n.Forward(positive)
+	if err != nil {
+		return 0
+	}
+	nPred, err := n.Forward(negative)
+	if err != nil {
+		return 0
+	}
 
 	// Concatenate predictions for TripletMarginLoss
 	embDim := len(aPred)
@@ -425,7 +462,10 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin floa
 		n.tripletYBuf = make([]float32, tripletLen)
 	}
 	dummyY := n.tripletYBuf[:tripletLen]
-	lVal := n.loss.Forward(tripletPred, dummyY)
+	lVal, err := n.loss.Forward(tripletPred, dummyY)
+	if err != nil {
+		return 0
+	}
 
 	// 3. Compute loss gradient
 	if cap(n.lossGradBuf) < tripletLen {
@@ -434,19 +474,30 @@ func (n *Network) TrainTriplet(anchor, positive, negative []float32, margin floa
 	grad := n.lossGradBuf[:tripletLen]
 
 	if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
-		backwardInPlace.BackwardInPlace(tripletPred, dummyY, grad)
+		if err := backwardInPlace.BackwardInPlace(tripletPred, dummyY, grad); err != nil {
+			return 0
+		}
 	} else {
-		tmpGrad := n.loss.Backward(tripletPred, dummyY)
+		tmpGrad, err := n.loss.Backward(tripletPred, dummyY)
+		if err != nil {
+			return 0
+		}
 		copy(grad, tmpGrad)
 	}
 
 	// 4. Backward passes (accumulating gradients)
 	// Anchor gradient
-	_ = n.accumulateBackward(grad[0:embDim])
+	if _, err := n.accumulateBackward(grad[0:embDim]); err != nil {
+		return 0
+	}
 	// Positive gradient
-	_ = n.accumulateBackward(grad[embDim : 2*embDim])
+	if _, err := n.accumulateBackward(grad[embDim : 2*embDim]); err != nil {
+		return 0
+	}
 	// Negative gradient
-	_ = n.accumulateBackward(grad[2*embDim : 3*embDim])
+	if _, err := n.accumulateBackward(grad[2*embDim : 3*embDim]); err != nil {
+		return 0
+	}
 
 	// Optimization step
 	n.Step()
@@ -480,12 +531,16 @@ func (n *Network) SetParams(params []float32) {
 }
 
 // accumulateBackward performs a backward pass through all layers and accumulates gradients.
-func (n *Network) accumulateBackward(grad []float32) []float32 {
+func (n *Network) accumulateBackward(grad []float32) ([]float32, error) {
 	curr := grad
+	var err error
 	for i := len(n.layers) - 1; i >= 0; i-- {
-		curr = n.layers[i].AccumulateBackward(curr)
+		curr, err = n.layers[i].AccumulateBackward(curr)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return curr
+	return curr, nil
 }
 
 // trainBatchParallel performs training on a batch of samples using parallel processing.
@@ -552,10 +607,17 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 				}
 
 				// Forward pass
-				yPred := worker.Forward(batchX[i])
+				yPred, err := worker.Forward(batchX[i])
+				if err != nil {
+					return
+				}
 
 				// Compute loss
-				losses[i] = worker.loss.Forward(yPred, batchY[i])
+				l, err := worker.loss.Forward(yPred, batchY[i])
+				if err != nil {
+					return
+				}
+				losses[i] = l
 
 				// Compute loss gradient
 				yPredLen := len(yPred)
@@ -566,13 +628,15 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 				grad := worker.lossGradBuf[:yPredLen]
 
 				if backwardInPlace, ok := worker.loss.(loss.BackwardInPlacer); ok {
-					backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
+					_ = backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
 				} else {
-					grad = worker.loss.Backward(yPred, batchY[i])
+					grad, _ = worker.loss.Backward(yPred, batchY[i])
 				}
 
 				// Backward pass (accumulates into worker's private gradients)
-				_ = worker.accumulateBackward(grad)
+				if _, err := worker.accumulateBackward(grad); err != nil {
+					return
+				}
 			}
 		}(workers[w], start, end)
 	}
@@ -624,8 +688,11 @@ func (n *Network) trainBatchSequential(batchX [][]float32, batchY [][]float32) f
 			}
 		}
 
-		yPred := n.Forward(batchX[i])
-		totalLoss += n.loss.Forward(yPred, batchY[i])
+		yPred, err := n.Forward(batchX[i])
+		if err != nil {
+			continue
+		}
+		l, _ := n.loss.Forward(yPred, batchY[i]); totalLoss += l
 
 		// Compute loss gradient
 		yPredLen := len(yPred)
@@ -635,13 +702,15 @@ func (n *Network) trainBatchSequential(batchX [][]float32, batchY [][]float32) f
 		grad := n.lossGradBuf[:yPredLen]
 
 		if backwardInPlace, ok := n.loss.(loss.BackwardInPlacer); ok {
-			backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
+			_ = backwardInPlace.BackwardInPlace(yPred, batchY[i], grad)
 		} else {
-			grad = n.loss.Backward(yPred, batchY[i])
+			grad, _ = n.loss.Backward(yPred, batchY[i])
 		}
 
 		// Backward pass (accumulates gradients into layer gradient buffers)
-		_ = n.Backward(grad)
+		if _, err := n.Backward(grad); err != nil {
+			continue
+		}
 	}
 
 	// Average gradients by dividing each by batch size

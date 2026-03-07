@@ -13,7 +13,7 @@ func TestGRUForward(t *testing.T) {
 	x := []float32{1.0, 0.5, -0.5}
 
 	// Forward pass
-	output := gru.Forward(x)
+	output, _ := gru.Forward(x)
 
 	// Check output size
 	if len(output) != 5 {
@@ -42,7 +42,10 @@ func TestGRUBackward(t *testing.T) {
 	}
 
 	// Backward pass
-	outputGrad := gru.Backward(grad)
+	outputGrad, err := gru.Backward(grad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Check output gradient size
 	if len(outputGrad) != 3 {
@@ -135,7 +138,7 @@ func TestGRUSequence(t *testing.T) {
 
 	var outputs [][]float32
 	for _, x := range sequence {
-		output := gru.Forward(x)
+		output, _ := gru.Forward(x)
 		outputs = append(outputs, output)
 	}
 
@@ -246,8 +249,8 @@ func TestGRUParamsConsistency(t *testing.T) {
 	// Forward pass with same input should give same result
 	x := []float32{1.0, 0.5, -0.5, 0.2}
 
-	output1 := gru1.Forward(x)
-	output2 := gru2.Forward(x)
+	output1, _ := gru1.Forward(x)
+	output2, _ := gru2.Forward(x)
 
 	for i := 0; i < 8; i++ {
 		if float32(math.Abs(float64(output1[i]-output2[i]))) > 1e-6 {

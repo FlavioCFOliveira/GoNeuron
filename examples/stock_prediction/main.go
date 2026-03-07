@@ -66,7 +66,11 @@ func minMaxScale(prices []float32) ([]float32, NormalizationParams) {
 	}
 	scaled := make([]float32, len(prices))
 	for i, p := range prices {
-		scaled[i] = (p - minVal) / (maxVal - minVal)
+		if maxVal == minVal {
+			scaled[i] = 0
+		} else {
+			scaled[i] = (p - minVal) / (maxVal - minVal)
+		}
 	}
 	return scaled, NormalizationParams{Min: minVal, Max: maxVal}
 }
@@ -116,7 +120,7 @@ func main() {
 	fmt.Println("\nEvaluating...")
 	var totalSE float32
 	for i := range xTest {
-		pred := model.Forward(xTest[i])
+		pred, _ := model.Forward(xTest[i])
 		actual := yTest[i][0]
 		diff := (pred[0] - actual) * (normParams.Max - normParams.Min)
 		totalSE += diff * diff

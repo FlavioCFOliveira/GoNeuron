@@ -32,7 +32,7 @@ func BenchmarkNetworkForward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		network.Forward(input)
+		_, _ = network.Forward(input)
 	}
 }
 
@@ -51,11 +51,11 @@ func BenchmarkNetworkBackward(b *testing.B) {
 	fillRandom(grad)
 
 	// Forward pass to set up state
-	network.Forward(input)
+	_, _ = network.Forward(input)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = network.Backward(grad)
+		_, _ = network.Backward(grad)
 	}
 }
 
@@ -209,9 +209,9 @@ func BenchmarkNetworkGradients(b *testing.B) {
 	fillRandom(target)
 
 	// Forward pass
-	network.Forward(input)
-	grad := loss.MSE{}.Backward(network.Forward(input), target)
-	_ = network.Backward(grad)
+	output, _ := network.Forward(input)
+	grad, _ := loss.MSE{}.Backward(output, target)
+	_, _ = network.Backward(grad)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

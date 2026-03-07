@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"errors"
 	"math"
 )
 
@@ -80,10 +81,10 @@ func (a *AvgPool2D) SetTraining(training bool) {
 	a.training = training
 }
 
-func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) []float32 {
+func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *int) ([]float32, error) {
 	totalInput := len(input)
 	if totalInput == 0 {
-		return make([]float32, 0)
+		return make([]float32, 0), nil
 	}
 
 	if a.inChannels <= 0 {
@@ -149,7 +150,7 @@ func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 
 		m.AvgPool2DPersistent(inBuf, outBuf, 1, a.inChannels, a.inputHeight, a.inputWidth, a.outputHeight, a.outputWidth, a.kernelSize, a.stride, a.padding)
 		outBuf.Read(a.outputBuf[:requiredOutput])
-		return a.outputBuf[:requiredOutput]
+		return a.outputBuf[:requiredOutput], nil
 	}
 
 	// Average pooling logic
@@ -182,7 +183,7 @@ func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 			}
 			a.countBuf[pos] = count
 
-			if count > 0 {
+				if count > 0 {
 				invCount := 1.0 / float32(count)
 				for c := 0; c < a.inChannels; c++ {
 					sum := float32(0.0)
@@ -209,19 +210,19 @@ func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		}
 	}
 
-	return a.outputBuf[:requiredOutput]
+	return a.outputBuf[:requiredOutput], nil
 }
 
 // Forward performs a forward pass through the average pooling layer.
-func (a *AvgPool2D) Forward(input []float32) []float32 {
+func (a *AvgPool2D) Forward(input []float32) ([]float32, error) {
 	return a.ForwardWithArena(input, nil, nil)
 }
 
-func (a *AvgPool2D) ForwardBatch(input []float32, batchSize int) []float32 {
+func (a *AvgPool2D) ForwardBatch(input []float32, batchSize int) ([]float32, error) {
 	return a.ForwardBatchWithArena(input, batchSize, nil, nil)
 }
 
-func (a *AvgPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (a *AvgPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return a.ForwardWithArena(input, arena, offset)
 	}
@@ -285,22 +286,104 @@ func (a *AvgPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena 
 
 		m.AvgPool2DPersistent(inBuf, outBuf, batchSize, a.inChannels, a.inputHeight, a.inputWidth, a.outputHeight, a.outputWidth, a.kernelSize, a.stride, a.padding)
 		outBuf.Read(a.outputBuf[:requiredOutput])
-		return a.outputBuf[:requiredOutput]
+		return a.outputBuf[:requiredOutput], nil
 	}
 
+	// When arena is nil, we need to save all inputs in savedInput and track offsets
+	if arena == nil {
+		if cap(a.savedInput) < len(input) {
+			a.savedInput = make([]float32, len(input))
+		}
+		a.savedInput = a.savedInput[:len(input)]
+		copy(a.savedInput, input)
+		a.arena = a.savedInput
+		a.savedInputOffsets = a.savedInputOffsets[:0]
+		for i := 0; i < batchSize; i++ {
+			a.savedInputOffsets = append(a.savedInputOffsets, i*inSize)
+		}
+		// Initialize countBuf if needed
+		if len(a.countBuf) < outSize {
+			a.countBuf = make([]int, outSize)
+		}
+		// Process each sample without calling ForwardWithArena (which would clear savedInputOffsets)
+		for i := 0; i < batchSize; i++ {
+			sampleInput := input[i*inSize : (i+1)*inSize]
+			// Average pooling logic for single sample
+			outH := a.outputHeight
+			outW := a.outputWidth
+			kernelSize := a.kernelSize
+			stride := a.stride
+			padding := a.padding
+			inputHeight := a.inputHeight
+			inputWidth := a.inputWidth
+
+			// Reset countBuf for spatial positions
+			for j := range a.countBuf {
+				a.countBuf[j] = 0
+			}
+
+			for oh := 0; oh < outH; oh++ {
+				for ow := 0; ow < outW; ow++ {
+					pos := oh*outW + ow
+					count := 0
+					for kh := 0; kh < kernelSize; kh++ {
+						for kw := 0; kw < kernelSize; kw++ {
+							inH := oh*stride + kh - padding
+							inW := ow*stride + kw - padding
+							if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
+								count++
+							}
+						}
+					}
+					a.countBuf[pos] = count
+
+					if count > 0 {
+					invCount := 1.0 / float32(count)
+					for c := 0; c < a.inChannels; c++ {
+						sum := float32(0.0)
+						inChannelOffset := c * inputHeight * inputWidth
+						outChannelOffset := c * outH * outW
+						for kh := 0; kh < kernelSize; kh++ {
+							for kw := 0; kw < kernelSize; kw++ {
+								inH := oh*stride + kh - padding
+								inW := ow*stride + kw - padding
+								if inH >= 0 && inH < inputHeight && inW >= 0 && inW < inputWidth {
+									idx := inChannelOffset + inH*inputWidth + inW
+									sum += sampleInput[idx]
+								}
+							}
+						}
+						a.outputBuf[i*a.inChannels*outSize+outChannelOffset+pos] = sum * invCount
+					}
+				} else {
+					for c := 0; c < a.inChannels; c++ {
+						outChannelOffset := c * outH * outW
+						a.outputBuf[i*a.inChannels*outSize+outChannelOffset+pos] = 0
+					}
+				}
+			}
+		}
+	}
+	return a.outputBuf[:requiredOutput], nil
+	}
+
+	// When arena is provided, use ForwardWithArena for each sample
 	for i := 0; i < batchSize; i++ {
-		out := a.ForwardWithArena(input[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := a.ForwardWithArena(input[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(a.outputBuf[i*a.inChannels*outSize:(i+1)*a.inChannels*outSize], out)
 	}
 
-	return a.outputBuf[:requiredOutput]
+	return a.outputBuf[:requiredOutput], nil
 }
 
 // Backward performs backpropagation through the average pooling layer.
-func (a *AvgPool2D) Backward(grad []float32) []float32 {
+func (a *AvgPool2D) Backward(grad []float32) ([]float32, error) {
 	numSaved := len(a.savedInputOffsets)
 	if numSaved == 0 {
-		return nil
+		return nil, errors.New("no saved input for backward pass")
 	}
 
 	ts := numSaved - 1
@@ -323,7 +406,7 @@ func (a *AvgPool2D) Backward(grad []float32) []float32 {
 		gInBuf.Read(gradIn)
 
 		a.savedInputOffsets = a.savedInputOffsets[:ts]
-		return gradIn
+		return gradIn, nil
 	}
 
 	// Clear gradient buffer
@@ -369,10 +452,10 @@ func (a *AvgPool2D) Backward(grad []float32) []float32 {
 	}
 
 	a.savedInputOffsets = a.savedInputOffsets[:ts]
-	return gradIn
+	return gradIn, nil
 }
 
-func (a *AvgPool2D) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (a *AvgPool2D) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return a.Backward(grad)
 	}
@@ -399,18 +482,21 @@ func (a *AvgPool2D) BackwardBatch(grad []float32, batchSize int) []float32 {
 		if len(a.savedInputOffsets) >= batchSize {
 			a.savedInputOffsets = a.savedInputOffsets[:len(a.savedInputOffsets)-batchSize]
 		}
-		return gradIn
+		return gradIn, nil
 	}
 
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := a.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := a.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(a.gradInBuf[i*inSize:(i+1)*inSize], dx)
 	}
 
-	return a.gradInBuf[:requiredInput]
+	return a.gradInBuf[:requiredInput], nil
 }
 
-func (a *AvgPool2D) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (a *AvgPool2D) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return a.BackwardBatch(grad, batchSize)
 }
 
@@ -507,6 +593,6 @@ func (a *AvgPool2D) GetInChannels() int {
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
-func (a *AvgPool2D) AccumulateBackward(grad []float32) []float32 {
+func (a *AvgPool2D) AccumulateBackward(grad []float32) ([]float32, error) {
 	return a.Backward(grad)
 }

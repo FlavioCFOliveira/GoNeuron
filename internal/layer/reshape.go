@@ -60,7 +60,7 @@ func (f *Flatten) SetTraining(training bool) {
 	f.training = training
 }
 
-func (f *Flatten) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (f *Flatten) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	total := len(x)
 	if cap(f.inputShape) < 2 {
 		f.inputShape = make([]int, 0, 2)
@@ -74,42 +74,42 @@ func (f *Flatten) ForwardWithArena(x []float32, arena *[]float32, offset *int) [
 	}
 
 	copy(f.outputBuf, x)
-	return f.outputBuf[:flattened]
+	return f.outputBuf[:flattened], nil
 }
 
 // Forward performs a forward pass, flattening the input.
-func (f *Flatten) Forward(x []float32) []float32 {
+func (f *Flatten) Forward(x []float32) ([]float32, error) {
 	return f.ForwardWithArena(x, nil, nil)
 }
 
 // Backward performs backpropagation, reshaping gradient to original shape.
-func (f *Flatten) Backward(grad []float32) []float32 {
+func (f *Flatten) Backward(grad []float32) ([]float32, error) {
 	// Gradient flows through unchanged - just need to return correct size
-	return grad
+	return grad, nil
 }
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
-func (f *Flatten) AccumulateBackward(grad []float32) []float32 {
+func (f *Flatten) AccumulateBackward(grad []float32) ([]float32, error) {
 	// Gradient flows through unchanged - just need to return correct size
-	return grad
+	return grad, nil
 }
 
 var emptyParams = make([]float32, 0)
 
-func (f *Flatten) ForwardBatch(x []float32, batchSize int) []float32 {
+func (f *Flatten) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return f.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (f *Flatten) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (f *Flatten) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	return f.ForwardWithArena(x, arena, offset)
 }
 
-func (f *Flatten) BackwardBatch(grad []float32, batchSize int) []float32 {
-	return grad
+func (f *Flatten) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
+	return grad, nil
 }
 
-func (f *Flatten) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
-	return grad
+func (f *Flatten) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
+	return grad, nil
 }
 
 // Params returns layer parameters (empty for Flatten).

@@ -31,8 +31,8 @@ func TestMetalBatchNorm2D(t *testing.T) {
 	}
 
 	// Forward
-	outCPU := bnCPU.Forward(input)
-	outMetal := bnMetal.Forward(input)
+	outCPU, _ := bnCPU.Forward(input)
+	outMetal, _ := bnMetal.Forward(input)
 
 	if len(outCPU) != len(outMetal) {
 		t.Fatalf("Output length mismatch: cpu=%d, metal=%d", len(outCPU), len(outMetal))
@@ -52,8 +52,8 @@ func TestMetalBatchNorm2D(t *testing.T) {
 		gradOut[i] = rng.RandFloat()*2 - 1
 	}
 
-	gradInCPU := bnCPU.Backward(gradOut)
-	gradInMetal := bnMetal.Backward(gradOut)
+	gradInCPU, _ := bnCPU.Backward(gradOut)
+	gradInMetal, _ := bnMetal.Backward(gradOut)
 
 	if len(gradInCPU) != len(gradInMetal) {
 		t.Fatalf("GradIn length mismatch: cpu=%d, metal=%d", len(gradInCPU), len(gradInMetal))
@@ -100,8 +100,8 @@ func TestMetalBatchNorm2DBatch(t *testing.T) {
 		input[i] = rng.RandFloat()
 	}
 
-	outCPU := bnCPU.ForwardBatch(input, batchSize)
-	outMetal := bnMetal.ForwardBatch(input, batchSize)
+	outCPU, _ := bnCPU.ForwardBatch(input, batchSize)
+	outMetal, _ := bnMetal.ForwardBatch(input, batchSize)
 
 	if len(outCPU) != len(outMetal) {
 		t.Fatalf("Forward batch output length mismatch: cpu=%d, metal=%d", len(outCPU), len(outMetal))
@@ -119,8 +119,8 @@ func TestMetalBatchNorm2DBatch(t *testing.T) {
 		gradOut[i] = rng.RandFloat()
 	}
 
-	gradInCPU := bnCPU.BackwardBatch(gradOut, batchSize)
-	gradInMetal := bnMetal.BackwardBatch(gradOut, batchSize)
+	gradInCPU, _ := bnCPU.BackwardBatch(gradOut, batchSize)
+	gradInMetal, _ := bnMetal.BackwardBatch(gradOut, batchSize)
 
 	for i := range gradInCPU {
 		if math.Abs(float64(gradInCPU[i]-gradInMetal[i])) > 1e-4 {

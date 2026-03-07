@@ -15,7 +15,7 @@ func TestLayerNormForward(t *testing.T) {
 	// With gamma=1, beta=0: same as normalized
 	input := []float32{1, 2, 3, 4}
 
-	output := ln.Forward(input)
+	output, _ := ln.Forward(input)
 
 	// Manually compute expected values
 	mean := float32(2.5)
@@ -70,7 +70,7 @@ func TestLayerNormWithoutAffine(t *testing.T) {
 	ln := NewLayerNorm(4, 1e-5, false)
 
 	input := []float32{1, 2, 3, 4}
-	output := ln.Forward(input)
+	output, _ := ln.Forward(input)
 
 	// Should be same as normalized
 	mean := float32(2.5)
@@ -102,7 +102,7 @@ func TestLayerNormBatch(t *testing.T) {
 	// Input: [1, 2, 3, 4, 5, 6, 7, 8] (2 batches of 4)
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8}
 
-	output := ln.Forward(input)
+	output, _ := ln.Forward(input)
 
 	// Each batch should be normalized independently
 	mean1 := float32(2.5)
@@ -130,7 +130,7 @@ func TestLayerNormBackward(t *testing.T) {
 
 	// Pass gradient of all ones
 	grad := []float32{1, 1, 1, 1}
-	outputGrad := ln.Backward(grad)
+	outputGrad, _ := ln.Backward(grad)
 
 	// For layer norm with all ones gradient and no affine,
 	// the gradient should sum to zero (since normalization is shift-invariant)
@@ -193,7 +193,7 @@ func TestLayerNormNumericalStability(t *testing.T) {
 	ln := NewLayerNorm(4, 1e-5, false)
 
 	input := []float32{5, 5, 5, 5}
-	output := ln.Forward(input)
+	output, _ := ln.Forward(input)
 
 	// With zero variance, output should be close to beta (0)
 	for i := 0; i < 4; i++ {
@@ -233,6 +233,6 @@ func BenchmarkLayerNormBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ln.Backward(grad)
+		_, _ = ln.Backward(grad)
 	}
 }

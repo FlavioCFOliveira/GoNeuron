@@ -222,7 +222,7 @@ func (l *LSTM) Reset() {
 	}
 }
 
-func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) []float32 {
+func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	// Copy input to buffer
 	copy(l.inputBuf, x)
 
@@ -366,7 +366,7 @@ storeState:
 
 	// Copy output
 	copy(l.outputBuf, l.hiddenBuf)
-	return l.outputBuf
+	return l.outputBuf, nil
 }
 
 func (l *LSTM) saveState(c, h, pre []float32) {
@@ -390,15 +390,15 @@ func (l *LSTM) saveState(c, h, pre []float32) {
 }
 
 // Forward performs a forward pass for one time step.
-func (l *LSTM) Forward(x []float32) []float32 {
+func (l *LSTM) Forward(x []float32) ([]float32, error) {
 	return l.ForwardWithArena(x, nil, nil)
 }
 
-func (l *LSTM) ForwardBatch(x []float32, batchSize int) []float32 {
+func (l *LSTM) ForwardBatch(x []float32, batchSize int) ([]float32, error) {
 	return l.ForwardBatchWithArena(x, batchSize, nil, nil)
 }
 
-func (l *LSTM) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) []float32 {
+func (l *LSTM) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error) {
 	if batchSize <= 1 {
 		return l.ForwardWithArena(x, arena, offset)
 	}
@@ -411,23 +411,26 @@ func (l *LSTM) ForwardBatchWithArena(x []float32, batchSize int, arena *[]float3
 		// Note: for batching in RNNs, we usually assume independent samples
 		// unless specifically handled. We reset before each sample.
 		l.Reset()
-		out := l.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		out, err := l.ForwardWithArena(x[i*inSize:(i+1)*inSize], arena, offset)
+		if err != nil {
+			return nil, err
+		}
 		copy(l.outputBuf[i*outSize:(i+1)*outSize], out)
 	}
-	return l.outputBuf[:batchSize*outSize]
+	return l.outputBuf[:batchSize*outSize], nil
 }
 
 // Backward performs backpropagation through time for one time step.
 // grad: gradient of loss w.r.t. output (length outSize)
 // Returns: gradient of loss w.r.t. input (length inSize)
-func (l *LSTM) Backward(grad []float32) []float32 {
+func (l *LSTM) Backward(grad []float32) ([]float32, error) {
 	// Get time step index
 	ts := l.timeStep - 1
 	if ts < 0 || ts >= len(l.savedCellOffsets) {
 		for i := range l.inputBuf {
 			l.inputBuf[i] = 0
 		}
-		return l.inputBuf
+		return l.inputBuf, nil
 	}
 
 	// Get saved states from arena
@@ -619,10 +622,10 @@ func (l *LSTM) Backward(grad []float32) []float32 {
 	l.clipGradients()
 
 	l.timeStep--
-	return dx
+	return dx, nil
 }
 
-func (l *LSTM) BackwardBatch(grad []float32, batchSize int) []float32 {
+func (l *LSTM) BackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	if batchSize <= 1 {
 		return l.Backward(grad)
 	}
@@ -632,13 +635,16 @@ func (l *LSTM) BackwardBatch(grad []float32, batchSize int) []float32 {
 		l.dxBuf = make([]float32, batchSize*inSize)
 	}
 	for i := batchSize - 1; i >= 0; i-- {
-		dx := l.Backward(grad[i*outSize : (i+1)*outSize])
+		dx, err := l.Backward(grad[i*outSize : (i+1)*outSize])
+		if err != nil {
+			return nil, err
+		}
 		copy(l.dxBuf[i*inSize:(i+1)*inSize], dx)
 	}
-	return l.dxBuf[:batchSize*inSize]
+	return l.dxBuf[:batchSize*inSize], nil
 }
 
-func (l *LSTM) AccumulateBackwardBatch(grad []float32, batchSize int) []float32 {
+func (l *LSTM) AccumulateBackwardBatch(grad []float32, batchSize int) ([]float32, error) {
 	return l.BackwardBatch(grad, batchSize)
 }
 
@@ -869,6 +875,6 @@ func (l *LSTM) LightweightClone(params []float32, grads []float32) Layer {
 
 // AccumulateBackward performs backpropagation and accumulates gradients.
 // For LSTM, gradients are already accumulated in Backward, so this just calls Backward.
-func (l *LSTM) AccumulateBackward(grad []float32) []float32 {
+func (l *LSTM) AccumulateBackward(grad []float32) ([]float32, error) {
 	return l.Backward(grad)
 }

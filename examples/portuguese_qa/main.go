@@ -222,7 +222,7 @@ func main() {
 				input[i] = float32(resultIds[i])
 			}
 
-			output := model.Forward(input)
+			output, _ := model.Forward(input)
 
 			// Get probabilities for the position t-1 to predict token at t
 			stepOffset := (t - 1) * vocabSize

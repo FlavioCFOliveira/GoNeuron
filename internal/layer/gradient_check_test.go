@@ -25,7 +25,7 @@ func TestDenseGradientFlow(t *testing.T) {
 	x := []float32{0.5, -0.3, 0.2, 0.1}
 
 	// Forward pass
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 
 	// Compute loss gradient
 	lossGrad := make([]float32, len(output))
@@ -34,7 +34,7 @@ func TestDenseGradientFlow(t *testing.T) {
 	}
 
 	// Backward pass
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check output gradient exists and has correct shape
 	if len(gradIn) != len(x) {
@@ -75,13 +75,13 @@ func TestConv2DGradientFlow(t *testing.T) {
 	}
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = 0.1
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shapes
 	if len(gradIn) != len(x) {
@@ -120,7 +120,7 @@ func TestLSTMGradientFlow(t *testing.T) {
 	// Process 2 timesteps
 	for step := 0; step < 2; step++ {
 		x := []float32{0.5, -0.3, 0.2}
-		output := layer.Forward(x)
+		output, _ := layer.Forward(x)
 
 		// Check output shape
 		if len(output) != outSize {
@@ -132,7 +132,7 @@ func TestLSTMGradientFlow(t *testing.T) {
 			lossGrad[i] = 0.1
 		}
 
-		gradIn := layer.Backward(lossGrad)
+		gradIn, _ := layer.Backward(lossGrad)
 
 		// Backward returns gradient w.r.t input (inSize), not sequence length
 		if len(gradIn) != inSize {
@@ -172,7 +172,7 @@ func TestGRUGradientFlow(t *testing.T) {
 	// Process 2 timesteps
 	for step := 0; step < 2; step++ {
 		x := []float32{0.5, -0.3, 0.2}
-		output := layer.Forward(x)
+		output, _ := layer.Forward(x)
 
 		// Check output shape
 		if len(output) != outSize {
@@ -184,7 +184,7 @@ func TestGRUGradientFlow(t *testing.T) {
 			lossGrad[i] = 0.1
 		}
 
-		gradIn := layer.Backward(lossGrad)
+		gradIn, _ := layer.Backward(lossGrad)
 
 		// Backward returns gradient w.r.t input (inSize), not sequence length
 		if len(gradIn) != inSize {
@@ -222,13 +222,13 @@ func TestEmbeddingGradientFlow(t *testing.T) {
 	x := []float32{1, 3, 5}
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = 0.1
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shapes
 	if len(gradIn) != len(x) {
@@ -263,13 +263,13 @@ func TestBatchNorm2DGradientFlow(t *testing.T) {
 	layer.SetTraining(true)
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = 0.1
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shapes
 	if len(gradIn) != len(x) {
@@ -297,7 +297,7 @@ func TestMaxPool2DGradientFlow(t *testing.T) {
 	}
 
 	// Forward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 
 	// Target gradients
 	lossGrad := make([]float32, len(output))
@@ -306,7 +306,7 @@ func TestMaxPool2DGradientFlow(t *testing.T) {
 	}
 
 	// Backward
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shape
 	if len(gradIn) != len(x) {
@@ -340,13 +340,13 @@ func TestAvgPool2DGradientFlow(t *testing.T) {
 	}
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = 1.0
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shape
 	if len(gradIn) != len(x) {
@@ -374,13 +374,13 @@ func TestFlattenGradientFlow(t *testing.T) {
 	x := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = float32(i + 1)
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shape
 	if len(gradIn) != len(x) {
@@ -403,13 +403,13 @@ func TestDropoutGradientFlow(t *testing.T) {
 	x := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = 1.0
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shape
 	if len(gradIn) != len(x) {
@@ -436,13 +436,13 @@ func TestTransformerBlockGradientFlow(t *testing.T) {
 	}
 
 	// Forward and backward
-	output := layer.Forward(x)
+	output, _ := layer.Forward(x)
 	lossGrad := make([]float32, len(output))
 	for i := range lossGrad {
 		lossGrad[i] = 0.01
 	}
 
-	gradIn := layer.Backward(lossGrad)
+	gradIn, _ := layer.Backward(lossGrad)
 
 	// Check shape
 	if len(gradIn) != len(x) {
@@ -477,9 +477,15 @@ func TestGradientAccumulation(t *testing.T) {
 
 	// First forward-backward
 	x1 := []float32{0.5, 0.3, 0.2}
-	_ = layer.Forward(x1)
+	_, err := layer.Forward(x1)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 	lossGrad1 := []float32{0.1, -0.1}
-	layer.Backward(lossGrad1)
+	_, err = layer.Backward(lossGrad1)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	gradsAfterFirst := make([]float32, len(layer.Gradients()))
 	copy(gradsAfterFirst, layer.Gradients())
@@ -487,9 +493,15 @@ func TestGradientAccumulation(t *testing.T) {
 	// Second forward-backward (should accumulate)
 	layer.Reset()
 	x2 := []float32{-0.2, 0.4, 0.1}
-	_ = layer.Forward(x2)
+	_, err = layer.Forward(x2)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 	lossGrad2 := []float32{-0.05, 0.05}
-	layer.AccumulateBackward(lossGrad2)
+	_, err = layer.AccumulateBackward(lossGrad2)
+	if err != nil {
+		t.Fatalf("AccumulateBackward failed: %v", err)
+	}
 
 	gradsAfterSecond := layer.Gradients()
 
@@ -519,9 +531,15 @@ func TestClearGradients(t *testing.T) {
 
 	// Forward-backward to get gradients
 	x := []float32{0.5, 0.3, 0.2}
-	_ = layer.Forward(x)
+	_, err := layer.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
 	lossGrad := []float32{0.1, -0.1}
-	layer.Backward(lossGrad)
+	_, err = layer.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
 
 	// Verify gradients exist
 	grads := layer.Gradients()
@@ -586,7 +604,10 @@ func TestGradientShapes(t *testing.T) {
 			}
 
 			// Forward
-			output := tt.layer.Forward(x)
+			output, err := tt.layer.Forward(x)
+			if err != nil {
+				t.Fatalf("Forward failed: %v", err)
+			}
 
 			// Backward
 			lossGrad := make([]float32, len(output))
@@ -594,7 +615,10 @@ func TestGradientShapes(t *testing.T) {
 				lossGrad[i] = 0.1
 			}
 
-			gradIn := tt.layer.Backward(lossGrad)
+			gradIn, err := tt.layer.Backward(lossGrad)
+			if err != nil {
+				t.Fatalf("Backward failed: %v", err)
+			}
 
 			// Check input gradient shape
 			expectedSize := tt.expectedGradSize

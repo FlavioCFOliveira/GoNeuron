@@ -10,7 +10,7 @@ func TestFlattenForward(t *testing.T) {
 
 	// Test flattening a 2D input [2, 3] -> [6]
 	input := []float32{1, 2, 3, 4, 5, 6}
-	output := flatten.Forward(input)
+	output, _ := flatten.Forward(input)
 
 	if len(output) != 6 {
 		t.Errorf("Output length = %d, expected 6", len(output))
@@ -30,7 +30,7 @@ func TestFlattenBackward(t *testing.T) {
 	flatten.Forward(input)
 
 	grad := []float32{1, 1, 1, 1, 1, 1}
-	outputGrad := flatten.Backward(grad)
+	outputGrad, _ := flatten.Backward(grad)
 
 	for i := 0; i < 6; i++ {
 		if outputGrad[i] != grad[i] {
@@ -82,7 +82,7 @@ func TestFlattenLargeInput(t *testing.T) {
 		input[i] = float32(i)
 	}
 
-	output := flatten.Forward(input)
+	output, _ := flatten.Forward(input)
 
 	if len(output) != 4096 {
 		t.Errorf("Output length = %d, expected 4096", len(output))
@@ -131,6 +131,6 @@ func BenchmarkFlattenBackward(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		flatten.Backward(grad)
+		_, _ = flatten.Backward(grad)
 	}
 }
