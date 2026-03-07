@@ -455,20 +455,85 @@ func (d *Dense) Backward(grad []float32) ([]float32, error) {
 		d.bufGradB.Read(gradB)
 		d.bufGradIn.Read(gradIn)
 	} else {
-		for o := 0; o < outSize; o++ {
-			dzo := dz[o]
-			wBase := o * inSize
-			for i := 0; i < inSize; i++ {
-				gradW[wBase+i] += dzo * input[i]
+		// Cache-blocked implementation for better memory locality
+		// Block size tuned for L1 cache (64 elements = 256 bytes per block)
+		const blockSize = 64
+
+		// Compute gradW with cache blocking
+		// gradW[o, i] += dz[o] * input[i]
+		// Process in blocks to keep data in cache
+		for oBlock := 0; oBlock < outSize; oBlock += blockSize {
+			oEnd := oBlock + blockSize
+			if oEnd > outSize {
+				oEnd = outSize
+			}
+			for iBlock := 0; iBlock < inSize; iBlock += blockSize {
+				iEnd := iBlock + blockSize
+				if iEnd > inSize {
+					iEnd = inSize
+				}
+
+				// Process the block
+				for o := oBlock; o < oEnd; o++ {
+					dzo := dz[o]
+					wBase := o * inSize
+
+					// Unrolled inner loop for better instruction pipelining
+					i := iBlock
+					for ; i < iEnd-3; i += 4 {
+						gradW[wBase+i] += dzo * input[i]
+						gradW[wBase+i+1] += dzo * input[i+1]
+						gradW[wBase+i+2] += dzo * input[i+2]
+						gradW[wBase+i+3] += dzo * input[i+3]
+					}
+					// Handle remaining elements
+					for ; i < iEnd; i++ {
+						gradW[wBase+i] += dzo * input[i]
+					}
+				}
 			}
 		}
 
-		for i := 0; i < inSize; i++ {
-			sum := float32(0.0)
-			for o := 0; o < outSize; o++ {
-				sum += dz[o] * weights[o*inSize+i]
+		// Compute gradIn with cache blocking
+		// gradIn[i] = sum_o dz[o] * weights[o, i]
+		// Access pattern: weights are stored row-major, so we access stride-n
+		// Blocking improves cache locality by processing chunks of weights
+		for iBlock := 0; iBlock < inSize; iBlock += blockSize {
+			iEnd := iBlock + blockSize
+			if iEnd > inSize {
+				iEnd = inSize
 			}
-			gradIn[i] = sum
+
+			// Initialize gradIn for this block
+			for i := iBlock; i < iEnd; i++ {
+				gradIn[i] = 0
+			}
+
+			for oBlock := 0; oBlock < outSize; oBlock += blockSize {
+				oEnd := oBlock + blockSize
+				if oEnd > outSize {
+					oEnd = outSize
+				}
+
+				// Process the block
+				for o := oBlock; o < oEnd; o++ {
+					dzo := dz[o]
+					wBase := o * inSize
+
+					// Unrolled inner loop
+					i := iBlock
+					for ; i < iEnd-3; i += 4 {
+						gradIn[i] += dzo * weights[wBase+i]
+						gradIn[i+1] += dzo * weights[wBase+i+1]
+						gradIn[i+2] += dzo * weights[wBase+i+2]
+						gradIn[i+3] += dzo * weights[wBase+i+3]
+					}
+					// Handle remaining elements
+					for ; i < iEnd; i++ {
+						gradIn[i] += dzo * weights[wBase+i]
+					}
+				}
+			}
 		}
 	}
 
