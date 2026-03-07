@@ -259,11 +259,27 @@ type MultiHeadAttention struct {
 }
 
 func NewMultiHeadAttention(dim, numHeads, seqLen int, causal bool) *MultiHeadAttention {
+	m, _ := NewMultiHeadAttentionE(dim, numHeads, seqLen, causal)
+	return m
+}
+
+// NewMultiHeadAttentionE creates a MultiHeadAttention layer with error handling.
+func NewMultiHeadAttentionE(dim, numHeads, seqLen int, causal bool) (*MultiHeadAttention, error) {
+	if numHeads <= 0 {
+		return nil, fmt.Errorf("numHeads must be positive, got %d", numHeads)
+	}
+	if seqLen <= 0 {
+		return nil, fmt.Errorf("seqLen must be positive, got %d", seqLen)
+	}
+
 	headDim := -1
 	if dim != -1 {
+		if dim <= 0 {
+			return nil, fmt.Errorf("dim must be positive, got %d", dim)
+		}
 		headDim = dim / numHeads
 		if headDim*numHeads != dim {
-			panic("dim must be divisible by numHeads")
+			return nil, fmt.Errorf("dim %d must be divisible by numHeads %d", dim, numHeads)
 		}
 	}
 
@@ -280,7 +296,7 @@ func NewMultiHeadAttention(dim, numHeads, seqLen int, causal bool) *MultiHeadAtt
 		m.Build(seqLen * dim)
 	}
 
-	return m
+	return m, nil
 }
 
 func (m *MultiHeadAttention) Build(inSize int) {
@@ -292,7 +308,10 @@ func (m *MultiHeadAttention) Build(inSize int) {
 		}
 		m.headDim = m.dim / m.numHeads
 		if m.headDim*m.numHeads != m.dim {
-			panic(fmt.Sprintf("inferred dim %d must be divisible by numHeads %d (inSize %d, seqLen %d)", m.dim, m.numHeads, inSize, m.seqLen))
+			// Cannot return error from Build(), so we log and set to invalid state
+			// This will be caught in Forward with a proper error
+			m.dim = -1 // Mark as invalid
+			return
 		}
 	}
 
@@ -348,6 +367,11 @@ func (m *MultiHeadAttention) ForwardWithArena(x []float32, arena *[]float32, off
 	// x is [seqLen * dim]
 	seqLen := m.seqLen
 	dim := m.dim
+
+	// Check if layer was properly initialized
+	if dim <= 0 {
+		return nil, fmt.Errorf("MultiHeadAttention: layer not properly initialized (dim=%d). Check that dim is divisible by numHeads", dim)
+	}
 
 	// 1. Projections
 	m.wQ.Reset()
@@ -817,11 +841,36 @@ type TransformerBlock struct {
 }
 
 func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *TransformerBlock {
-	return NewTransformerBlockExt(dim, numHeads, seqLen, ffDim, causal, ActReLU, NormLN, false)
+	t, _ := NewTransformerBlockE(dim, numHeads, seqLen, ffDim, causal)
+	return t
+}
+
+// NewTransformerBlockE creates a TransformerBlock with error handling.
+func NewTransformerBlockE(dim, numHeads, seqLen, ffDim int, causal bool) (*TransformerBlock, error) {
+	return NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim, causal, ActReLU, NormLN, false)
 }
 
 func NewTransformerBlockExt(dim, numHeads, seqLen, ffDim int, causal bool, actType ActivationType, normType NormType, useRoPE bool) *TransformerBlock {
-	mha := NewMultiHeadAttention(dim, numHeads, seqLen, causal)
+	t, _ := NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim, causal, actType, normType, useRoPE)
+	return t
+}
+
+// NewTransformerBlockExtE creates an extended TransformerBlock with error handling.
+func NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim int, causal bool, actType ActivationType, normType NormType, useRoPE bool) (*TransformerBlock, error) {
+	if numHeads <= 0 {
+		return nil, fmt.Errorf("numHeads must be positive, got %d", numHeads)
+	}
+	if seqLen <= 0 {
+		return nil, fmt.Errorf("seqLen must be positive, got %d", seqLen)
+	}
+	if ffDim <= 0 {
+		return nil, fmt.Errorf("ffDim must be positive, got %d", ffDim)
+	}
+
+	mha, err := NewMultiHeadAttentionE(dim, numHeads, seqLen, causal)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MultiHeadAttention: %w", err)
+	}
 	mha.UseRoPE = useRoPE
 
 	var norm1, norm2 Layer
@@ -861,7 +910,7 @@ func NewTransformerBlockExt(dim, numHeads, seqLen, ffDim int, causal bool, actTy
 		t.Build(seqLen * dim)
 	}
 
-	return t
+	return t, nil
 }
 
 func (t *TransformerBlock) Build(inSize int) {

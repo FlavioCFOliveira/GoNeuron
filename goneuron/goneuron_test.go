@@ -21,9 +21,9 @@ func TestNewSequential(t *testing.T) {
 // TestDenseLayerCreation tests Dense layer factory functions.
 func TestDenseLayerCreation(t *testing.T) {
 	tests := []struct {
-		name string
-		args []interface{}
-		panicExpected bool
+		name       string
+		args       []interface{}
+		nilExpected bool
 	}{
 		{"Lazy inference", []interface{}{4, ReLU}, false},
 		{"Explicit in/out", []interface{}{2, 4, ReLU}, false},
@@ -33,17 +33,12 @@ func TestDenseLayerCreation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.panicExpected {
-				defer func() {
-					if r := recover(); r == nil {
-						t.Error("Expected panic for invalid args")
-					}
-				}()
-			}
-
 			l := Dense(tt.args...)
-			if !tt.panicExpected && l == nil {
-				t.Error("Dense returned nil")
+			if tt.nilExpected && l != nil {
+				t.Error("Dense should return nil for invalid args")
+			}
+			if !tt.nilExpected && l == nil {
+				t.Error("Dense returned nil for valid args")
 			}
 		})
 	}
@@ -52,34 +47,26 @@ func TestDenseLayerCreation(t *testing.T) {
 // TestConv2DCreation tests Conv2D layer factory.
 func TestConv2DCreation(t *testing.T) {
 	tests := []struct {
-		name string
-		args []interface{}
-		panicExpected bool
+		name       string
+		args       []interface{}
+		nilExpected bool
 	}{
 		{
 			name: "Lazy inference",
 			args: []interface{}{16, 3, 1, 1, ReLU},
-			panicExpected: false,
+			nilExpected: false,
 		},
 		{
 			name: "Explicit channels",
 			args: []interface{}{3, 16, 3, 1, 1, ReLU},
-			panicExpected: false,
+			nilExpected: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.panicExpected {
-				defer func() {
-					if r := recover(); r == nil {
-						t.Error("Expected panic")
-					}
-				}()
-			}
-
 			l := Conv2D(tt.args...)
-			if !tt.panicExpected && l == nil {
+			if !tt.nilExpected && l == nil {
 				t.Error("Conv2D returned nil")
 			}
 		})

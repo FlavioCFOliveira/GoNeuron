@@ -43,7 +43,18 @@ type AvgPool2D struct {
 // kernelSize: size of pooling window (square)
 // stride: stride for pooling (defaults to kernelSize)
 // padding: zero padding size
+// Returns nil if parameters are invalid.
 func NewAvgPool2D(inChannels, kernelSize, stride, padding int) *AvgPool2D {
+	if kernelSize <= 0 {
+		return nil
+	}
+	if stride <= 0 {
+		return nil
+	}
+	if padding < 0 {
+		return nil
+	}
+
 	return &AvgPool2D{
 		inChannels:        inChannels,
 		kernelSize:        kernelSize,

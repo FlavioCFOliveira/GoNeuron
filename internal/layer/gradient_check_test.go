@@ -639,3 +639,366 @@ func TestGradientShapes(t *testing.T) {
 		})
 	}
 }
+
+// numericalGradient computes gradient using finite differences.
+func numericalGradient(l Layer, x []float32, lossGrad []float32, epsilon float32) ([]float32, error) {
+	grad := make([]float32, len(x))
+
+	for i := range x {
+		// Evaluate at x + epsilon
+		xPlus := make([]float32, len(x))
+		copy(xPlus, x)
+		xPlus[i] += epsilon
+
+		outPlus, err := l.Forward(xPlus)
+		if err != nil {
+			return nil, err
+		}
+
+		// Compute loss at x + epsilon
+		lossPlus := float32(0)
+		for j, o := range outPlus {
+			lossPlus += o * lossGrad[j]
+		}
+
+		// Evaluate at x - epsilon
+		xMinus := make([]float32, len(x))
+		copy(xMinus, x)
+		xMinus[i] -= epsilon
+
+		// Reset layer state
+		l.Reset()
+
+		outMinus, err := l.Forward(xMinus)
+		if err != nil {
+			return nil, err
+		}
+
+		// Compute loss at x - epsilon
+		lossMinus := float32(0)
+		for j, o := range outMinus {
+			lossMinus += o * lossGrad[j]
+		}
+
+		// Central difference: (f(x+eps) - f(x-eps)) / (2*eps)
+		grad[i] = (lossPlus - lossMinus) / (2 * epsilon)
+
+		// Reset for next iteration
+		l.Reset()
+	}
+
+	return grad, nil
+}
+
+// TestDenseNumericalGradient validates Dense gradients using finite differences.
+func TestDenseNumericalGradient(t *testing.T) {
+	l := NewDense(4, 3, activations.Tanh{})
+
+	// Initialize with small weights for numerical stability
+	params := l.Params()
+	rng := NewRNG(42)
+	for i := range params {
+		params[i] = (rng.RandFloat()*2 - 1) * 0.1
+	}
+	l.ClearGradients()
+
+	// Small input values
+	x := []float32{0.1, -0.2, 0.15, -0.1}
+
+	// Forward
+	output, err := l.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Loss gradient (linear loss for simplicity)
+	lossGrad := make([]float32, len(output))
+	for i := range lossGrad {
+		lossGrad[i] = 0.1
+	}
+
+	// Analytical gradient
+	gradAnalytical, err := l.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
+
+	// Numerical gradient
+	l.Reset()
+	gradNumerical, err := numericalGradient(l, x, lossGrad, 1e-4)
+	if err != nil {
+		t.Fatalf("Numerical gradient failed: %v", err)
+	}
+
+	// Compare
+	tol := float32(5e-3)
+	for i := range gradAnalytical {
+		diff := float32(math.Abs(float64(gradAnalytical[i] - gradNumerical[i])))
+		if diff > tol {
+			t.Errorf("Gradient mismatch at %d: analytical=%f, numerical=%f, diff=%f",
+				i, gradAnalytical[i], gradNumerical[i], diff)
+		}
+	}
+}
+
+// TestConv2DNumericalGradient validates Conv2D gradients using finite differences.
+func TestConv2DNumericalGradient(t *testing.T) {
+	l := NewConv2D(1, 1, 3, 1, 1, activations.Linear{})
+	l.Build(1)
+
+	// Initialize with small weights
+	params := l.Params()
+	rng := NewRNG(42)
+	for i := range params {
+		params[i] = (rng.RandFloat()*2 - 1) * 0.1
+	}
+	l.ClearGradients()
+
+	// Small input: 1 channel, 4x4
+	x := make([]float32, 16)
+	for i := range x {
+		x[i] = (rng.RandFloat()*2 - 1) * 0.1
+	}
+
+	// Forward
+	output, err := l.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Loss gradient
+	lossGrad := make([]float32, len(output))
+	for i := range lossGrad {
+		lossGrad[i] = 0.1
+	}
+
+	// Analytical gradient
+	gradAnalytical, err := l.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
+
+	// Numerical gradient (use larger epsilon for Conv2D)
+	l.Reset()
+	gradNumerical, err := numericalGradient(l, x, lossGrad, 1e-3)
+	if err != nil {
+		t.Fatalf("Numerical gradient failed: %v", err)
+	}
+
+	// Compare with relaxed tolerance
+	tol := float32(1e-2)
+	for i := range gradAnalytical {
+		diff := float32(math.Abs(float64(gradAnalytical[i] - gradNumerical[i])))
+		if diff > tol {
+			t.Errorf("Gradient mismatch at %d: analytical=%f, numerical=%f, diff=%f",
+				i, gradAnalytical[i], gradNumerical[i], diff)
+		}
+	}
+}
+
+// TestLSTMNumericalGradient validates LSTM gradients using finite differences.
+func TestLSTMNumericalGradient(t *testing.T) {
+	l := NewLSTM(3, 2)
+
+	// Initialize with small weights
+	params := l.Params()
+	rng := NewRNG(42)
+	for i := range params {
+		params[i] = (rng.RandFloat()*2 - 1) * 0.05
+	}
+	l.ClearGradients()
+	l.Reset()
+
+	// Small input
+	x := []float32{0.1, -0.1, 0.05}
+
+	// Forward
+	output, err := l.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Loss gradient
+	lossGrad := make([]float32, len(output))
+	for i := range lossGrad {
+		lossGrad[i] = 0.1
+	}
+
+	// Analytical gradient
+	gradAnalytical, err := l.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
+
+	// Numerical gradient
+	l.Reset()
+	gradNumerical, err := numericalGradient(l, x, lossGrad, 1e-4)
+	if err != nil {
+		t.Fatalf("Numerical gradient failed: %v", err)
+	}
+
+	// Compare
+	tol := float32(5e-3)
+	for i := range gradAnalytical {
+		diff := float32(math.Abs(float64(gradAnalytical[i] - gradNumerical[i])))
+		if diff > tol {
+			t.Errorf("Gradient mismatch at %d: analytical=%f, numerical=%f, diff=%f",
+				i, gradAnalytical[i], gradNumerical[i], diff)
+		}
+	}
+}
+
+// TestGRUNumericalGradient validates GRU gradients using finite differences.
+func TestGRUNumericalGradient(t *testing.T) {
+	l := NewGRU(3, 2)
+
+	// Initialize with small weights
+	params := l.Params()
+	rng := NewRNG(42)
+	for i := range params {
+		params[i] = (rng.RandFloat()*2 - 1) * 0.05
+	}
+	l.ClearGradients()
+	l.Reset()
+
+	// Small input
+	x := []float32{0.1, -0.1, 0.05}
+
+	// Forward
+	output, err := l.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Loss gradient
+	lossGrad := make([]float32, len(output))
+	for i := range lossGrad {
+		lossGrad[i] = 0.1
+	}
+
+	// Analytical gradient
+	gradAnalytical, err := l.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
+
+	// Numerical gradient
+	l.Reset()
+	gradNumerical, err := numericalGradient(l, x, lossGrad, 1e-4)
+	if err != nil {
+		t.Fatalf("Numerical gradient failed: %v", err)
+	}
+
+	// Compare
+	tol := float32(5e-3)
+	for i := range gradAnalytical {
+		diff := float32(math.Abs(float64(gradAnalytical[i] - gradNumerical[i])))
+		if diff > tol {
+			t.Errorf("Gradient mismatch at %d: analytical=%f, numerical=%f, diff=%f",
+				i, gradAnalytical[i], gradNumerical[i], diff)
+		}
+	}
+}
+
+// TestLayerNormNumericalGradient validates LayerNorm gradients using finite differences.
+func TestLayerNormNumericalGradient(t *testing.T) {
+	l := NewLayerNorm(4, 1e-5, true)
+
+	// Initialize with small weights
+	params := l.Params()
+	rng := NewRNG(42)
+	for i := range params {
+		params[i] = 1.0 + (rng.RandFloat()*2-1)*0.1
+	}
+	l.ClearGradients()
+
+	// Small input
+	x := []float32{0.1, -0.2, 0.15, -0.1}
+
+	// Forward
+	output, err := l.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Loss gradient
+	lossGrad := make([]float32, len(output))
+	for i := range lossGrad {
+		lossGrad[i] = 0.1
+	}
+
+	// Analytical gradient
+	gradAnalytical, err := l.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
+
+	// Numerical gradient
+	l.Reset()
+	gradNumerical, err := numericalGradient(l, x, lossGrad, 1e-4)
+	if err != nil {
+		t.Fatalf("Numerical gradient failed: %v", err)
+	}
+
+	// Compare with relaxed tolerance for LayerNorm
+	// LayerNorm has complex normalization operations that make numerical gradients less accurate
+	tol := float32(2e-2)
+	for i := range gradAnalytical {
+		diff := float32(math.Abs(float64(gradAnalytical[i] - gradNumerical[i])))
+		if diff > tol {
+			t.Errorf("Gradient mismatch at %d: analytical=%f, numerical=%f, diff=%f",
+				i, gradAnalytical[i], gradNumerical[i], diff)
+		}
+	}
+}
+
+// TestRMSNormNumericalGradient validates RMSNorm gradients using finite differences.
+func TestRMSNormNumericalGradient(t *testing.T) {
+	l := NewRMSNorm(4, 1e-5)
+
+	// Initialize with small weights
+	params := l.Params()
+	rng := NewRNG(42)
+	for i := range params {
+		params[i] = 1.0 + (rng.RandFloat()*2-1)*0.1
+	}
+	l.ClearGradients()
+
+	// Small input
+	x := []float32{0.1, -0.2, 0.15, -0.1}
+
+	// Forward
+	output, err := l.Forward(x)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Loss gradient
+	lossGrad := make([]float32, len(output))
+	for i := range lossGrad {
+		lossGrad[i] = 0.1
+	}
+
+	// Analytical gradient
+	gradAnalytical, err := l.Backward(lossGrad)
+	if err != nil {
+		t.Fatalf("Backward failed: %v", err)
+	}
+
+	// Numerical gradient
+	l.Reset()
+	gradNumerical, err := numericalGradient(l, x, lossGrad, 1e-4)
+	if err != nil {
+		t.Fatalf("Numerical gradient failed: %v", err)
+	}
+
+	// Compare
+	tol := float32(5e-3)
+	for i := range gradAnalytical {
+		diff := float32(math.Abs(float64(gradAnalytical[i] - gradNumerical[i])))
+		if diff > tol {
+			t.Errorf("Gradient mismatch at %d: analytical=%f, numerical=%f, diff=%f",
+				i, gradAnalytical[i], gradNumerical[i], diff)
+		}
+	}
+}

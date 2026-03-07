@@ -14,6 +14,7 @@ import (
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
+	"github.com/FlavioCFOliveira/GoNeuron/internal/logger"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
 )
@@ -275,14 +276,17 @@ func (n *Network) Train(x []float32, y []float32) float32 {
 	// Forward pass
 	yPred, err := n.Forward(x)
 	if err != nil {
+		logger.Error("Forward pass failed", logger.F("error", err))
 		return 0
 	}
 
 	// Compute loss
 	l, err := n.loss.Forward(yPred, y)
 	if err != nil {
+		logger.Error("Loss computation failed", logger.F("error", err))
 		return 0
 	}
+	logger.Debug("Training step complete", logger.F("loss", l))
 
 	// Compute gradient of loss w.r.t. prediction
 	// Use pre-allocated buffer if possible
@@ -307,11 +311,13 @@ func (n *Network) Train(x []float32, y []float32) float32 {
 
 	// Backward pass
 	if _, err := n.Backward(grad); err != nil {
+		logger.Error("Backward pass failed", logger.F("error", err))
 		return 0
 	}
 
 	// Optimization step
 	n.Step()
+	logger.Debug("Optimization step complete")
 
 	return l
 }
@@ -381,14 +387,23 @@ func (n *Network) Fit(trainX, trainY [][]float32, epochs int, batchSize int, cal
 func (n *Network) TrainBatch(batchX [][]float32, batchY [][]float32) float32 {
 	batchSize := len(batchX)
 	if batchSize == 0 {
+		logger.Warn("TrainBatch called with empty batch")
 		return 0
 	}
+
+	logger.Debug("Starting batch training",
+		logger.F("batch_size", batchSize),
+		logger.F("parallel_threshold", 64),
+	)
 
 	// Use parallel processing for batches larger than 64 samples
 	// Parallel overhead dominates for small batches
 	const parallelThreshold = 64
 
 	if batchSize >= parallelThreshold && runtime.NumCPU() > 1 {
+		logger.Debug("Using parallel batch processing",
+			logger.F("num_cpu", runtime.NumCPU()),
+		)
 		return n.trainBatchParallel(batchX, batchY)
 	}
 

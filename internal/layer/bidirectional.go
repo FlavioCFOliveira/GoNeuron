@@ -23,7 +23,15 @@ type Bidirectional struct {
 
 // NewBidirectional creates a new bidirectional wrapper for the given layer.
 // It clones the provided layer to create the backward direction layer.
+// Returns nil if the layer is nil or has invalid dimensions.
 func NewBidirectional(l Layer) *Bidirectional {
+	if l == nil {
+		return nil
+	}
+	if l.InSize() <= 0 || l.OutSize() <= 0 {
+		return nil
+	}
+
 	forward := l
 	backward := l.Clone()
 

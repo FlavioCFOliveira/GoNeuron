@@ -40,7 +40,21 @@ type MoE struct {
 	grads  []float32
 }
 
+// NewMoE creates a new Mixture of Experts layer.
+// Returns nil if parameters are invalid.
 func NewMoE(inSize, outSize, numExperts, k int) *MoE {
+	if inSize <= 0 && inSize != -1 {
+		return nil
+	}
+	if outSize <= 0 && outSize != -1 {
+		return nil
+	}
+	if numExperts <= 0 {
+		return nil
+	}
+	if k <= 0 || k > numExperts {
+		return nil
+	}
 	experts := make([]Layer, numExperts)
 	expertOutputs := make([][]float32, numExperts)
 	for i := 0; i < numExperts; i++ {

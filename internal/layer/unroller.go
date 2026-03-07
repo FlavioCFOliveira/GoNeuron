@@ -17,7 +17,18 @@ type SequenceUnroller struct {
 }
 
 // NewSequenceUnroller creates a new sequence unroller layer.
+// Returns nil if base layer is nil or timeSteps is invalid.
 func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnroller {
+	if base == nil {
+		return nil
+	}
+	if timeSteps <= 0 {
+		return nil
+	}
+	if base.InSize() <= 0 || base.OutSize() <= 0 {
+		return nil
+	}
+
 	outSize := base.OutSize()
 	if returnSeq {
 		outSize *= timeSteps
@@ -45,7 +56,7 @@ func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offse
 	outSize := s.base.OutSize()
 
 	if len(x) != s.timeSteps*inSize {
-		panic(fmt.Sprintf("SequenceUnroller: input size mismatch. Expected %d, got %d", s.timeSteps*inSize, len(x)))
+		return nil, fmt.Errorf("SequenceUnroller: input size mismatch. Expected %d, got %d", s.timeSteps*inSize, len(x))
 	}
 
 	s.base.Reset()

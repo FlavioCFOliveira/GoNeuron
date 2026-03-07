@@ -37,7 +37,14 @@ type Dropout struct {
 // NewDropout creates a new dropout layer.
 // p is the probability of dropping a neuron (default 0.5).
 // A higher p means more aggressive dropout.
+// Returns nil if p is invalid (p < 0 or p > 1).
 func NewDropout(p float32, inSize int) *Dropout {
+	if p < 0 || p > 1 {
+		return nil
+	}
+	if inSize <= 0 {
+		return nil
+	}
 	return &Dropout{
 		p:                p,
 		training:         true,

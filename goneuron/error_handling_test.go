@@ -177,37 +177,26 @@ func TestDense_BackwardCompatibility(t *testing.T) {
 	_ = Dense(10, ReLU)
 }
 
-// TestDense_PanicOnInvalid verifies that Dense panics on invalid args
-func TestDense_PanicOnInvalid(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Dense() should panic with invalid args")
-		}
-	}()
-
-	_ = Dense(10) // 1 arg - should panic
+// TestDense_ReturnsNilOnInvalid verifies that Dense returns nil on invalid args
+func TestDense_ReturnsNilOnInvalid(t *testing.T) {
+	l := Dense(10) // 1 arg - should return nil
+	if l != nil {
+		t.Error("Dense() should return nil with invalid args")
+	}
 }
 
 // TestConv2D_BackwardCompatibility verifies that the original Conv2D function still works
 func TestConv2D_BackwardCompatibility(t *testing.T) {
-	// This should not panic with valid args
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("Conv2D() panicked with valid args: %v", r)
-		}
-	}()
-
-	_ = Conv2D(32, 3, 1, 1, ReLU)
+	l := Conv2D(32, 3, 1, 1, ReLU)
+	if l == nil {
+		t.Error("Conv2D() returned nil with valid args")
+	}
 }
 
 // TestTransformerBlock_BackwardCompatibility verifies that the original TransformerBlock function still works
 func TestTransformerBlock_BackwardCompatibility(t *testing.T) {
-	// This should not panic with valid args
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("TransformerBlock() panicked with valid args: %v", r)
-		}
-	}()
-
-	_ = TransformerBlock(8, 10, 64, true)
+	l := TransformerBlock(8, 10, 64, true)
+	if l == nil {
+		t.Error("TransformerBlock() returned nil with valid args")
+	}
 }

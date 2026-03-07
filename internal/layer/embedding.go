@@ -33,7 +33,14 @@ type Embedding struct {
 // NewEmbedding creates a new embedding layer.
 // num_embeddings: size of the dictionary of embeddings
 // embedding_dim: size of each embedding vector
+// Returns nil if parameters are invalid.
 func NewEmbedding(num_embeddings, embedding_dim int) *Embedding {
+	if num_embeddings <= 0 {
+		return nil
+	}
+	if embedding_dim <= 0 {
+		return nil
+	}
 	// Xavier/Glorot initialization
 	scale := float32(math.Sqrt(3.0 / float64(embedding_dim)))
 

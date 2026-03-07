@@ -188,7 +188,7 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 	// Infer input dimensions from length
 	totalInput := len(input)
 	if totalInput%c.inChannels != 0 {
-		panic("Conv2D: input length not divisible by inChannels")
+		return nil, fmt.Errorf("Conv2D: input length %d not divisible by inChannels %d", totalInput, c.inChannels)
 	}
 	channelSize := totalInput / c.inChannels
 
@@ -199,7 +199,7 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		inputWidth = c.setInputWidth
 		// Verify the dimensions match the input length
 		if inputHeight*inputWidth != channelSize {
-			panic(fmt.Sprintf("Conv2D: input dimensions %dx%d don't match channelSize %d", inputHeight, inputWidth, channelSize))
+			return nil, fmt.Errorf("Conv2D: input dimensions %dx%d don't match channelSize %d", inputHeight, inputWidth, channelSize)
 		}
 	} else {
 		// Infer dimensions - try square first, then rectangular

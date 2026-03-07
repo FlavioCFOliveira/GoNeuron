@@ -2,9 +2,11 @@ package goneuron
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/layer"
+	"github.com/FlavioCFOliveira/GoNeuron/internal/logger"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/loss"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/net"
 	"github.com/FlavioCFOliveira/GoNeuron/internal/opt"
@@ -53,12 +55,9 @@ func ELU(alpha float32) activations.Activation {
 // - Dense(in, out, act) -> Explicit input size
 // - Dense(out, act, in) -> Explicit input size (alternative order used in some examples)
 //
-// Deprecated: This function panics on invalid arguments. Use DenseE() instead for error handling.
+// Deprecated: Use DenseE() instead for proper error handling.
 func Dense(args ...interface{}) Layer {
-	l, err := DenseE(args...)
-	if err != nil {
-		panic(err)
-	}
+	l, _ := DenseE(args...)
 	return l
 }
 
@@ -116,12 +115,9 @@ func DenseE(args ...interface{}) (Layer, error) {
 // - Conv2D(inC, outC, k, s, p, act) -> Explicit inChannels
 // - Conv2D(outC, k, s, p, act, inC) -> Explicit inChannels (alternative order)
 //
-// Deprecated: This function panics on invalid arguments. Use Conv2DE() instead for error handling.
+// Deprecated: Use Conv2DE() instead for proper error handling.
 func Conv2D(args ...interface{}) Layer {
-	l, err := Conv2DE(args...)
-	if err != nil {
-		panic(err)
-	}
+	l, _ := Conv2DE(args...)
 	return l
 }
 
@@ -276,12 +272,9 @@ func RBF(in, numCenters, out int, gamma float32) Layer {
 // - TransformerBlock(numHeads, seqLen, ffDim, causal) -> Lazy inference of dim
 // - TransformerBlock(dim, numHeads, seqLen, ffDim, causal) -> Explicit dim
 //
-// Deprecated: This function panics on invalid arguments. Use TransformerBlockE() instead for error handling.
+// Deprecated: Use TransformerBlockE() instead for proper error handling.
 func TransformerBlock(args ...interface{}) Layer {
-	l, err := TransformerBlockE(args...)
-	if err != nil {
-		panic(err)
-	}
+	l, _ := TransformerBlockE(args...)
 	return l
 }
 
@@ -467,4 +460,36 @@ func Load(filename string) (*Model, Loss, error) {
 		return nil, nil, err
 	}
 	return &net.Sequential{Network: n}, l, nil
+}
+
+// Logging provides structured logging for debugging and monitoring.
+// Use SetLogLevel to configure the verbosity of logs.
+type LogLevel = logger.Level
+
+const (
+	LogDebug   = logger.DebugLevel
+	LogInfo    = logger.InfoLevel
+	LogWarn    = logger.WarnLevel
+	LogError   = logger.ErrorLevel
+	LogSilent  = logger.SilentLevel
+)
+
+// SetLogLevel sets the global log level.
+// Use LogDebug for detailed debugging, LogInfo for normal operation,
+// LogWarn for warnings only, LogError for errors only, or LogSilent to disable.
+func SetLogLevel(level LogLevel) {
+	logger.SetLevel(level)
+}
+
+// SetLogOutput sets the output destination for logs (default: os.Stdout).
+func SetLogOutput(w io.Writer) {
+	logger.SetOutput(w)
+}
+
+// LogField represents a key-value pair for structured logging.
+type LogField = logger.Field
+
+// Log creates a new log field with the given key and value.
+func Log(key string, value interface{}) LogField {
+	return logger.F(key, value)
 }

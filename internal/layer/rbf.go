@@ -42,7 +42,20 @@ type RBF struct {
 }
 
 // NewRBF creates a new RBF layer.
+// Returns nil if parameters are invalid (inSize, numCenters, outSize <= 0 or gamma <= 0).
 func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
+	if inSize <= 0 {
+		return nil
+	}
+	if numCenters <= 0 {
+		return nil
+	}
+	if outSize <= 0 {
+		return nil
+	}
+	if gamma <= 0 {
+		return nil
+	}
 	weightSize := outSize * numCenters
 	biasSize := outSize
 	centerSize := numCenters * inSize

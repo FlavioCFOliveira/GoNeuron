@@ -166,7 +166,16 @@ func NewDense(in, out int, act activations.Activation) *Dense {
 }
 
 // NewDenseWithDevice creates a new dense layer with a specific device.
+// Returns nil if parameters are invalid (in <= 0 and not -1, or out <= 0 and not -1).
 func NewDenseWithDevice(in, out int, act activations.Activation, device Device) *Dense {
+	// Validate inputs (allow -1 for lazy initialization)
+	if in < -1 || in == 0 {
+		return nil
+	}
+	if out < -1 || out == 0 {
+		return nil
+	}
+
 	d := &Dense{
 		act:                act,
 		outSize:            out,

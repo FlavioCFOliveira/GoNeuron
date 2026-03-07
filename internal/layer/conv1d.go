@@ -58,7 +58,24 @@ type Conv1D struct {
 // stride: stride of the convolution
 // padding: zero-padding added to both sides of input
 // act: activation function
+// Returns nil if parameters are invalid.
 func NewConv1D(inChannels, outChannels, kernelSize, stride, padding int, act activations.Activation) *Conv1D {
+	if inChannels <= 0 {
+		return nil
+	}
+	if outChannels <= 0 {
+		return nil
+	}
+	if kernelSize <= 0 {
+		return nil
+	}
+	if stride <= 0 {
+		return nil
+	}
+	if padding < 0 {
+		return nil
+	}
+
 	c := &Conv1D{
 		inChannels:  inChannels,
 		outChannels: outChannels,
