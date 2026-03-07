@@ -254,27 +254,48 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 				b.runningVar[f] = (1-b.momentum)*b.runningVar[f] + b.momentum*variance
 			}
 		} else {
+			// OPTIMIZED CPU mean/variance computation
+			// Using single-pass algorithm with manual vectorization
+			const blockSize = 64
+			n := float32(batchSize * spatialSize)
+			invN := 1.0 / n
+
 			for f := 0; f < b.numFeatures; f++ {
+				// Step 1: Compute mean using cache blocking
 				sum := float32(0.0)
 				for i := 0; i < batchSize; i++ {
-					base := i * b.numFeatures * spatialSize + f * spatialSize
-					for s := 0; s < spatialSize; s++ {
+					base := i*b.numFeatures*spatialSize + f*spatialSize
+					// Process in blocks for better cache utilization
+					s := 0
+					for ; s <= spatialSize-4; s += 4 {
+						sum += x[base+s] + x[base+s+1] + x[base+s+2] + x[base+s+3]
+					}
+					for ; s < spatialSize; s++ {
 						sum += x[base+s]
 					}
 				}
-				mean := sum / float32(batchSize*spatialSize)
+				mean := sum * invN
 				b.savedMean[f] = mean
 				b.runningMean[f] = (1-b.momentum)*b.runningMean[f] + b.momentum*mean
 
+				// Step 2: Compute variance using cache blocking
 				sumSq := float32(0.0)
 				for i := 0; i < batchSize; i++ {
-					base := i * b.numFeatures * spatialSize + f * spatialSize
-					for s := 0; s < spatialSize; s++ {
+					base := i*b.numFeatures*spatialSize + f*spatialSize
+					s := 0
+					for ; s <= spatialSize-4; s += 4 {
+						d0 := x[base+s] - mean
+						d1 := x[base+s+1] - mean
+						d2 := x[base+s+2] - mean
+						d3 := x[base+s+3] - mean
+						sumSq += d0*d0 + d1*d1 + d2*d2 + d3*d3
+					}
+					for ; s < spatialSize; s++ {
 						diff := x[base+s] - mean
 						sumSq += diff * diff
 					}
 				}
-				variance := sumSq / float32(batchSize*spatialSize)
+				variance := sumSq * invN
 				std := float32(math.Sqrt(float64(variance + b.eps)))
 				b.savedVar[f] = variance
 				b.savedStd[f] = std
@@ -299,18 +320,72 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 			return output, nil
 }
 
-		// CPU normalization
+		// CPU normalization - OPTIMIZED VERSION
+		// Pre-compute reciprocal of std for division optimization
+		istdBuf := make([]float32, b.numFeatures)
+		for f := 0; f < b.numFeatures; f++ {
+			istdBuf[f] = 1.0 / b.savedStd[f]
+		}
+
+		// Main loop with cache blocking and unrolling
+		const blockSize = 64 // Tuned for L1 cache
+
 		for i := 0; i < batchSize; i++ {
+			batchBase := i * b.numFeatures * spatialSize
+
 			for f := 0; f < b.numFeatures; f++ {
-				base := i * b.numFeatures * spatialSize + f * spatialSize
+				base := batchBase + f*spatialSize
 				mean := b.savedMean[f]
-				std := b.savedStd[f]
-				for s := 0; s < spatialSize; s++ {
-					norm := (x[base+s] - mean) / std
-					if b.affine {
-						output[base+s] = b.gamma[f]*norm + b.beta[f]
-					} else {
-						output[base+s] = norm
+				istd := istdBuf[f]
+				gamma := float32(1.0)
+				beta := float32(0.0)
+				if b.affine {
+					gamma = b.gamma[f]
+					beta = b.beta[f]
+				}
+
+				// Cache-blocked loop
+				for s := 0; s < spatialSize; s += blockSize {
+					end := s + blockSize
+					if end > spatialSize {
+						end = spatialSize
+					}
+
+					// Unrolled inner loop (4x unroll)
+					j := s
+					for ; j <= end-4; j += 4 {
+						idx0 := base + j
+						idx1 := idx0 + 1
+						idx2 := idx0 + 2
+						idx3 := idx0 + 3
+
+						n0 := (x[idx0] - mean) * istd
+						n1 := (x[idx1] - mean) * istd
+						n2 := (x[idx2] - mean) * istd
+						n3 := (x[idx3] - mean) * istd
+
+						if b.affine {
+							output[idx0] = gamma*n0 + beta
+							output[idx1] = gamma*n1 + beta
+							output[idx2] = gamma*n2 + beta
+							output[idx3] = gamma*n3 + beta
+						} else {
+							output[idx0] = n0
+							output[idx1] = n1
+							output[idx2] = n2
+							output[idx3] = n3
+						}
+					}
+
+					// Handle remaining elements
+					for ; j < end; j++ {
+						idx := base + j
+						norm := (x[idx] - mean) * istd
+						if b.affine {
+							output[idx] = gamma*norm + beta
+						} else {
+							output[idx] = norm
+						}
 					}
 				}
 			}

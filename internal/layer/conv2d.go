@@ -152,6 +152,146 @@ func (c *Conv2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 	return outH, outW
 }
 
+// conv2D3x3Optimized implements an optimized 3x3 convolution with stride=1, padding=1
+// This is a common configuration used in many CNN architectures
+func (c *Conv2D) conv2D3x3Optimized(input []float32, inputHeight, inputWidth, outH, outW int) {
+	outSize := outH * outW
+	inChannels := c.inChannels
+	outChannels := c.outChannels
+
+	// Kernel weights are stored as: [outChannels][inChannels][3][3]
+	// Pre-fetch weights into local arrays for better cache locality
+
+	// Process output channels in groups for better cache utilization
+	const tileSize = 8
+
+	for oc := 0; oc < outChannels; oc++ {
+		ocWeightBase := oc * inChannels * 9 // 9 = 3*3
+		ocOutBase := oc * outSize
+
+		// Clear output buffer for this channel
+		for i := 0; i < outSize; i++ {
+			c.preActBuf[ocOutBase+i] = 0
+		}
+
+		// Process input channels
+		for ic := 0; ic < inChannels; ic++ {
+			// Pre-fetch the 3x3 kernel weights for this input/output channel pair
+			wBase := ocWeightBase + ic*9
+			w00 := c.weights[wBase+0]
+			w01 := c.weights[wBase+1]
+			w02 := c.weights[wBase+2]
+			w10 := c.weights[wBase+3]
+			w11 := c.weights[wBase+4]
+			w12 := c.weights[wBase+5]
+			w20 := c.weights[wBase+6]
+			w21 := c.weights[wBase+7]
+			w22 := c.weights[wBase+8]
+
+			icOffset := ic * inputHeight * inputWidth
+
+			// Process output positions with loop unrolling and vector-friendly access
+			// Skip boundary checks by processing only valid interior region
+			// Handle boundaries separately
+
+			// Process interior region (no boundary checks needed)
+			for oh := 1; oh < outH-1; oh++ {
+				outRowOffset := ocOutBase + oh*outW
+				inRow := oh
+				rowOffsetTop := icOffset + (inRow-1)*inputWidth
+				rowOffsetMid := icOffset + inRow*inputWidth
+				rowOffsetBot := icOffset + (inRow+1)*inputWidth
+
+				// Process in chunks of 4 for better instruction pipelining
+				ow := 1
+				for ; ow <= outW-5; ow += 4 {
+					pos0 := outRowOffset + ow
+					pos1 := pos0 + 1
+					pos2 := pos0 + 2
+					pos3 := pos0 + 3
+					inCol0 := ow
+					inCol1 := ow + 1
+					inCol2 := ow + 2
+					inCol3 := ow + 3
+
+					// Top row contributions
+					c.preActBuf[pos0] += w00*input[rowOffsetTop+inCol0-1] + w01*input[rowOffsetTop+inCol0] + w02*input[rowOffsetTop+inCol0+1]
+					c.preActBuf[pos1] += w00*input[rowOffsetTop+inCol1-1] + w01*input[rowOffsetTop+inCol1] + w02*input[rowOffsetTop+inCol1+1]
+					c.preActBuf[pos2] += w00*input[rowOffsetTop+inCol2-1] + w01*input[rowOffsetTop+inCol2] + w02*input[rowOffsetTop+inCol2+1]
+					c.preActBuf[pos3] += w00*input[rowOffsetTop+inCol3-1] + w01*input[rowOffsetTop+inCol3] + w02*input[rowOffsetTop+inCol3+1]
+
+					// Middle row contributions
+					c.preActBuf[pos0] += w10*input[rowOffsetMid+inCol0-1] + w11*input[rowOffsetMid+inCol0] + w12*input[rowOffsetMid+inCol0+1]
+					c.preActBuf[pos1] += w10*input[rowOffsetMid+inCol1-1] + w11*input[rowOffsetMid+inCol1] + w12*input[rowOffsetMid+inCol1+1]
+					c.preActBuf[pos2] += w10*input[rowOffsetMid+inCol2-1] + w11*input[rowOffsetMid+inCol2] + w12*input[rowOffsetMid+inCol2+1]
+					c.preActBuf[pos3] += w10*input[rowOffsetMid+inCol3-1] + w11*input[rowOffsetMid+inCol3] + w12*input[rowOffsetMid+inCol3+1]
+
+					// Bottom row contributions
+					c.preActBuf[pos0] += w20*input[rowOffsetBot+inCol0-1] + w21*input[rowOffsetBot+inCol0] + w22*input[rowOffsetBot+inCol0+1]
+					c.preActBuf[pos1] += w20*input[rowOffsetBot+inCol1-1] + w21*input[rowOffsetBot+inCol1] + w22*input[rowOffsetBot+inCol1+1]
+					c.preActBuf[pos2] += w20*input[rowOffsetBot+inCol2-1] + w21*input[rowOffsetBot+inCol2] + w22*input[rowOffsetBot+inCol2+1]
+					c.preActBuf[pos3] += w20*input[rowOffsetBot+inCol3-1] + w21*input[rowOffsetBot+inCol3] + w22*input[rowOffsetBot+inCol3+1]
+				}
+
+				// Handle remaining elements
+				for ; ow < outW-1; ow++ {
+					pos := outRowOffset + ow
+					inCol := ow
+
+					c.preActBuf[pos] += w00*input[rowOffsetTop+inCol-1] + w01*input[rowOffsetTop+inCol] + w02*input[rowOffsetTop+inCol+1]
+					c.preActBuf[pos] += w10*input[rowOffsetMid+inCol-1] + w11*input[rowOffsetMid+inCol] + w12*input[rowOffsetMid+inCol+1]
+					c.preActBuf[pos] += w20*input[rowOffsetBot+inCol-1] + w21*input[rowOffsetBot+inCol] + w22*input[rowOffsetBot+inCol+1]
+				}
+			}
+
+			// Handle first and last rows (boundaries)
+			for oh := 0; oh < outH; oh += outH - 1 {
+				if oh == 0 || oh == outH-1 {
+					outRowOffset := ocOutBase + oh*outW
+					inRow := oh
+					for ow := 0; ow < outW; ow++ {
+						inCol := ow
+						pos := outRowOffset + ow
+
+						if inRow > 0 {
+							rowOffset := icOffset + (inRow-1)*inputWidth
+							if inCol > 0 {
+								c.preActBuf[pos] += w00 * input[rowOffset+inCol-1]
+							}
+							c.preActBuf[pos] += w01 * input[rowOffset+inCol]
+							if inCol < inputWidth-1 {
+								c.preActBuf[pos] += w02 * input[rowOffset+inCol+1]
+							}
+						}
+
+						{
+							rowOffset := icOffset + inRow*inputWidth
+							if inCol > 0 {
+								c.preActBuf[pos] += w10 * input[rowOffset+inCol-1]
+							}
+							c.preActBuf[pos] += w11 * input[rowOffset+inCol]
+							if inCol < inputWidth-1 {
+								c.preActBuf[pos] += w12 * input[rowOffset+inCol+1]
+							}
+						}
+
+						if inRow < inputHeight-1 {
+							rowOffset := icOffset + (inRow+1)*inputWidth
+							if inCol > 0 {
+								c.preActBuf[pos] += w20 * input[rowOffset+inCol-1]
+							}
+							c.preActBuf[pos] += w21 * input[rowOffset+inCol]
+							if inCol < inputWidth-1 {
+								c.preActBuf[pos] += w22 * input[rowOffset+inCol+1]
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 // SetInputDimensions explicitly sets the input dimensions for the next forward pass.
 // This allows non-square inputs and avoids automatic inference.
 func (c *Conv2D) SetInputDimensions(height, width int) {
@@ -317,49 +457,87 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 	icWeightStride := kernelSize * kernelSize
 	ocWeightStride := inChannels * icWeightStride
 
-	for oc := 0; oc < outChannels; oc++ {
-		ocWeightBase := oc * ocWeightStride
-		ocOutBase := oc * outSize
+	// OPTIMIZED CONVOLUTION: Loop reordering for better cache locality
+	// Process output spatial positions with kernel unrolling for 3x3 case
 
-		for ic := 0; ic < inChannels; ic++ {
-			icWeightBase := ocWeightBase + ic*icWeightStride
-			inputChannelOffset := ic * inputHeight * inputWidth
+	if kernelSize == 3 && stride == 1 && padding == 1 {
+		// Optimized 3x3 kernel with padding=1, stride=1
+		c.conv2D3x3Optimized(input, inputHeight, inputWidth, outH, outW)
+	} else {
+		// Generic fallback implementation
+		for oc := 0; oc < outChannels; oc++ {
+			ocWeightBase := oc * ocWeightStride
+			ocOutBase := oc * outSize
 
-			for kh := 0; kh < kernelSize; kh++ {
-				khWeightBase := icWeightBase + kh*kernelSize
+			for ic := 0; ic < inChannels; ic++ {
+				icWeightBase := ocWeightBase + ic*icWeightStride
+				inputChannelOffset := ic * inputHeight * inputWidth
 
-				for kw := 0; kw < kernelSize; kw++ {
-					weightIdx := khWeightBase + kw
-					wVal := c.weights[weightIdx]
+				for kh := 0; kh < kernelSize; kh++ {
+					khWeightBase := icWeightBase + kh*kernelSize
 
-					for oh := 0; oh < outH; oh++ {
-						inH := oh*stride + kh - padding
-						if inH >= 0 && inH < inputHeight {
-							inHOffset := inputChannelOffset + inH*inputWidth
-							ohOffset := ocOutBase + oh*outW
-							for ow := 0; ow < outW; ow++ {
-								inW := ow*stride + kw - padding
-								if inW >= 0 && inW < inputWidth {
-									inputIdx := inHOffset + inW
-									pos := ohOffset + ow
-									c.preActBuf[pos] += wVal * input[inputIdx]
+					for kw := 0; kw < kernelSize; kw++ {
+						weightIdx := khWeightBase + kw
+						wVal := c.weights[weightIdx]
+
+						for oh := 0; oh < outH; oh++ {
+							inH := oh*stride + kh - padding
+							if inH >= 0 && inH < inputHeight {
+								inHOffset := inputChannelOffset + inH*inputWidth
+								ohOffset := ocOutBase + oh*outW
+								for ow := 0; ow < outW; ow++ {
+									inW := ow*stride + kw - padding
+									if inW >= 0 && inW < inputWidth {
+										inputIdx := inHOffset + inW
+										pos := ohOffset + ow
+										c.preActBuf[pos] += wVal * input[inputIdx]
+									}
 								}
 							}
 						}
 					}
 				}
 			}
-		}
 
-		// Add bias and apply activation for this output channel
-		biasVal := c.biases[oc]
-		for oh := 0; oh < outH; oh++ {
-			ohOffset := ocOutBase + oh*outW
-			for ow := 0; ow < outW; ow++ {
-				pos := ohOffset + ow
-				sum := c.preActBuf[pos] + biasVal
-				c.preActBuf[pos] = sum
-				c.outputBuf[pos] = c.activation.Activate(sum)
+			// Add bias and apply activation for this output channel
+			biasVal := c.biases[oc]
+			for oh := 0; oh < outH; oh++ {
+				ohOffset := ocOutBase + oh*outW
+				for ow := 0; ow < outW; ow++ {
+					pos := ohOffset + ow
+					sum := c.preActBuf[pos] + biasVal
+					c.preActBuf[pos] = sum
+					c.outputBuf[pos] = c.activation.Activate(sum)
+				}
+			}
+		}
+	}
+
+	// Apply bias and activation after convolution is complete
+	if kernelSize == 3 && stride == 1 && padding == 1 {
+		for oc := 0; oc < outChannels; oc++ {
+			ocOutBase := oc * outSize
+			biasVal := c.biases[oc]
+			for oh := 0; oh < outH; oh++ {
+				ohOffset := ocOutBase + oh*outW
+				// Unrolled loop
+				ow := 0
+				for ; ow <= outW-4; ow += 4 {
+					pos := ohOffset + ow
+					c.preActBuf[pos] += biasVal
+					c.preActBuf[pos+1] += biasVal
+					c.preActBuf[pos+2] += biasVal
+					c.preActBuf[pos+3] += biasVal
+					c.outputBuf[pos] = c.activation.Activate(c.preActBuf[pos])
+					c.outputBuf[pos+1] = c.activation.Activate(c.preActBuf[pos+1])
+					c.outputBuf[pos+2] = c.activation.Activate(c.preActBuf[pos+2])
+					c.outputBuf[pos+3] = c.activation.Activate(c.preActBuf[pos+3])
+				}
+				for ; ow < outW; ow++ {
+					pos := ohOffset + ow
+					c.preActBuf[pos] += biasVal
+					c.outputBuf[pos] = c.activation.Activate(c.preActBuf[pos])
+				}
 			}
 		}
 	}

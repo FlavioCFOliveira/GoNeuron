@@ -285,14 +285,8 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 		}
 		metalUsed = true
 	} else {
-		for o := 0; o < outSize; o++ {
-			sum := biases[o]
-			wBase := o * inSize
-			for i := 0; i < inSize; i++ {
-				sum += weights[wBase+i] * input[i]
-			}
-			preAct[o] = sum
-		}
+		// Use optimized CPU MatMul implementation
+		matMulOptimized(input, weights, biases, preAct, 1, inSize, outSize)
 	}
 
 	// Save pre-activation to arena
