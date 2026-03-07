@@ -118,16 +118,20 @@ func main() {
 	model.Fit(xTrain, yTrain, epochs, 16, goneuron.Logger(20))
 
 	fmt.Println("\nEvaluating...")
+	predictions, err := model.PredictBatch(xTest)
+	if err != nil {
+		log.Fatalf("Failed to predict: %v", err)
+	}
 	var totalSE float32
-	for i := range xTest {
-		pred, _ := model.Forward(xTest[i])
+	for i := range predictions {
+		pred := predictions[i][0]
 		actual := yTest[i][0]
-		diff := (pred[0] - actual) * (normParams.Max - normParams.Min)
+		diff := (pred - actual) * (normParams.Max - normParams.Min)
 		totalSE += diff * diff
 
 		if i < 5 {
 			pActual := actual*(normParams.Max-normParams.Min) + normParams.Min
-			pPred := pred[0]*(normParams.Max-normParams.Min) + normParams.Min
+			pPred := pred*(normParams.Max-normParams.Min) + normParams.Min
 			fmt.Printf("Actual: $%.2f, Predicted: $%.2f, Error: $%.2f\n", pActual, pPred, pPred-pActual)
 		}
 	}

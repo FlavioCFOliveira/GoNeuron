@@ -4,6 +4,7 @@ package layer
 import (
 	"fmt"
 	"math"
+	"sync"
 	"unsafe"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
@@ -47,6 +48,7 @@ type Conv2D struct {
 	savedInput        []float32
 	savedInputOffsets []int
 	arenaPtr          *[]float32
+	arenaMu           sync.Mutex // Protege operações de arena contra race conditions
 
 	training bool
 
@@ -375,8 +377,9 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		c.gradInBuf = make([]float32, totalInput)
 	}
 
-	// Save input for backward pass
+	// Save input for backward pass - protegido por mutex quando usando arena
 	if arena != nil && offset != nil {
+		c.arenaMu.Lock()
 		c.arenaPtr = arena
 		if len(*arena) < *offset+len(input) {
 			newArena := make([]float32, (*offset+len(input))*2)
@@ -387,6 +390,7 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		copy(saved, input)
 		c.savedInputOffsets = append(c.savedInputOffsets, *offset)
 		*offset += len(input)
+		c.arenaMu.Unlock()
 	} else {
 		if cap(c.savedInput) < len(input) {
 			c.savedInput = make([]float32, len(input))

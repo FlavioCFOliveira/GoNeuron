@@ -1,6 +1,8 @@
 // Package layer provides neural network layer implementations.
 package layer
 
+import "sync"
+
 // Dropout implements dropout regularization.
 // During training, randomly sets inputs to 0 with probability p.
 // During inference, passes inputs through unchanged.
@@ -27,6 +29,7 @@ type Dropout struct {
 	// Saved state for backward pass
 	savedMaskOffsets []int
 	arenaPtr         *[]float32
+	arenaMu          sync.Mutex // Protege operações de arena contra race conditions
 
 	// RNG for dropout masks
 	rng *RNG
@@ -92,6 +95,7 @@ func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) (
 
 	var mask []float32
 	if arena != nil && offset != nil {
+		d.arenaMu.Lock()
 		d.arenaPtr = arena
 		if len(*arena) < *offset+inSize {
 			newArena := make([]float32, (*offset+inSize)*2)
@@ -101,6 +105,7 @@ func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) (
 		mask = (*arena)[*offset : *offset+inSize]
 		d.savedMaskOffsets = append(d.savedMaskOffsets, *offset)
 		*offset += inSize
+		d.arenaMu.Unlock()
 	} else {
 		if cap(d.maskBuf) < inSize {
 			d.maskBuf = make([]float32, inSize)

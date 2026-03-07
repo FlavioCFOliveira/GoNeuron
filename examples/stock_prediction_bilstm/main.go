@@ -179,11 +179,14 @@ func main() {
 	network.Fit(xTrain, yTrain, epochs, batchSize, net.Logger{Interval: 100})
 
 	// Evaluation
-	var mse float32
 	network.SetTraining(false)
-	for i := range xTest {
-		out, _ := network.Forward(xTest[i])
-		pred := out[0]
+	predictions, err := network.ForwardBatch(xTest)
+	if err != nil {
+		log.Fatalf("Failed to predict: %v", err)
+	}
+	var mse float32
+	for i := range predictions {
+		pred := predictions[i][0]
 		// Denormalize
 		actualPred := pred*(normParams[closeIdx].Max-normParams[closeIdx].Min) + normParams[closeIdx].Min
 		actualTrue := yTest[i][0]*(normParams[closeIdx].Max-normParams[closeIdx].Min) + normParams[closeIdx].Min

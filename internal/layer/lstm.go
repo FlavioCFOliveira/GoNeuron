@@ -3,6 +3,7 @@ package layer
 
 import (
 	"math"
+	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
@@ -69,6 +70,7 @@ type LSTM struct {
 	savedHiddenOffsets []int
 	savedPreActOffsets []int
 	arenaPtr           *[]float32
+	arenaMu            sync.Mutex // Protege operações de arena contra race conditions
 
 	// Current time step
 	timeStep int
@@ -337,8 +339,9 @@ func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]f
 	}
 
 storeState:
-	// === Store states for backprop ===
+	// === Store states for backprop === - protegido por mutex quando usando arena
 	if arena != nil && offset != nil {
+		l.arenaMu.Lock()
 		l.arenaPtr = arena
 		outSize := l.outSize
 		if len(*arena) < *offset+outSize*6 {
@@ -358,6 +361,7 @@ storeState:
 		l.savedPreActOffsets = append(l.savedPreActOffsets, *offset)
 		copy((*arena)[*offset:*offset+outSize*4], l.preActBuf)
 		*offset += outSize * 4
+		l.arenaMu.Unlock()
 	} else {
 		l.saveState(l.cellBuf, l.hiddenBuf, l.preActBuf)
 	}

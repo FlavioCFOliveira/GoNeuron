@@ -3,6 +3,7 @@ package layer
 
 import (
 	"math"
+	"sync"
 )
 
 // BatchNorm2D implements 2D batch normalization.
@@ -41,6 +42,7 @@ type BatchNorm2D struct {
 	savedMeanOffsets  []int
 	savedStdOffsets   []int
 	arena             []float32
+	arenaMu           sync.Mutex // Protege operações de arena contra race conditions
 
 	inputHeight     int
 	inputWidth      int
@@ -200,8 +202,9 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 	output := b.outputBuf[:total]
 
 	if b.training {
-		// Save state for backward pass
+		// Save state for backward pass - protegido por mutex quando usando arena
 		if arena != nil && offset != nil {
+			b.arenaMu.Lock()
 			b.arena = *arena
 			totalRequired := total + b.numFeatures*2
 			if len(*arena) < *offset+totalRequired {
@@ -221,6 +224,7 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 			b.savedStdOffsets = append(b.savedStdOffsets, *offset)
 			b.savedStd = (*arena)[*offset : *offset+b.numFeatures]
 			*offset += b.numFeatures
+			b.arenaMu.Unlock()
 		} else {
 			if cap(b.savedInput) < total {
 				b.savedInput = make([]float32, total)

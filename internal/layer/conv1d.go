@@ -14,6 +14,7 @@ package layer
 
 import (
 	"math"
+	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
@@ -47,8 +48,9 @@ type Conv1D struct {
 	training bool
 
 	// Arena for memory management
-	arenaPtr *[]float32
+	arenaPtr          *[]float32
 	savedInputOffsets []int
+	arenaMu           sync.Mutex // Protege operações de arena contra race conditions
 }
 
 // NewConv1D creates a new Conv1D layer
@@ -135,10 +137,11 @@ func (c *Conv1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([
 		c.outputBuf = make([]float32, outputSize)
 	}
 
-	// Cache input for backward pass
+	// Cache input for backward pass - protegido por mutex quando usando arena
 	if c.training {
 		if arena != nil && offset != nil {
 			// Use arena for memory management
+			c.arenaMu.Lock()
 			c.arenaPtr = arena
 			inSize := len(x)
 			if len(*arena) < *offset+inSize {
@@ -150,6 +153,7 @@ func (c *Conv1D) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([
 			copy(saved, x)
 			c.savedInputOffsets = append(c.savedInputOffsets, *offset)
 			*offset += inSize
+			c.arenaMu.Unlock()
 		} else {
 			c.inputBuf = make([]float32, len(x))
 			copy(c.inputBuf, x)

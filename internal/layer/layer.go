@@ -4,6 +4,7 @@ package layer
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"math"
@@ -148,6 +149,7 @@ type Dense struct {
 	savedPreActOffsets []int
 	savedOutput        []float32
 	arenaPtr           *[]float32
+	arenaMu            sync.Mutex // Protege operações de arena contra race conditions
 
 	// Metal persistent buffers
 	bufWeights *MetalBuffer
@@ -243,8 +245,9 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 
 	copy(d.inputBuf, x)
 
-	// Save input to arena
+	// Save input to arena - protegido por mutex quando usando arena
 	if arena != nil && offset != nil {
+		d.arenaMu.Lock()
 		d.arenaPtr = arena
 		inSize := len(x)
 		if len(*arena) < *offset+inSize {
@@ -257,6 +260,7 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 		copy(saved, x)
 		d.savedInputOffsets = append(d.savedInputOffsets, *offset)
 		*offset += inSize
+		d.arenaMu.Unlock()
 	} else {
 		d.saveInput(x)
 	}
@@ -289,8 +293,9 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 		matMulOptimized(input, weights, biases, preAct, 1, inSize, outSize)
 	}
 
-	// Save pre-activation to arena
+	// Save pre-activation to arena - protegido por mutex
 	if arena != nil && offset != nil {
+		d.arenaMu.Lock()
 		if len(*arena) < *offset+outSize {
 			newArena := make([]float32, (*offset+outSize)*2)
 			copy(newArena, *arena)
@@ -300,6 +305,7 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 		copy(saved, preAct)
 		d.savedPreActOffsets = append(d.savedPreActOffsets, *offset)
 		*offset += outSize
+		d.arenaMu.Unlock()
 	} else {
 		d.savePreAct(preAct)
 	}

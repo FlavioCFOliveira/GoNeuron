@@ -4,6 +4,7 @@ package layer
 import (
 	"errors"
 	"math"
+	"sync"
 )
 
 // AvgPool2D implements 2D average pooling.
@@ -32,6 +33,7 @@ type AvgPool2D struct {
 	savedInput        []float32
 	savedInputOffsets []int
 	arena             []float32
+	arenaMu           sync.Mutex // Protege operações de arena contra race conditions
 
 	training bool
 
@@ -129,8 +131,9 @@ func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		a.gradInBuf = make([]float32, totalInput)
 	}
 
-	// Save input for backward pass
+	// Save input for backward pass - protegido por mutex
 	if arena != nil && offset != nil {
+		a.arenaMu.Lock()
 		a.arena = *arena
 		if len(*arena) < *offset+totalInput {
 			newArena := make([]float32, (*offset+totalInput)*2)
@@ -142,6 +145,7 @@ func (a *AvgPool2D) ForwardWithArena(input []float32, arena *[]float32, offset *
 		copy(saved, input)
 		a.savedInputOffsets = append(a.savedInputOffsets, *offset)
 		*offset += totalInput
+		a.arenaMu.Unlock()
 	} else {
 		if cap(a.savedInput) < totalInput {
 			a.savedInput = make([]float32, totalInput)
@@ -264,8 +268,9 @@ func (a *AvgPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena 
 
 	// GPU acceleration
 	if m, ok := a.device.(*MetalDevice); ok && m.IsAvailable() {
-		// Save input to arena if provided
+		// Save input to arena if provided - protegido por mutex
 		if arena != nil && offset != nil {
+			a.arenaMu.Lock()
 			if len(*arena) < *offset+len(input) {
 				newArena := make([]float32, (*offset+len(input))*2)
 				copy(newArena, *arena)
@@ -277,6 +282,7 @@ func (a *AvgPool2D) ForwardBatchWithArena(input []float32, batchSize int, arena 
 				a.savedInputOffsets = append(a.savedInputOffsets, *offset+i*inSize)
 			}
 			*offset += len(input)
+			a.arenaMu.Unlock()
 		} else {
 			if cap(a.savedInput) < len(input) {
 				a.savedInput = make([]float32, len(input))

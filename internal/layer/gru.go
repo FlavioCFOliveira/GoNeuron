@@ -3,6 +3,7 @@ package layer
 
 import (
 	"math"
+	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
@@ -62,6 +63,7 @@ type GRU struct {
 	savedPreActOffsets []int
 	arenaPtr           *[]float32
 	arena              []float32
+	arenaMu            sync.Mutex // Protege operações de arena contra race conditions
 
 	// Current time step
 	timeStep int
@@ -254,8 +256,9 @@ func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]fl
 		g.cellBuf[i] = hPrev[i] + g.updateGateOut[i]*(g.cellGateOut[i]-hPrev[i])
 	}
 
-	// === Store states for backprop ===
+	// === Store states for backprop === - protegido por mutex quando usando arena
 	if arena != nil && offset != nil {
+		g.arenaMu.Lock()
 		g.arenaPtr = arena
 		if len(*arena) < *offset+outSize*4 {
 			newArena := make([]float32, (*offset+outSize*4)*2)
@@ -269,6 +272,7 @@ func (g *GRU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]fl
 		g.savedPreActOffsets = append(g.savedPreActOffsets, *offset)
 		copy((*arena)[*offset:*offset+outSize*3], g.preActBuf)
 		*offset += outSize * 3
+		g.arenaMu.Unlock()
 	} else {
 		g.saveState(g.cellBuf, g.preActBuf)
 	}

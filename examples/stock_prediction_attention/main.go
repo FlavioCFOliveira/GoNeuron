@@ -100,10 +100,13 @@ func main() {
 	network.Fit(xTrain, yTrain, epochs, 16, net.Logger{Interval: 20})
 
 	// Evaluation
+	predictions, err := network.ForwardBatch(xTest)
+	if err != nil {
+		log.Fatalf("Failed to predict: %v", err)
+	}
 	var mse float32
-	for i := range xTest {
-		out, _ := network.Forward(xTest[i])
-		pred := out[0]
+	for i := range predictions {
+		pred := predictions[i][0]
 		diff := (pred - yTest[i][0]) * (normParams.Max - normParams.Min)
 		mse += diff * diff
 	}
