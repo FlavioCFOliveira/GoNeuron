@@ -348,3 +348,18 @@ func (c *Conv1D) Stride() int { return c.stride }
 
 // Padding returns padding
 func (c *Conv1D) Padding() int { return c.padding }
+
+// InSize returns the input size (inChannels).
+// Note: For Conv1D, this is the number of input channels, not the sequence length.
+func (c *Conv1D) InSize() int { return c.inChannels }
+
+// OutSize returns the output size (outChannels).
+// Note: For Conv1D, this is the number of output channels, not the sequence length.
+func (c *Conv1D) OutSize() int { return c.outChannels }
+
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// Conv1D saves input for backward pass. Size depends on batch and sequence length.
+// Returns 0 as dimensions are dynamic per forward pass.
+func (c *Conv1D) ArenaSize() int {
+	return 0 // Dynamic based on input sequence length
+}

@@ -88,6 +88,15 @@ func (n *Network) initBuffers() {
 	n.params = make([]float32, totalSize)
 	n.grads = make([]float32, totalSize)
 
+	// Pre-calculate arena size to avoid dynamic reallocations during forward pass
+	totalArenaSize := 0
+	for _, l := range n.layers {
+		totalArenaSize += l.ArenaSize()
+	}
+	if totalArenaSize > 0 {
+		n.arena = make([]float32, totalArenaSize)
+	}
+
 	offset := 0
 	for _, l := range n.layers {
 		lLen := len(l.Params())

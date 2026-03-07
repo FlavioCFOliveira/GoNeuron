@@ -767,6 +767,13 @@ func (l *LSTM) OutSize() int {
 	return l.outSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// LSTM saves cell state (outSize), hidden state (outSize), and pre-activations (outSize*4) per timestep.
+// Total per timestep: outSize * 6
+func (l *LSTM) ArenaSize() int {
+	return l.outSize * 6
+}
+
 func (l *LSTM) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

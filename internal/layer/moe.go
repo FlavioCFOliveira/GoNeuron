@@ -491,6 +491,12 @@ func (m *MoE) SetTraining(t bool) {
 func (m *MoE) InSize() int  { return m.inSize }
 func (m *MoE) OutSize() int { return m.outSize }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// MoE saves input (inSize) for backward pass through experts.
+func (m *MoE) ArenaSize() int {
+	return m.inSize
+}
+
 func (m *MoE) AccumulateBackward(grad []float32) ([]float32, error) {
 	return m.Backward(grad)
 }

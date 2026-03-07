@@ -340,6 +340,12 @@ func (b *Bidirectional) OutSize() int {
 	return b.forward.OutSize() * 2
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// Bidirectional delegates to the underlying layers.
+func (b *Bidirectional) ArenaSize() int {
+	return b.forward.ArenaSize() + b.backward.ArenaSize()
+}
+
 // AccumulateBackward accumulates gradients.
 func (b *Bidirectional) AccumulateBackward(grad []float32) ([]float32, error) {
 	return b.Backward(grad)

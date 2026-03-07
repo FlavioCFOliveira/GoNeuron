@@ -293,6 +293,13 @@ func (g *GlobalAttention) OutSize() int {
 	return g.inSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// GlobalAttention saves inputs for backward pass; size depends on sequence length.
+// Returns 0 (dynamic) as sequence length varies per forward pass.
+func (g *GlobalAttention) ArenaSize() int {
+	return 0 // Dynamic based on sequence length
+}
+
 func (g *GlobalAttention) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

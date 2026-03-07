@@ -545,6 +545,16 @@ func (a *AvgPool2D) OutSize() int {
 	return a.inChannels * a.outputHeight * a.outputWidth
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// AvgPool2D saves input (inChannels * inputHeight * inputWidth) for backward pass.
+// Returns 0 if dimensions not yet known.
+func (a *AvgPool2D) ArenaSize() int {
+	if a.inputHeight > 0 && a.inputWidth > 0 {
+		return a.inChannels * a.inputHeight * a.inputWidth
+	}
+	return 0
+}
+
 // Reset resets the average pooling layer.
 func (a *AvgPool2D) Reset() {
 	a.inputHeight = 0

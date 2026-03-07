@@ -287,4 +287,11 @@ func (s *SequenceUnroller) OutSize() int {
 	}
 	return s.base.OutSize()
 }
+
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// SequenceUnroller delegates to the base layer for each timestep.
+func (s *SequenceUnroller) ArenaSize() int {
+	return s.timeSteps * s.base.ArenaSize()
+}
+
 func (s *SequenceUnroller) AccumulateBackward(grad []float32) ([]float32, error) { return s.Backward(grad) }

@@ -81,6 +81,11 @@ type Layer interface {
 	// LightweightClone creates a new layer that shares the same parameters and gradients
 	// but has its own internal reusable buffers.
 	LightweightClone(params []float32, grads []float32) Layer
+
+	// ArenaSize returns the number of float32 values needed in the activation arena
+	// for this layer to save its intermediate states during forward pass.
+	// Returns 0 if the layer doesn't need to save state to arena.
+	ArenaSize() int
 }
 
 // DeferredLayer is a layer that can defer its initialization until the input size is known.
@@ -607,6 +612,12 @@ func (d *Dense) SetTraining(training bool) {
 
 func (d *Dense) InSize() int { return d.inSize }
 func (d *Dense) OutSize() int { return d.outSize }
+
+// ArenaSize returns the number of float32 values needed in the arena.
+// Dense needs inSize (for input) + outSize (for pre-activation values).
+func (d *Dense) ArenaSize() int {
+	return d.inSize + d.outSize
+}
 
 func (d *Dense) NamedParams() []NamedParam {
 	return []NamedParam{

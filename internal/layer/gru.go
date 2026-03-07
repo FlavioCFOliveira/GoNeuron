@@ -587,6 +587,12 @@ func (g *GRU) OutSize() int {
 	return g.outSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// GRU saves hidden state (outSize) + pre-activations (outSize*3) per timestep.
+func (g *GRU) ArenaSize() int {
+	return g.outSize * 4
+}
+
 func (g *GRU) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

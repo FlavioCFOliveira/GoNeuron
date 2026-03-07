@@ -232,6 +232,13 @@ func (e *Embedding) OutSize() int {
 	return e.embedding_dim
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// Embedding saves input indices for backward pass.
+// Size depends on batch size, so returns 0 (dynamic allocation).
+func (e *Embedding) ArenaSize() int {
+	return 0 // Dynamic based on batch size
+}
+
 func (e *Embedding) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

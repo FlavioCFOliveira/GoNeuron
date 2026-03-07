@@ -480,6 +480,12 @@ func (l *LayerNorm) OutSize() int {
 	return l.normalizedShape
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// LayerNorm saves input (normalizedShape) + mean (1) + std (1) for backward pass.
+func (l *LayerNorm) ArenaSize() int {
+	return l.normalizedShape + 2
+}
+
 func (l *LayerNorm) NamedParams() []NamedParam {
 	if !l.elementwiseAffine {
 		return nil

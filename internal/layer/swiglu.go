@@ -269,6 +269,12 @@ func (s *SwiGLU) OutSize() int {
 	return s.outSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// SwiGLU saves input (inSize) + gate values (outSize) + up values (outSize) for backward pass.
+func (s *SwiGLU) ArenaSize() int {
+	return s.inSize + s.outSize*2
+}
+
 func (s *SwiGLU) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

@@ -385,6 +385,12 @@ func (r *RMSNorm) OutSize() int {
 	return r.normalizedShape
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// RMSNorm saves input (normalizedShape) + RMS (1) for backward pass.
+func (r *RMSNorm) ArenaSize() int {
+	return r.normalizedShape + 1
+}
+
 func (r *RMSNorm) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

@@ -146,6 +146,10 @@ func (p *PositionalEncoding) SetDevice(d Device)         { p.device = d }
 func (p *PositionalEncoding) InSize() int                { return p.seqLen * p.dim }
 func (p *PositionalEncoding) OutSize() int               { return p.seqLen * p.dim }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// PositionalEncoding does not save state to arena.
+func (p *PositionalEncoding) ArenaSize() int { return 0 }
+
 func (p *PositionalEncoding) NamedParams() []NamedParam {
 	return []NamedParam{
 		{
@@ -736,6 +740,14 @@ func (m *MultiHeadAttention) SetDevice(d Device) {
 func (m *MultiHeadAttention) InSize() int  { return m.seqLen * m.dim }
 func (m *MultiHeadAttention) OutSize() int { return m.seqLen * m.dim }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// MultiHeadAttention saves Q, K, V projections and attention scores.
+func (m *MultiHeadAttention) ArenaSize() int {
+	// Q, K, V each: seqLen * dim
+	// Attention scores: seqLen * seqLen * numHeads
+	return m.seqLen*m.dim*3 + m.seqLen*m.seqLen*m.numHeads
+}
+
 func (m *MultiHeadAttention) NamedParams() []NamedParam {
 	var params []NamedParam
 	for _, p := range m.wQ.NamedParams() {
@@ -1311,6 +1323,13 @@ func (t *TransformerBlock) SetDevice(d Device) {
 func (t *TransformerBlock) InSize() int                { return t.seqLen * t.dim }
 func (t *TransformerBlock) OutSize() int               { return t.seqLen * t.dim }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// TransformerBlock delegates to its sub-layers.
+func (t *TransformerBlock) ArenaSize() int {
+	// Sum of ArenaSize for all sub-layers
+	return t.mha.ArenaSize() + t.norm1.ArenaSize() + t.ff1.ArenaSize() + t.ff2.ArenaSize() + t.norm2.ArenaSize()
+}
+
 func (t *TransformerBlock) NamedParams() []NamedParam {
 	var params []NamedParam
 	for _, p := range t.mha.NamedParams() {
@@ -1525,6 +1544,11 @@ func (g *GlobalAveragePooling1D) InSize() int               { return g.seqLen * 
 func (g *GlobalAveragePooling1D) OutSize() int              { return g.dim }
 func (g *GlobalAveragePooling1D) Reset()                   {}
 func (g *GlobalAveragePooling1D) ClearGradients()          {}
+
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// GlobalAveragePooling1D doesn't save state to arena (stateless pooling).
+func (g *GlobalAveragePooling1D) ArenaSize() int { return 0 }
+
 func (g *GlobalAveragePooling1D) Clone() Layer {
 	return NewGlobalAveragePooling1D(g.seqLen, g.dim)
 }
@@ -1637,6 +1661,11 @@ func (c *CLSPooling) SetGradients(g []float32) {}
 func (c *CLSPooling) SetDevice(d Device)        {}
 func (c *CLSPooling) InSize() int               { return c.seqLen * c.dim }
 func (c *CLSPooling) OutSize() int              { return c.dim }
+
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// CLSPooling doesn't save state to arena.
+func (c *CLSPooling) ArenaSize() int { return 0 }
+
 func (c *CLSPooling) Reset()                   {}
 func (c *CLSPooling) ClearGradients()          {}
 func (c *CLSPooling) Clone() Layer {

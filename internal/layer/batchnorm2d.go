@@ -664,6 +664,16 @@ func (b *BatchNorm2D) OutSize() int {
 	return b.numFeatures
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// BatchNorm2D saves input (numFeatures * numelPerChannel) for backward pass.
+// Returns 0 if spatial dimensions are not yet known.
+func (b *BatchNorm2D) ArenaSize() int {
+	if b.numelPerChannel > 0 {
+		return b.numFeatures * b.numelPerChannel
+	}
+	return 0
+}
+
 func (b *BatchNorm2D) NamedParams() []NamedParam {
 	params := []NamedParam{
 		{Name: "running_mean", Shape: []int{b.numFeatures}, Data: b.runningMean},

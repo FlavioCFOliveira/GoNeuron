@@ -493,6 +493,16 @@ func (m *MaxPool2D) OutSize() int {
 	return m.inChannels * m.outputHeight * m.outputWidth
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// MaxPool2D saves input (inChannels * inputHeight * inputWidth) for backward pass.
+// Returns 0 if dimensions not yet known.
+func (m *MaxPool2D) ArenaSize() int {
+	if m.inputHeight > 0 && m.inputWidth > 0 {
+		return m.inChannels * m.inputHeight * m.inputWidth
+	}
+	return 0
+}
+
 // Reset resets the max pooling layer.
 func (m *MaxPool2D) Reset() {
 	m.inputHeight = 0

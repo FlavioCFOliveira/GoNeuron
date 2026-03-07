@@ -380,6 +380,12 @@ func (d *Dropout) OutSize() int {
 	return d.outSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// Dropout saves mask (inSize) for backward pass.
+func (d *Dropout) ArenaSize() int {
+	return d.inSize
+}
+
 // Reset resets the dropout layer.
 func (d *Dropout) Reset() {
 	d.rng = NewRNG(42)

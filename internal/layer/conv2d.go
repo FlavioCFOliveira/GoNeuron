@@ -910,6 +910,17 @@ func (c *Conv2D) OutSize() int {
 	return c.outChannels
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// Conv2D saves input (inChannels * inputHeight * inputWidth) for backward pass.
+// Uses configured dimensions if available, otherwise returns 0 (dynamic allocation).
+func (c *Conv2D) ArenaSize() int {
+	if c.inputHeight > 0 && c.inputWidth > 0 {
+		return c.inChannels * c.inputHeight * c.inputWidth
+	}
+	// Return 0 if dimensions not yet known - will use dynamic allocation
+	return 0
+}
+
 func (c *Conv2D) NamedParams() []NamedParam {
 	return []NamedParam{
 		{

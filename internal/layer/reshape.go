@@ -143,6 +143,12 @@ func (f *Flatten) OutSize() int {
 	return f.outSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// Flatten doesn't save state to arena (uses internal buffers).
+func (f *Flatten) ArenaSize() int {
+	return 0
+}
+
 // Reset resets the flatten layer.
 func (f *Flatten) Reset() {
 	f.inputShape = f.inputShape[:0]

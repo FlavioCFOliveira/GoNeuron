@@ -346,6 +346,12 @@ func (r *RBF) OutSize() int {
 	return r.outSize
 }
 
+// ArenaSize returns the number of float32 values needed in the activation arena.
+// RBF saves input (inSize) + phi activations (numCenters) for backward pass.
+func (r *RBF) ArenaSize() int {
+	return r.inSize + r.numCenters
+}
+
 func (r *RBF) NamedParams() []NamedParam {
 	return []NamedParam{
 		{
