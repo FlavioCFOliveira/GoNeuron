@@ -120,5 +120,9 @@ func main() {
 		diff := (pred - yTest[i][0]) * (normParams.Max - normParams.Min)
 		mse += diff * diff
 	}
-	fmt.Printf("\nTest RMSE: $%.2f\n", float32(math.Sqrt(float64(mse/float32(len(xTest))))))
+	var rmse float32
+	if len(xTest) > 0 {
+		rmse = float32(math.Sqrt(float64(mse / float32(len(xTest)))))
+	}
+	fmt.Printf("\nTest RMSE: $%.2f\n", rmse)
 }

@@ -82,12 +82,23 @@ func loadMNISTImages(filename string) ([][]float32, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("invalid magic number: %d", magic)
 	}
 
-	images := make([][]float32, numImages)
 	pixelCount := int(rows * cols)
+	totalPixels := int(numImages) * pixelCount
+
+	// Pre-allocate contiguous buffer for zero-allocation pattern
+	buffer := make([]float32, totalPixels)
+	images := make([][]float32, numImages)
+
+	// Temporary buffer for reading raw pixels
+	pixels := make([]uint8, pixelCount)
+
 	for i := 0; i < int(numImages); i++ {
-		pixels := make([]uint8, pixelCount)
-		gz.Read(pixels)
-		floatPixels := make([]float32, pixelCount)
+		if _, err := gz.Read(pixels); err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to read image %d: %w", i, err)
+		}
+
+		// Create slice view into contiguous buffer
+		floatPixels := buffer[i*pixelCount : (i+1)*pixelCount]
 		for j := 0; j < pixelCount; j++ {
 			floatPixels[j] = float32(pixels[j]) / 255.0
 		}
@@ -122,14 +133,22 @@ func loadMNISTLabels(filename string) ([][]float32, error) {
 		return nil, fmt.Errorf("invalid magic number: %d", magic)
 	}
 
+	const numClasses = 10
+	totalElements := int(numLabels) * numClasses
+
+	// Pre-allocate contiguous buffer for zero-allocation pattern
+	buffer := make([]float32, totalElements)
 	labels := make([][]float32, numLabels)
+
 	for i := 0; i < int(numLabels); i++ {
 		var label uint8
 		if err := binary.Read(gz, binary.BigEndian, &label); err != nil {
 			return nil, fmt.Errorf("failed to read label %d: %w", i, err)
 		}
-		oneHot := make([]float32, 10)
-		if label < 10 {
+
+		// Create slice view into contiguous buffer
+		oneHot := buffer[i*numClasses : (i+1)*numClasses]
+		if label < numClasses {
 			oneHot[label] = 1.0
 		}
 		labels[i] = oneHot
@@ -221,10 +240,14 @@ func main() {
 
 	// 5. Evaluation
 	fmt.Println("\nEvaluating on test set...")
+	predictions, err := model.PredictBatch(xTest)
+	if err != nil {
+		fmt.Printf("Error during prediction: %v\n", err)
+		return
+	}
 	correct := 0
-	for i := 0; i < len(xTest); i++ {
-		pred := model.Predict(xTest[i])
-		if argmax(pred) == argmax(yTest[i]) {
+	for i := 0; i < len(predictions); i++ {
+		if argmax(predictions[i]) == argmax(yTest[i]) {
 			correct++
 		}
 	}

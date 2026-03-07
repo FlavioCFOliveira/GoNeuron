@@ -140,10 +140,21 @@ func main() {
 		"terrible waste of talent",
 	}
 
+	// Tokenize all test sentences for batch prediction
+	testInputs := make([][]float32, len(testSentences))
+	for i, s := range testSentences {
+		testInputs[i] = tokenize(s)
+	}
+
+	predictions, err := model.PredictBatch(testInputs)
+	if err != nil {
+		fmt.Printf("Error during prediction: %v\n", err)
+		return
+	}
+
 	fmt.Println("\nTesting Model:")
-	for _, s := range testSentences {
-		tokens := tokenize(s)
-		pred, _ := model.Forward(tokens)
+	for i, s := range testSentences {
+		pred := predictions[i]
 		sentiment := "Positive"
 		if pred[1] > pred[0] {
 			sentiment = "Negative"

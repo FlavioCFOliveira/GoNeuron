@@ -164,15 +164,17 @@ func main() {
 			if i < len(currIndices) { input[i] = float32(currIndices[i]) } else { input[i] = 0 }
 		}
 
-		for i := 0; i < 50; i++ {
-			x, _ := emb.Forward(input)
-			x, _ = pos.Forward(x)
-			x, _ = block.Forward(x)
-			lastIdx := len(currIndices) - 1
-			if lastIdx < 0 { lastIdx = 0 }
-			if lastIdx >= seqLen { lastIdx = seqLen - 1 }
-			logits, _ := head.Forward(x[lastIdx*embeddingDim : (lastIdx+1)*embeddingDim])
-			nextIdx := sample(activations.Softmax{}.ActivateBatch(logits))
+		logitsBuf := make([]float32, tokenizer.vocabSize)
+	for i := 0; i < 50; i++ {
+		x, _ := emb.Forward(input)
+		x, _ = pos.Forward(x)
+		x, _ = block.Forward(x)
+		lastIdx := len(currIndices) - 1
+		if lastIdx < 0 { lastIdx = 0 }
+		if lastIdx >= seqLen { lastIdx = seqLen - 1 }
+		rawLogits, _ := head.Forward(x[lastIdx*embeddingDim : (lastIdx+1)*embeddingDim])
+		copy(logitsBuf, rawLogits)
+		nextIdx := sample(activations.Softmax{}.ActivateBatch(logitsBuf))
 			nextChar := tokenizer.idxToChar[nextIdx]
 			if nextChar == '\n' { break }
 			generated += string(nextChar)

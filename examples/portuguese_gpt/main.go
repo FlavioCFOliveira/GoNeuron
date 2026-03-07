@@ -427,6 +427,8 @@ func generateText(model *net.Network, tokenizer *SimpleTokenizer, seed string, m
 		seedTokens = append(seedTokens, float32(id))
 	}
 
+	vocabSize := tokenizer.VocabSize()
+	logitsBuf := make([]float32, vocabSize)
 	for n := 0; n < maxNewTokens; n++ {
 		input := make([]float32, seqLen)
 		copy(input, seedTokens)
@@ -441,10 +443,8 @@ func generateText(model *net.Network, tokenizer *SimpleTokenizer, seed string, m
 		lastIdx := len(seedTokens) - 1
 		if lastIdx >= seqLen { break }
 
-		vocabSize := tokenizer.VocabSize()
-		logits := pred[lastIdx*vocabSize : (lastIdx+1)*vocabSize]
-
-		bestID := sample(logits, temp, topK)
+		copy(logitsBuf, pred[lastIdx*vocabSize:(lastIdx+1)*vocabSize])
+		bestID := sample(logitsBuf, temp, topK)
 
 		if bestID == 3 || bestID == 0 { break }
 		seedTokens = append(seedTokens, float32(bestID))

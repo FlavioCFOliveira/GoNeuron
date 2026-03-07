@@ -36,8 +36,13 @@ func loadBatch(filename string) ([][]float32, [][]float32, error) {
 	}
 	defer file.Close()
 
-	var inputs [][]float32
-	var targets [][]float32
+	// Pre-allocate contiguous buffers for zero-allocation pattern
+	// Each batch has 10000 images
+	const batchSize = 10000
+	inputBuffer := make([]float32, 0, batchSize*ImageSize*ImageSize*Channels)
+	targetBuffer := make([]float32, 0, batchSize*NumClasses)
+	inputViews := make([][]float32, 0, batchSize)
+	targetViews := make([][]float32, 0, batchSize)
 
 	buf := make([]byte, RecordSize)
 	for {
@@ -50,44 +55,75 @@ func loadBatch(filename string) ([][]float32, [][]float32, error) {
 		}
 
 		label := int(buf[0])
-		target := make([]float32, NumClasses)
-		target[label] = 1.0
-
-		input := make([]float32, ImageSize*ImageSize*Channels)
-		for i := 0; i < ImageSize*ImageSize*Channels; i++ {
-			// Normalize to [0, 1]
-			input[i] = float32(buf[i+1]) / 255.0
+		// Validate label is in valid range [0, 9] for CIFAR-10
+		if label < 0 || label >= NumClasses {
+			return nil, nil, fmt.Errorf("invalid label value at record %d: %d (must be in range [0, %d])", len(inputViews)+1, label, NumClasses-1)
 		}
 
-		inputs = append(inputs, input)
-		targets = append(targets, target)
+		// Append target to contiguous buffer and create view
+		targetStart := len(targetBuffer)
+		targetBuffer = append(targetBuffer, make([]float32, NumClasses)...)
+		targetBuffer[targetStart+label] = 1.0
+		targetViews = append(targetViews, targetBuffer[targetStart:targetStart+NumClasses])
+
+		// Append input to contiguous buffer and create view
+		inputStart := len(inputBuffer)
+		inputBuffer = append(inputBuffer, make([]float32, ImageSize*ImageSize*Channels)...)
+		for i := 0; i < ImageSize*ImageSize*Channels; i++ {
+			// Normalize to [0, 1]
+			inputBuffer[inputStart+i] = float32(buf[i+1]) / 255.0
+		}
+		inputViews = append(inputViews, inputBuffer[inputStart:inputStart+ImageSize*ImageSize*Channels])
 	}
 
-	return inputs, targets, nil
+	return inputViews, targetViews, nil
 }
 
 func LoadCIFAR10(dataDir string) (*CIFAR10, error) {
 	cifar := &CIFAR10{}
 
-	// Load training batches
+	// Load training batches (each should have 10000 images)
 	for i := 1; i <= 5; i++ {
 		filename := filepath.Join(dataDir, fmt.Sprintf("data_batch_%d.bin", i))
 		inputs, targets, err := loadBatch(filename)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to load training batch %d: %w", i, err)
+		}
+		// Validate batch size: each training batch should have 10000 images
+		if len(inputs) != 10000 {
+			return nil, fmt.Errorf("training batch %d has invalid size: expected 10000 images, got %d", i, len(inputs))
+		}
+		// Validate that inputs and targets match
+		if len(targets) != len(inputs) {
+			return nil, fmt.Errorf("training batch %d: mismatch between inputs (%d) and targets (%d)", i, len(inputs), len(targets))
 		}
 		cifar.TrainInputs = append(cifar.TrainInputs, inputs...)
 		cifar.TrainTargets = append(cifar.TrainTargets, targets...)
 	}
 
-	// Load test batch
+	// Load test batch (should have 10000 images)
 	filename := filepath.Join(dataDir, "test_batch.bin")
 	inputs, targets, err := loadBatch(filename)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load test batch: %w", err)
+	}
+	// Validate test batch size
+	if len(inputs) != 10000 {
+		return nil, fmt.Errorf("test batch has invalid size: expected 10000 images, got %d", len(inputs))
+	}
+	if len(targets) != len(inputs) {
+		return nil, fmt.Errorf("test batch: mismatch between inputs (%d) and targets (%d)", len(inputs), len(targets))
 	}
 	cifar.TestInputs = inputs
 	cifar.TestTargets = targets
+
+	// Final validation: ensure total training images is 50000
+	if len(cifar.TrainInputs) != TrainImages {
+		return nil, fmt.Errorf("total training images mismatch: expected %d, got %d", TrainImages, len(cifar.TrainInputs))
+	}
+	if len(cifar.TrainTargets) != TrainImages {
+		return nil, fmt.Errorf("total training targets mismatch: expected %d, got %d", TrainImages, len(cifar.TrainTargets))
+	}
 
 	return cifar, nil
 }
@@ -182,12 +218,17 @@ func main() {
 }
 
 func evaluate(model *goneuron.Model, inputs, targets [][]float32) float32 {
-	correct := 0
 	model.SetTraining(false)
 
-	for i := range inputs {
-		pred, _ := model.Forward(inputs[i])
-		if argmax(pred) == argmax(targets[i]) {
+	predictions, err := model.PredictBatch(inputs)
+	if err != nil {
+		fmt.Printf("Error during prediction: %v\n", err)
+		return 0
+	}
+
+	correct := 0
+	for i := 0; i < len(predictions); i++ {
+		if argmax(predictions[i]) == argmax(targets[i]) {
 			correct++
 		}
 	}

@@ -80,18 +80,47 @@ func loadMNISTImages(filename string) ([][]float32, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("invalid magic number: %d", magic)
 	}
 
-	images := make([][]float32, numImages)
+	// Validate dimensions
+	if rows <= 0 || cols <= 0 || numImages <= 0 {
+		return nil, 0, 0, fmt.Errorf("invalid dimensions: images=%d, rows=%d, cols=%d", numImages, rows, cols)
+	}
+	if rows > 10000 || cols > 10000 || numImages > 1000000 {
+		return nil, 0, 0, fmt.Errorf("dimensions exceed maximum: images=%d, rows=%d, cols=%d", numImages, rows, cols)
+	}
+
+	// Pre-allocate contiguous buffer for all images (zero-allocation pattern)
 	pixelCount := int(rows * cols)
+	totalPixels := int(numImages) * pixelCount
+	buffer := make([]float32, totalPixels)
+	images := make([][]float32, numImages)
+
 	for i := 0; i < int(numImages); i++ {
 		pixels := make([]uint8, pixelCount)
-		if _, err := io.ReadFull(gz, pixels); err != nil {
+		n, err := io.ReadFull(gz, pixels)
+		if err != nil {
 			return nil, 0, 0, fmt.Errorf("failed to read image %d: %w", i, err)
 		}
-		floatPixels := make([]float32, pixelCount)
+		if n != pixelCount {
+			return nil, 0, 0, fmt.Errorf("incomplete read for image %d: got %d bytes, expected %d", i, n, pixelCount)
+		}
+		// Slice into pre-allocated buffer
+		floatPixels := buffer[i*pixelCount : (i+1)*pixelCount]
 		for j := 0; j < pixelCount; j++ {
 			floatPixels[j] = float32(pixels[j]) / 255.0
 		}
 		images[i] = floatPixels
+	}
+
+	// Verify no extra data remains after reading all images
+	var extraByte [1]byte
+	n, err := gz.Read(extraByte[:])
+	if err != io.EOF {
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("unexpected error after reading images: %w", err)
+		}
+		if n > 0 {
+			return nil, 0, 0, fmt.Errorf("extra data found after reading %d images", numImages)
+		}
 	}
 
 	return images, int(rows), int(cols), nil
@@ -119,7 +148,15 @@ func loadMNISTLabels(filename string) ([][]float32, error) {
 	}
 
 	if magic != 2049 {
-		return nil, fmt.Errorf("invalid magic number: %d", magic)
+		return nil, fmt.Errorf("invalid magic number for labels: expected 2049, got %d", magic)
+	}
+
+	// Validate number of labels
+	if numLabels <= 0 {
+		return nil, fmt.Errorf("invalid number of labels: %d", numLabels)
+	}
+	if numLabels > 1000000 {
+		return nil, fmt.Errorf("number of labels exceeds maximum: %d", numLabels)
 	}
 
 	labels := make([][]float32, numLabels)
@@ -128,11 +165,25 @@ func loadMNISTLabels(filename string) ([][]float32, error) {
 		if err := binary.Read(gz, binary.BigEndian, &label); err != nil {
 			return nil, fmt.Errorf("failed to read label %d: %w", i, err)
 		}
-		oneHot := make([]float32, 10)
-		if label < 10 {
-			oneHot[label] = 1.0
+		// Validate label is in valid range [0, 9] for MNIST
+		if label > 9 {
+			return nil, fmt.Errorf("invalid label value at index %d: %d (must be in range [0, 9])", i, label)
 		}
+		oneHot := make([]float32, 10)
+		oneHot[label] = 1.0
 		labels[i] = oneHot
+	}
+
+	// Verify no extra data remains (optional check for file integrity)
+	var extraByte uint8
+	if err := binary.Read(gz, binary.BigEndian, &extraByte); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("extra data found after reading %d labels", numLabels)
+		}
+		// EOF is expected, any other error is problematic
+		if err != io.EOF {
+			return nil, fmt.Errorf("unexpected error after reading labels: %w", err)
+		}
 	}
 
 	return labels, nil
@@ -229,10 +280,14 @@ func main() {
 
 	// 5. Evaluation
 	fmt.Println("\nEvaluating on test set...")
+	predictions, err := model.PredictBatch(xTest)
+	if err != nil {
+		fmt.Printf("Error during prediction: %v\n", err)
+		return
+	}
 	correct := 0
-	for i := 0; i < len(xTest); i++ {
-		pred := model.Predict(xTest[i])
-		if argmax(pred) == argmax(yTest[i]) {
+	for i := 0; i < len(predictions); i++ {
+		if argmax(predictions[i]) == argmax(yTest[i]) {
 			correct++
 		}
 	}

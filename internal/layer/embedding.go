@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -112,11 +113,12 @@ func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 
 	// For each input index
 	for b := 0; b < batchSize; b++ {
-		idx := int(x[b])
+		// Convert float to int with proper rounding
+		idx := int(math.Floor(float64(x[b])))
 
-		// Bounds check
+		// Bounds check - return error instead of silently using index 0
 		if idx < 0 || idx >= e.num_embeddings {
-			idx = 0 // Default to first embedding for out-of-bounds
+			return nil, fmt.Errorf("embedding index %d out of bounds [0, %d)", idx, e.num_embeddings)
 		}
 
 		// Copy embedding vector

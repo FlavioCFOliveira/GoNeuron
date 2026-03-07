@@ -7,6 +7,13 @@ import (
 	"strconv"
 )
 
+// Constants for CSV validation limits
+const (
+	maxCSVRows  = 10_000_000
+	maxCSVCols  = 10_000
+	maxFileSize = 1 << 30 // 1GB
+)
+
 // Dataset represents a collection of samples and labels.
 type Dataset struct {
 	Samples [][]float32
@@ -18,6 +25,15 @@ type Dataset struct {
 // All other columns are used as features.
 // hasHeader skips the first line if true.
 func LoadCSV(filename string, labelCols []int, hasHeader bool) (*Dataset, error) {
+	// Validate file size before opening
+	info, err := os.Stat(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+	if info.Size() > maxFileSize {
+		return nil, fmt.Errorf("file size %d exceeds maximum allowed %d bytes", info.Size(), maxFileSize)
+	}
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -25,9 +41,15 @@ func LoadCSV(filename string, labelCols []int, hasHeader bool) (*Dataset, error)
 	defer file.Close()
 
 	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1 // Allow variable fields, we'll validate manually
 	records, err := reader.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read csv: %w", err)
+	}
+
+	// Validate number of rows
+	if len(records) > maxCSVRows {
+		return nil, fmt.Errorf("csv file has %d rows, exceeding maximum %d", len(records), maxCSVRows)
 	}
 
 	if len(records) == 0 {
@@ -44,6 +66,18 @@ func LoadCSV(filename string, labelCols []int, hasHeader bool) (*Dataset, error)
 	}
 
 	numCols := len(records[0])
+	// Validate number of columns
+	if numCols > maxCSVCols {
+		return nil, fmt.Errorf("csv file has %d columns, exceeding maximum %d", numCols, maxCSVCols)
+	}
+
+	// Validate label column indices
+	for _, col := range labelCols {
+		if col < 0 || col >= numCols {
+			return nil, fmt.Errorf("label column index %d out of range [0, %d)", col, numCols)
+		}
+	}
+
 	isLabelCol := make(map[int]bool)
 	for _, col := range labelCols {
 		isLabelCol[col] = true

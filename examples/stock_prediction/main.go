@@ -131,5 +131,9 @@ func main() {
 			fmt.Printf("Actual: $%.2f, Predicted: $%.2f, Error: $%.2f\n", pActual, pPred, pPred-pActual)
 		}
 	}
-	fmt.Printf("Test RMSE: $%.2f\n", float32(math.Sqrt(float64(totalSE/float32(len(xTest))))))
+	var rmse float32
+	if len(xTest) > 0 {
+		rmse = float32(math.Sqrt(float64(totalSE / float32(len(xTest)))))
+	}
+	fmt.Printf("Test RMSE: $%.2f\n", rmse)
 }

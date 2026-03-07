@@ -226,6 +226,7 @@ func main() {
 		}
 	}
 
+	logitsBuf := make([]float32, tokenizer.vocabSize)
 	for i := 0; i < 100; i++ {
 		// Forward
 		x, _ := emb.Forward(input)
@@ -238,11 +239,12 @@ func main() {
 		if lastIdx >= seqLen { lastIdx = seqLen - 1 }
 
 		lastPosStart := lastIdx * embeddingDim
-		logits, _ := head.Forward(x[lastPosStart : lastPosStart+embeddingDim])
+		rawLogits, _ := head.Forward(x[lastPosStart : lastPosStart+embeddingDim])
+		copy(logitsBuf, rawLogits)
 
 		// Sample from distribution
 		softmax := activations.Softmax{}
-		probs := softmax.ActivateBatch(logits)
+		probs := softmax.ActivateBatch(logitsBuf)
 		nextIdx := sample(probs)
 
 		nextChar := tokenizer.idxToChar[nextIdx]

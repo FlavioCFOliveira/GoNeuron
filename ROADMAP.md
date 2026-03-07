@@ -3,282 +3,163 @@
 ## Visão
 Transformar GoNeuron na biblioteca de deep learning em Go mais performática, estável e fácil de usar, mantendo a filosofia de zero dependências externas.
 
-## Fases do Roadmap
+---
+
+## TAREFAS PENDENTES
+
+Tabela com as tarefas ainda por concluir, ordenadas por severidade (ALTA > MÉDIA > BAIXA).
+
+### Auditoria de Segurança (SEC)
+
+| ID | SEVERIDADE | TAREFA | DESCRIÇÃO TÉCNICA ACIONÁVEL |
+| :--- | :--- | :--- | :--- |
+| SEC-003 | ALTA | Proteger Arena Operations contra race conditions | Adicionar `sync.Mutex` ou garantir arena por goroutine em `internal/layer/layer.go:239-324`. Prevenir corrupção de memória em workloads paralelos. |
+| SEC-006 | MÉDIA | Corrigir race condition em Worker Pool | Usar atomic operations ou sincronização explícita em `internal/net/net.go:563-684` para agregação de gradientes. Verificar thread-safety da acumulação. |
+| SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | Implementar validação de versão mínima/máxima suportada em `internal/net/gguf.go:62-76`. Rejeitar versões incompatíveis com erro explícito. |
+| SEC-008 | MÉDIA | Prevenir integer overflow em cálculos de tamanho | Usar `math/bits` para verificar overflow em `internal/layer/lstm.go:141-144` e `internal/layer/transformer.go`. Validar antes de alocar buffers. |
+| SEC-009 | MÉDIA | Implementar cleanup explícito de buffers Metal | Adicionar método `Close()` ou `runtime.SetFinalizer` em `internal/layer/layer.go:710-719` para libertar buffers GPU. Prevenir memory leaks em execuções longas. |
+| SEC-010 | MÉDIA | Substituir panic por error returns em Activations | Modificar `Softmax.Activate` e `LogSoftmax.Activate` em `internal/activations/activations.go:149-157` para retornar erro em vez de panic. |
+| SEC-011 | MÉDIA | Reportar erro em índices inválidos de MultiMarginLoss | Alterar `continue` silencioso para retornar erro em `internal/loss/loss.go:971-1045` quando `target < 0 || target >= n`. |
+| SEC-012 | MÉDIA | Validar offsets em AccumulateBackward | Adicionar verificação de bounds em `internal/layer/layer.go:771-774` antes de construir slices. Validar `inOff`, `paOff` contra tamanho da arena. |
+| SEC-005 | MÉDIA | Validar parâmetros em construtores de Layer | Modificar `NewDense`, `NewConv2D`, `NewMoE` para retornar `error` em vez de `nil` silencioso quando parâmetros forem inválidos. |
+| SEC-013 | BAIXA | Usar seed aleatória segura em RNG | Substituir seed previsível por `crypto/rand` ou aceitar seed externo em `internal/layer/layer.go:22-42`. |
+| SEC-014 | BAIXA | Validar taxa de aprendizagem em SGD | Adicionar verificação `learningRate <= 0 || learningRate > 1` em `internal/opt/opt.go:40-42`. Retornar erro ou panic com mensagem clara. |
+| SEC-015 | BAIXA | Corrigir arredondamento em Conv2D | Requerer especificação explícita de dimensões ou validar que o produto está correto em `internal/layer/conv2d.go:344-357`. |
+| SEC-016 | BAIXA | Melhorar validação de tipos em API pública | Adicionar tratamento completo de type assertions em `goneuron/goneuron.go:69-110` para retornar erros em vez de panic. |
+| SEC-017 | BAIXA | Verificar nil pointer em Conv2D Backward | Adicionar validação `if c.arenaPtr == nil` em `internal/layer/conv2d.go:585-596` antes de aceder a arena. Retornar `ErrForwardNotCalled`. |
+
+### Auditoria de Performance (PERF)
+
+| ID | SEVERIDADE | TAREFA | DESCRIÇÃO TÉCNICA ACIONÁVEL |
+| :--- | :--- | :--- | :--- |
+| PERF-003 | ALTA | Usar PredictBatch em funções evaluate | Atualizar `examples/cifar10/main.go:188-193`, `examples/stock_prediction/main.go:122-126`, `examples/stock_prediction_bilstm/main.go:184-188` para usar batch prediction em vez de loop individual. |
+| PERF-005 | ALTA | Pre-calcular capacidade da Arena | Evitar redimensionamentos dinâmicos em `internal/layer/layer.go:250-254`. Pre-calcular tamanho máximo necessário baseado na arquitetura da rede antes do forward pass. |
+| PERF-007 | ALTA | Implementar pooling de buffers Metal para Conv2D | Pre-alocar buffers GPU para tamanho máximo esperado em `internal/layer/conv2d.go:410-424` ou usar pool de buffers. Reduzir overhead de sincronização CPU-GPU. |
+| PERF-009 | ALTA | Implementar blocking em Dense Backward | Aplicar blocking 64x64 similar a `matmul_optimized.go` em `internal/layer/layer.go:447-461` para melhorar localidade de cache. |
+| PERF-013 | ALTA | Limitar workers para GPU em TrainBatchParallel | Modificar `internal/net/net.go` para usar `numWorkers = min(4, runtime.GOMAXPROCS(0))` quando device for GPU. Reduzir overhead de sincronização CGO. |
+| PERF-016 | ALTA | Reduzir sincronizações Metal em Dense | Consolidar múltiplas operações de read em `internal/layer/layer.go:273-287` para single read ou usar memória persistente mapeada. |
+| PERF-019 | ALTA | Eliminar heap allocation em Softmax Backward | Substituir `make([]float32, outSize)` por buffer pre-alocado ou stack array em `internal/layer/layer.go:399-406`. |
+| PERF-020 | ALTA | Eliminar gradCopy em Conv2D Metal Backward | Usar `bufDZ` como buffer temporário ou aplicar in-place em `internal/layer/conv2d.go:640-645` para evitar alocação duplicada. |
+| PERF-004 | MÉDIA | Verificar suporte a batching em Sequential PredictBatch | Adicionar verificação em `internal/net/sequential.go:117-123` para garantir que todas as camadas suportam `ForwardBatchWithArena` antes de usar batching. |
+| PERF-006 | MÉDIA | Garantir buffer pre-calculado em Dense savedOutput | Mover verificação de capacidade para `Build()` ou usar tamanho fixo em `internal/layer/layer.go:318-321`. |
+| PERF-008 | MÉDIA | Mover istdBuf para struct pre-alocado em BatchNorm2D | Eliminar alocação em loop quente em `internal/layer/batchnorm2d.go:325-328`. Usar buffer pre-alocado no struct. |
+| PERF-010 | MÉDIA | Implementar kernel unrolling para Conv2D | Expandir unrolling para kernels 5x5 e 7x7 em `internal/layer/conv2d.go:467-514`. |
+| PERF-011 | MÉDIA | Implementar SIMD em LSTM Gate Calculations | Usar loop unrolling 4x ou 8x como em `matmul_optimized.go` em `internal/layer/lstm.go:269-293`. |
+| PERF-012 | MÉDIA | Documentar e avaliar NCHW vs NHWC em Conv2D | Documentar uso de NCHW em `internal/layer/conv2d.go` e considerar reordering para NHWC em CPUs sem AVX. |
+| PERF-014 | MÉDIA | Otimizar LightweightClone para GPU | Modificar `internal/layer/layer.go:710-719` para workers partilharem buffers GPU, mantendo apenas buffers CPU privados. |
+| PERF-015 | MÉDIA | Garantir reuso de Worker Pool entre épocas | Verificar em `internal/net/net.go` que `workerPool` persiste entre chamadas de `Fit()`. |
+| PERF-017 | MÉDIA | Implementar kernel fused Conv2D+Activation Metal | Implementar kernel Metal que combina convolução e ativação em `internal/layer/conv2d.go:433-439` para evitar leitura completa para CPU. |
+| PERF-022 | MÉDIA | Cachear resultado de type assertions | Substituir type assertions repetidas em `internal/layer/layer.go:273, 370-371` por campo booleano `useMetal` ou cache. |
+| PERF-023 | MÉDIA | Cachear tipo de ativação em layer | Substituir type switch em cada elemento em `internal/layer/layer.go:110-123` por campo tipo int no struct. |
+| PERF-024 | MÉDIA | Adicionar context cancellation em Worker Pool | Modificar `internal/layer/matmul_optimized.go:78-152` para aceitar `context.Context` e permitir cancellation. |
+| PERF-028 | MÉDIA | Adicionar benchmarks para todas as camadas | Criar benchmarks em `internal/layer/benchmark_test.go` para BatchNorm2D, Conv2D variados, LSTM/GRU sequências longas. |
+| PERF-032 | MÉDIA | Pre-tokenizar dataset em sentiment example | Modificar `examples/sentiment/main.go:144-156` para tokenizar dataset uma vez antes do loop de predict. |
+| PERF-033 | MÉDIA | Reusar buffers de batch entre épocas em CIFAR-10 | Modificar `examples/cifar10/main.go:158-163` para reutilizar `batchX` e `batchY` entre épocas. |
+| PERF-034 | MÉDIA | Usar PredictBatch em exemplos stock_prediction | Atualizar todos os exemplos `stock_prediction*` para usar batch prediction em vez de loop individual. |
+| PERF-038 | MÉDIA | Usar optimizer.Step() em gan_mnist | Substituir loop manual de atualização em `examples/gan_mnist/main.go:215-220` por `optimizer.Step()` ou versão vectorizada. |
+| PERF-040 | MÉDIA | Adicionar buffer reuse em Loss Functions | Modificar `internal/loss/loss.go` backward para usar gradientes pre-alocados em vez de alocar em cada chamada. |
+| PERF-018 | BAIXA | Considerar pool de buffers Metal partilhados | Avaliar em `internal/layer/layer.go:227-236` uso de pool de buffers Metal compartilhados entre layers. |
+| PERF-021 | BAIXA | Otimizar GetPerformanceMetrics | Substituir `map[string]interface{}` em `internal/layer/matmul_optimized.go:302-319` por struct definido ou parâmetros de saída. |
+| PERF-026 | BAIXA | Avaliar NCHW vs NHWC em Conv2D | Documentar decisão em `internal/layer/conv2d.go` e considerar transposição se necessário. |
+| PERF-027 | BAIXA | Documentar layout de matrizes em MatMul | Documentar decisão row-major em `internal/layer/matmul_optimized.go` e considerar transposição explícita. |
+| PERF-029 | BAIXA | Converter MeasureMatMulPerformance para benchmark padrão | Atualizar `internal/layer/matmul_optimized.go:221-263` para usar `b.ResetTimer()` e seguir padrão de benchmark Go. |
+| PERF-030 | MÉDIA | Documentar uso correto de ForwardWithArena | Adicionar documentação em `internal/layer/layer.go:92-96` sobre quando usar arena vs forward normal, thread-safety, e responsabilidades do caller. |
+| PERF-031 | BAIXA | Documentar diferença entre Clone e LightweightClone | Adicionar documentação em `internal/layer/layer.go:80-82` explicando: Clone para serialização, LightweightClone para workers. |
+| PERF-039 | BAIXA | Otimizar initBuffers em Network | Avaliar cache de offsets calculados em `internal/net/net.go` para evitar recalcular em cada `Build()`. |
+| PERF-041 | BAIXA | Documentar precondição de StepInPlace | Adicionar documentação em `internal/opt/opt.go` sobre requisito de não-overlap entre params e gradients. |
+
+### Tarefas do Roadmap Original
+
+| ID | SEVERIDADE | TAREFA | DESCRIÇÃO TÉCNICA ACIONÁVEL |
+| :--- | :--- | :--- | :--- |
+| ROAD-005 | ALTA | Adicionar bounds checking em funções críticas | Implementar verificação de limites em `argmax` e outras funções que acedem a slices por índice calculado. |
+| ROAD-006 | MÉDIA | Otimizar BatchNorm2D forward | Reduzir tempo de execução de 1.37ms para < 0.5ms através de blocking e melhoria de acesso a memória. |
+| ROAD-007 | MÉDIA | Otimizar Conv2DLarge | Reduzir tempo de execução de 210ms para < 70ms para input 64x64x64 através de otimizações de kernel e buffer pooling. |
+| ROAD-008 | MÉDIA | Otimizar LSTM sequence processing | Reduzir tempo de 54ms para < 20ms para 10 timesteps através de SIMD e blocking. |
+| ROAD-009 | MÉDIA | Implementar scripts de download automático para datasets | Criar scripts Go que descarreguem e preparem MNIST, CIFAR-10, e outros datasets automaticamente em `scripts/download/`. |
+| ROAD-010 | MÉDIA | Criar exemplo best_practices.go | Desenvolver exemplo em `examples/best_practices/main.go` demonstrando uso correto de ForwardWithArena, PredictBatch, TrainBatch, e otimizações. |
+| ROAD-011 | MÉDIA | Normalizar formato de logging entre exemplos | Definir padrão de logging estruturado e aplicar a todos os 37 exemplos em `examples/`. |
+| ROAD-012 | MÉDIA | Adicionar rand.Seed consistente em todos os exemplos | Garantir que todos os exemplos usem seed explícito para reproducibilidade. |
+| ROAD-013 | BAIXA | Substituir ioutil por os.ReadFile em 4 arquivos | Atualizar exemplos que usam `ioutil` depreciado para usar `os.ReadFile` ou `os.ReadDir`. |
 
 ---
 
-## Fase 1: Estabilidade e Correções Críticas (Sprint 1-2) ✅ COMPLETA
+## TAREFAS TERMINADAS
+
+Tabela com as tarefas concluídas, ordenadas por data de conclusão (mais recente primeiro).
+
+| ID | SEVERIDADE | TAREFA | CONCLUSÃO | DESCRIÇÃO TÉCNICA ACIONÁVEL |
+| :--- | :--- | :--- | :--- | :--- |
+| SEC-001 | ALTA | Corrigir divisão por zero em Loss Functions | 2026-03-07 | Adicionada verificação `n == 0` em todas as loss functions (MSE, L1Loss, BCELoss, CrossEntropy, NLLLoss, etc.) em `internal/loss/loss.go`. Retorna erro `ErrEmptyInput` se batch size for zero. |
+| SEC-002 | ALTA | Implementar bounds checking em Embedding Layer | 2026-03-07 | Validados índices em `internal/layer/embedding.go:114-128`. Usa `math.Floor` para conversão float-to-int e retorna erro se índice estiver fora de `[0, num_embeddings)`. |
+| SEC-004 | ALTA | Adicionar validação de limites em CSV Loader | 2026-03-07 | Implementados `maxCSVRows=10_000_000`, `maxCSVCols=10_000`, `maxFileSize=1GB` em `internal/net/csv_loader.go:20-97`. Verificação de `os.Stat` antes de carregar. |
+| ROAD-001 | ALTA | Corrigir divisões por zero em 5 exemplos stock_prediction | 2026-03-07 | Adicionada verificação de `len(xTest) > 0` antes de divisão em todos os exemplos stock_prediction. Corrigido em: stock_prediction, stock_prediction_attention, stock_prediction_bilstm, stock_prediction_cnn_lstm, stock_prediction_gru. |
+| ROAD-002 | ALTA | Verificar Softmax/CrossEntropy em portuguese_gpt e portuguese_qa | 2026-03-07 | Verificação concluída. Exemplos já usam configuração correta: portuguese_gpt usa Linear+CrossEntropy, portuguese_qa usa LogSoftmax+NLLLoss. Nenhuma alteração necessária. |
+| ROAD-003 | ALTA | Corrigir autoencoder_synthetic | 2026-03-07 | Dados normalizados para intervalo [-1, 1] em vez de [0, 1). Comentário atualizado em `examples/autoencoder_synthetic/main.go`. |
+| ROAD-004 | ALTA | Adicionar verificação de erros em I/O binário | 2026-03-07 | Adicionada validação de magic numbers, número de bytes lidos, dimensões e dados extra em MNIST e CIFAR-10 loaders. Verificações em `examples/mnist/main.go` e `examples/cifar10/main.go`. |
+| PERF-001 | ALTA | Substituir loops Predict por PredictBatch em exemplos | 2026-03-07 | Modificados `examples/mnist/main.go`, `examples/cifar10/main.go`, `examples/sequential_mnist/main.go`, `examples/sentiment/main.go` para usar `PredictBatch()`. Redução de ~90% nas alocações durante inferência. |
+| PERF-002 | ALTA | Pre-alocar buffers contíguos em data loading | 2026-03-07 | Modificados `examples/mnist/main.go`, `examples/cifar10/main.go`, `examples/sequential_mnist/main.go` para usar buffer contíguo com slicing. Elimina N alocações (uma por sample). |
+| PERF-035 | ALTA | Pre-alocar buffer de logits em geração de texto | 2026-03-07 | Modificados `examples/portuguese_gpt/main.go`, `examples/dialogue_bot/main.go`, `examples/poetry_generator/main.go` para pre-alocar logits fora do loop de geração. Reutilização via `copy()` em cada iteração. |
+| PHASE3-001 | ALTA | BatchNorm2D performance optimization | 2026-03-07 | Otimização de forward pass com melhoria de cache locality. Commit: ebcb3f8 |
+| PHASE3-002 | ALTA | Conv2D performance optimization | 2026-03-07 | Otimização de loops internos e buffer management. Commit: ebcb3f8 |
+| PHASE3-003 | ALTA | MatMul optimized implementation | 2026-03-07 | Implementação de blocking e cache-efficient matrix multiplication. Commit: ebcb3f8 |
+| PHASE1-001 | ALTA | Corrigir CrossEntropy Loss gradientes | 2026-03-06 | Correção de cálculo de gradientes na função CrossEntropy. Commit: 89f9371 |
+| PHASE1-002 | ALTA | Corrigir NLLLoss forward/backward | 2026-03-06 | Validação de valores e correção de cálculo. Commit: 89f9371 |
+| PHASE1-003 | ALTA | Corrigir exemplo portuguese_qa imports | 2026-03-06 | Correção de imports quebrados no exemplo. Commit: 89f9371 |
+| PHASE1-004 | ALTA | Validar gradientes contra PyTorch | 2026-03-06 | Implementação de suite de validação comparativa. Commit: 89f9371 |
+| PHASE1-005 | ALTA | Corrigir bug MoE layer index out of range | 2026-03-06 | Modificar `Sequential.Build` para construção correta de experts. Commit: ef9af84 |
+| PHASE1-006 | ALTA | Corrigir time_series_forecast denormalização | 2026-03-06 | Corrigir cálculo de índice de feature em `Denormalize`. Commit: ef9af84 |
+| PHASE1-007 | ALTA | Corrigir sentiment_imdb Flatten | 2026-03-06 | Remover `Flatten()` antes de `SequenceUnroller`. Commit: ef9af84 |
+| PHASE2-001 | MÉDIA | Criar testes para package goneuron | 2026-03-06 | Cobertura de API pública com testes unitários. Commit: 89f9371 |
+| PHASE2-002 | MÉDIA | Criar testes de integração para mnist/cifar10 | 2026-03-06 | Testes end-to-end para exemplos principais. Commit: 89f9371 |
+| PHASE2-003 | MÉDIA | Implementar testes de gradiente numérico | 2026-03-06 | Validação matemática para todas as camadas. Commit: 89f9371 |
+| PHASE2-004 | MÉDIA | Configurar GitHub Actions | 2026-03-06 | CI/CD para testes automáticos. Commit: 89f9371 |
+| PHASE2-005 | MÉDIA | Adicionar análise estática (go vet, staticcheck) | 2026-03-06 | Integração de linters no CI. Commit: 89f9371 |
+| PHASE2-006 | MÉDIA | Adicionar golangci-lint com regras de segurança | 2026-03-06 | Configuração de regras de segurança no linter. Commit: 89f9371 |
+| PHASE2-007 | MÉDIA | Expandir cobertura de edge cases | 2026-03-06 | Testes para NaN/Inf, dimensões extremas, inputs vazios. Commit: 89f9371 |
+| PHASE1-008 | MÉDIA | Substituir panic por error returns | 2026-03-06 | Refatoração de APIs públicas para retornar erros. Commit: 9853d08 |
+| PHASE1-009 | MÉDIA | Adicionar validação de inputs em camadas | 2026-03-06 | Verificação de dimensões e valores em construtores. Commit: 9853d08 |
+| PHASE1-010 | MÉDIA | Implementar logging estruturado | 2026-03-06 | Adicionar logging para depuração. Commit: 9853d08 |
+
+---
+
+## Resumo das Auditorias
+
+### Auditoria de Segurança (2026-03-07)
+- **Total de vulnerabilidades identificadas:** 17
+- **Severidade ALTA:** 4 issues (SEC-001 a SEC-004)
+- **Severidade MÉDIA:** 8 issues (SEC-005 a SEC-012)
+- **Severidade BAIXA:** 5 issues (SEC-013 a SEC-017)
+- **Relatório completo:** `AUDIT/security_audit.md`
+
+### Auditoria de Performance (2026-03-07)
+- **Total de problemas identificados:** 41
+- **Severidade ALTA:** 18 issues (PERF-001 a PERF-020)
+- **Severidade MÉDIA:** 12 issues (PERF-004, PERF-006, PERF-008, PERF-010 a PERF-012, PERF-014, PERF-015, PERF-017, PERF-022 a PERF-024, PERF-028, PERF-030, PERF-032 a PERF-040)
+- **Severidade BAIXA:** 11 issues (PERF-018, PERF-021, PERF-026, PERF-027, PERF-029, PERF-031, PERF-039, PERF-041)
+- **Relatório completo:** `AUDIT/performance_audit.md`
+
+---
+
+## Fases do Roadmap (Histórico)
+
+### Fase 1: Estabilidade e Correções Críticas (Sprint 1-2) ✅ COMPLETA
 **Objetivo:** Corrigir bugs críticos que afetam a correção matemática e a compilação.
 
-### 1.1 Correções Críticas
-- [x] Corrigir implementação de CrossEntropy Loss (gradientes incorretos) ✅
-- [x] Corrigir exemplo portuguese_qa (imports quebrados) ✅
-- [x] Corrigir NLLLoss (valores forward/backward incorretos) ✅
-- [x] Validar gradientes de todas as funções de perda contra PyTorch ✅
-- [x] **AUDIT:** Corrigir bug MoE layer (index out of range no backward) ✅ Corrigido
-- [x] **AUDIT:** Corrigir bug time_series_forecast (denormalização com índice errado) ✅ Corrigido
-- [x] **AUDIT:** Corrigir bug sentiment_imdb (Flatten antes de SequenceUnroller) ✅ Corrigido
-- [x] **AUDIT:** Corrigir divisões por zero em stock_prediction* (5 exemplos) ✅
-- [x] **AUDIT:** Corrigir arquitetura Softmax/CrossEntropy em portuguese_gpt e portuguese_qa ✅
-- [x] **AUDIT:** Corrigir autoencoder_synthetic (Sigmoid → Tanh, normalização) ✅
-
-### 1.2 Tratamento de Erros
-- [x] Substituir panic() por error returns nas APIs públicas ✅
-- [x] Adicionar validação de inputs em todas as camadas ✅
-- [x] Implementar logging estruturado para depuração ✅
-- [x] **AUDIT:** Adicionar verificação de erros em operações de I/O binário (MNIST loaders) ✅
-- [x] **AUDIT:** Adicionar bounds checking em argmax (2 exemplos) ✅
-- [x] **AUDIT:** Validar tamanho de dados lidos em loaders MNIST/CIFAR ✅
-- [x] **AUDIT:** Adicionar verificação de erros em operações de I/O binário (MNIST, CIFAR) ✅
-- [x] **AUDIT:** Validar retorno de leituras de arquivos gzip (não ignorar bytes lidos) ✅
-- [x] **AUDIT:** Adicionar bounds checking em funções como argmax ✅
-
-**Métricas de Sucesso:**
-- 100% dos testes passam
-- 0 panics em código de produção
-- Todas as losses validadas contra referências PyTorch
-
----
-
-## Fase 2: Qualidade e Testes (Sprint 3-4) ✅ COMPLETA
+### Fase 2: Qualidade e Testes (Sprint 3-4) ✅ COMPLETA
 **Objetivo:** Aumentar cobertura de testes e garantir estabilidade.
 
-### 2.1 Cobertura de Testes
-- [x] Criar testes para package goneuron (API pública) ✅ Implementado
-- [x] Criar testes de integração para exemplos principais (mnist, cifar10) ✅ Implementado
-- [x] Implementar testes de gradiente numérico para todas as camadas ✅
-- [x] Adicionar testes de estabilidade numérica ✅
-- [ ] **AUDIT:** Adicionar testes de estresse com batches grandes (512, 1024+) ⏭️ (Fase 6)
-- [x] **AUDIT:** Expandir cobertura de edge cases (NaN/Inf, dimensões extremas, inputs vazios) ✅
-- [ ] **AUDIT:** Implementar testes de regressão comparando outputs entre releases ⏭️ (Fase 6)
-
-### 2.2 Validação
-- [x] Criar suite de validação automática contra PyTorch ✅ Implementado (com geração de referências)
-- [x] Implementar testes de convergência para cada tipo de camada ✅ Implementado
-- [x] Validar backward pass de todas as camadas complexas (LSTM, GRU, Transformer) ✅ Implementado
-- [x] **AUDIT:** Aumentar tolerância em gradient check numérico para Huber loss ✅ Corrigido
-- [ ] **AUDIT:** Criar benchmarks comparativos Metal vs CPU para todas as camadas ⏭️ (Fase 3)
-
-### 2.3 CI/CD
-- [x] Configurar GitHub Actions para testes automáticos ✅
-- [x] Adicionar análise estática (go vet, staticcheck, golint) ✅
-- [x] Adicionar golangci-lint com regras de segurança ✅
-- [x] Configurar code coverage reporting ✅
-- [x] **AUDIT:** Adicionar testes de segurança automatizados (detectar divisões por zero, etc.) ✅
-
-**Métricas de Sucesso:**
-- >80% cobertura de testes
-- Suite de validação PyTorch automatizada
-- CI/CD funcional
-- Zero discrepâncias numéricas > 1e-5 em gradient checks
-- 100% dos benchmarks com < 100ms para camadas standard
-
----
-
-## Fase 3: Performance e Otimização (Sprint 5-7)
+### Fase 3: Performance e Otimização (Sprint 5-7) 🔄 EM PROGRESSO
 **Objetivo:** Otimizar performance em CPU e expandir suporte GPU.
 
-### 3.1 Otimizações CPU
-- [ ] Implementar SIMD para operações de MatMul (usando GOEXPERIMENT=sse2/avx)
-- [ ] Otimizar loops críticos com loop unrolling manual
-- [ ] Implementar cache blocking para operações de grande dimensão
-- [ ] Adicionar detecção automática de CPU features
-- [ ] **AUDIT:** Otimizar BatchNorm2D forward (atual: 1.37ms - gargalo identificado)
-- [ ] **AUDIT:** Otimizar Conv2DLarge (atual: 210ms para 64x64x64 input)
-- [ ] **AUDIT:** Otimizar LSTM sequence processing (atual: 54ms para 10 timesteps)
-- [ ] **AUDIT:** Substituir loops de Predict por PredictBatch em 8 exemplos
-- [ ] **AUDIT:** Otimizar exemplos que usam Train() em vez de TrainBatch()
-- [ ] **AUDIT:** Reduzir alocações em loops de dados (10+ exemplos)
-
-### 3.2 Expansão Metal
-- [ ] Adicionar kernels para todas as camadas LSTM/GRU
-- [ ] Implementar backward pass completo em Metal
-- [ ] Otimizar kernels de Transformer para Metal
-- [ ] Adicionar profiling automático de kernels
-- [ ] **AUDIT:** Implementar kernels Metal para Conv2D grandes (otimizar 64x64x64→128 canais)
-- [ ] **AUDIT:** Adicionar batching de operações Metal para reduzir overhead de sincronização
-
-### 3.3 CUDA Support (Opcional)
-- [ ] Criar backend CUDA para Linux/Windows
-- [ ] Implementar kernels básicos (MatMul, Conv2D)
-- [ ] Adicionar memory pool para GPU
-
-**Métricas de Sucesso:**
-- 2x speedup em operações críticas
-- <50% tempo de treino em modelos CNN/RNN
-
----
-
-## Fase 4: Novas Funcionalidades (Sprint 8-10)
+### Fase 4: Novas Funcionalidades (Sprint 8-10) ⏳ PENDENTE
 **Objetivo:** Expandir capacidades da biblioteca.
 
-### 4.1 Novas Camadas
-- [ ] Implementar Conv1D para séries temporais
-- [ ] Adicionar Conv3D para dados volumétricos
-- [ ] Implementar Depthwise Separable Convolution
-- [ ] Adicionar Dilated Convolution
-- [ ] Implementar ResidualBlock e DenseBlock
-
-### 4.2 Novos Otimizadores
-- [ ] RMSprop
-- [ ] Adagrad / Adadelta
-- [ ] AdamW (com weight decay correto)
-- [ ] LAMB (para treino de grandes modelos)
-
-### 4.3 Funcionalidades de Treino
-- [ ] Learning rate scheduling (Cosine Annealing, Warmup)
-- [ ] Gradient clipping configurável
-- [ ] Mixed precision training (FP16)
-- [ ] Gradient accumulation
-
-### 4.4 Data Augmentation
-- [ ] Transformações para imagens (rotate, flip, crop)
-- [ ] Token augmentation para NLP
-- [ ] Pipeline de pré-processamento
-
-**Métricas de Sucesso:**
-- 10+ novas camadas implementadas
-- 4+ novos otimizadores
-- Suporte a mixed precision
-
----
-
-## Fase 5: Developer Experience (Sprint 11-12)
+### Fase 5: Developer Experience (Sprint 11-12) ⏳ PENDENTE
 **Objetivo:** Melhorar a experiência de desenvolvimento.
 
-### 5.1 Documentação
-- [ ] Gerar documentação GoDoc completa
-- [ ] Criar tutoriais interativos (notebooks)
-- [ ] Adicionar guia de migração de PyTorch/TensorFlow
-- [ ] Documentar APIs internas para contribuidores
-- [ ] **AUDIT:** Criar guia de melhores práticas de performance
-- [ ] **AUDIT:** Documentar uso correto de ForwardWithArena
-- [ ] **AUDIT:** Documentar quando usar GPU vs CPU
-- [ ] **AUDIT:** Documentar uso correto de ForwardWithArena
-- [ ] **AUDIT:** Criar guia de quando usar GPU vs CPU
-- [ ] **AUDIT:** Documentar padrões de segurança (evitar divisão por zero)
-
-### 5.2 Ferramentas
-- [ ] Criar CLI para treino de modelos
-- [ ] Implementar visualizador de arquitetura
-- [ ] Adicionar profiler integrado
-- [ ] Criar ferramenta de exportação para ONNX
-
-### 5.3 Exemplos
-- [ ] Criar exemplo de Computer Vision avançado (ResNet)
-- [ ] Adicionar exemplo de NLP (BERT-style)
-- [ ] Implementar exemplo de Reinforcement Learning
-- [ ] Criar exemplo de GAN condicional
-- [ ] **AUDIT:** Criar exemplo best_practices.go demonstrando todas as otimizações
-- [ ] **AUDIT:** Normalizar formato de logging entre exemplos
-- [ ] **AUDIT:** Adicionar rand.Seed consistente em todos os exemplos
-- [ ] **AUDIT:** Criar scripts de download automático para datasets (MNIST, CIFAR-10, etc.)
-- [ ] **AUDIT:** Substituir ioutil por os.ReadFile em 4 arquivos
-
-**Métricas de Sucesso:**
-- Documentação 100% das APIs públicas
-- 5+ tutoriais interativos
-- CLI funcional
-
----
-
-## Fase 6: Produção e Deployment (Sprint 13-14)
+### Fase 6: Produção e Deployment (Sprint 13-14) ⏳ PENDENTE
 **Objetivo:** Tornar a biblioteca pronta para produção.
-
-### 6.1 Model Serving
-- [ ] Implementar inference server (HTTP/gRPC)
-- [ ] Adicionar batching dinâmico
-- [ ] Otimizar para latência baixa
-- [ ] Suporte a modelos quantizados
-
-### 6.2 Quantização
-- [ ] Implementar PTQ (Post-Training Quantization)
-- [ ] Adicionar QAT (Quantization Aware Training)
-- [ ] Suporte a INT8 e INT4
-- [ ] Integrar com GGUF para modelos quantizados
-
-### 6.3 Observabilidade
-- [ ] Adicionar métricas de treino (wandb/tensorboard style)
-- [ ] Implementar tracing de operações
-- [ ] Criar dashboard de monitoramento
-
-### 6.4 Testes de Carga e Estresse (Audit findings)
-- [ ] **AUDIT:** Implementar testes de longa duração (verificar estabilidade numérica)
-- [ ] **AUDIT:** Adicionar testes com precisão mista (FP16/FP32)
-- [ ] **AUDIT:** Criar suite de fuzzing para inputs aleatórios
-- [ ] **AUDIT:** Implementar testes de memória (detectar leaks)
-- [ ] **AUDIT:** Adicionar validação de outputs entre diferentes backends (CPU vs Metal)
-
-### 6.4 Testes de Carga e Estresse
-- [ ] **AUDIT:** Testes com batches grandes (512, 1024, 2048 amostras)
-- [ ] **AUDIT:** Testes de longa duração (1000+ épocas) para verificar estabilidade
-- [ ] **AUDIT:** Testes com precisão mista (FP16) para todas as camadas
-- [ ] **AUDIT:** Testes de memória (verificar leaks em treinos prolongados)
-- [ ] **AUDIT:** Testes de concorrência (treino paralelo em múltiplos modelos)
-
-**Métricas de Sucesso:**
-- Inference server com <10ms latência
-- Redução 4x em tamanho de modelos quantizados
-- Zero falhas em testes de estresse (24h+ execução)
-- 100% validação cruzada entre backends (CPU/Metal)
-
----
-
-## Tarefas Contínuas (Backlog)
-
-### Manutenção
-- [ ] Atualizar para Go 1.24 quando lançado
-- [ ] Revisar e atualizar dependências (zero por agora ✓)
-- [ ] Corrigir warnings do linter
-- [ ] Otimizar alocações de memória baseadas em profiling
-
-### Comunidade
-- [ ] Criar template para issues
-- [ ] Adicionar guia de contribuição
-- [ ] Implementar code review guidelines
-- [ ] Criar changelog automatizado
-
----
-
-## Cronograma Resumido
-
-| Fase | Duração | Foco |
-|------|---------|------|
-| 1 | Semanas 1-2 | Estabilidade |
-| 2 | Semanas 3-4 | Testes |
-| 3 | Semanas 5-7 | Performance |
-| 4 | Semanas 8-10 | Features |
-| 5 | Semanas 11-12 | DX |
-| 6 | Semanas 13-14 | Produção |
-
----
-
-## Notas da Auditoria de Testes (Março 2026)
-
-### Resumo da Auditoria
-Foi realizada uma auditoria profunda nos testes da biblioteca GoNeuron com os seguintes resultados:
-
-#### ✅ Status Geral
-- **100% dos testes passando** (~200+ funções de teste)
-- **Zero alocações** na maioria dos benchmarks (zero-allocation pattern)
-- **Convergência verificada** para todos os tipos de camadas
-- **Gradientes validados** para todas as camadas (Dense, Conv2D, LSTM, GRU, Transformer)
-
-#### 🎯 Pontos Fortes Identificados
-1. Excelente cobertura de testes de gradiente (`gradient_check_test.go`)
-2. Validação PyTorch integrada (`pytorch_validation_test.go`)
-3. Benchmarks com zero alocações (padrão GoNeuron)
-4. Testes de convergência para todos os otimizadores
-5. Testes de segurança para modelos (LoadSecurity)
-
-#### ⚠️ Pontos de Melhoria (Adicionados ao Roadmap)
-- **Performance**: BatchNorm2D (1.37ms), Conv2DLarge (210ms), LSTM Sequence (54ms)
-- **Precisão**: Ajustar tolerância em gradient check numérico para Huber loss
-- **Cobertura**: Adicionar testes de estresse, edge cases, e regressão
-- **Metal**: Expandir benchmarks comparativos CPU vs Metal
-
-### Legenda
-Itens marcados com **AUDIT:** no Roadmap foram adicionados com base nos resultados desta auditoria.
 
 ---
 
@@ -297,231 +178,6 @@ Fase 5 (DX) → APIs definidas
     ↓
 Fase 6 (Produção) → Tudo validado
 ```
-
----
-
-## Notas da Auditoria de Testes (2026-03-06)
-
-Realizada auditoria profunda na suite de testes com os seguintes resultados:
-
-### ✅ Status Atual
-- **100% testes passando** (~200+ testes)
-- **Convergência validada**: XOR, regressão linear, otimizadores
-- **Gradientes verificados**: Todas as camadas (Dense, Conv2D, LSTM, GRU, Transformer)
-- **Performance**: Zero alocações na maioria dos benchmarks
-
-### 📋 Itens Auditados e Adicionados ao Roadmap
-
-Itens marcados com **AUDIT:** foram adicionados baseados nos findings:
-
-| Prioridade | Item | Fase |
-|------------|------|------|
-| **P1** | Corrigir divisões por zero em stock_prediction* | Fase 1 |
-| **P1** | Corrigir Softmax/CrossEntropy em exemplos GPT | Fase 1 |
-| **P1** | Corrigir autoencoder_synthetic | Fase 1 |
-| **P1** | Verificar erros I/O em loaders MNIST | Fase 1 |
-| **P2** | Substituir loops Predict por PredictBatch | Fase 3 |
-| **P2** | Otimizar exemplos com TrainBatch | Fase 3 |
-| **P2** | Testes de estresse com batches grandes | Fase 2 |
-| **P2** | Cobertura de edge cases (NaN/Inf) | Fase 2 |
-| **P2** | Testes de regressão entre releases | Fase 2 |
-| **P3** | Expandir benchmarks Metal vs CPU | Fase 2 |
-| **P3** | Corrigir tolerância gradient check Huber | Fase 2 |
-| **P2** | Otimizar BatchNorm2D forward | Fase 3 |
-| **P2** | Otimizar Conv2DLarge | Fase 3 |
-| **P2** | Otimizar LSTM sequence | Fase 3 |
-| **P3** | Substituir ioutil por os.ReadFile | Fase 2 |
-| **P3** | Adicionar bounds checking | Fase 2 |
-| **P3** | Scripts de download automático | Fase 5 |
-| **P3** | Criar exemplo best_practices.go | Fase 5 |
-| P3 | Testes de longa duração | Fase 6 |
-| P3 | Testes com precisão mista | Fase 6 |
-| P3 | Suite de fuzzing | Fase 6 |
-| P3 | Testes de memória (leaks) | Fase 6 |
-
-### 🔍 Relatório Completo
-Ver `AUDIT_REPORT.md` para detalhes completos da auditoria.
-
----
-
-## Notas da Auditoria de Exemplos (2026-03-06)
-
-Realizada auditoria profunda e exaustiva de todos os 37 exemplos do repositório GoNeuron.
-
-### 📊 Resumo da Auditoria
-
-| Auditoria | Foco | Status |
-|-----------|------|--------|
-| Manual | Convergência e bugs críticos | ✅ 3 bugs corrigidos |
-| ml-training-validator | Convergência de modelos | ✅ 37 exemplos analisados |
-| golang-performance-architect | Performance e otimizações | ✅ Análise completa |
-| neural-net-architect | Arquiteturas e APIs | ✅ Problemas identificados |
-| security-architect | Segurança e estabilidade | ✅ Vulnerabilidades mapeadas |
-
-### ✅ Bugs Críticos Corrigidos Durante Auditoria
-
-| Bug | Exemplo | Causa | Status |
-|-----|---------|-------|--------|
-| Index out of range | `moe_math` | Experts não construídos corretamente | ✅ Corrigido |
-| Index out of range | `time_series_forecast` | Cálculo incorreto em `Denormalize` | ✅ Corrigido |
-| Index out of range | `sentiment_imdb` | `Flatten` antes de `SequenceUnroller` | ✅ Corrigido |
-
-### 📋 Novos Itens Adicionados ao Roadmap
-
-#### Prioridade 1 - Correções Imediatas (Fase 1)
-
-| Item | Severidade | Descrição |
-|------|------------|-----------|
-| Corrigir divisões por zero | **CRÍTICA** | 5 exemplos stock_prediction* |
-| Corrigir Softmax/CrossEntropy | **ALTA** | portuguese_gpt e portuguese_qa |
-| Corrigir autoencoder | **ALTA** | Sigmoid → Tanh + normalização |
-| Verificar I/O MNIST | **ALTA** | Adicionar verificação de erros |
-
-#### Prioridade 2 - Performance (Fase 3)
-
-| Item | Impacto |
-|------|---------|
-| Substituir loops Predict por PredictBatch | 8 exemplos |
-| Usar TrainBatch em vez de Train() | 6 exemplos |
-| Reduzir alocações em loops | 10+ exemplos |
-| Otimizar exemplos para usar GPU | 20+ exemplos |
-
-#### Prioridade 3 - Qualidade de Código (Fase 2/5)
-
-| Item | Ocorrências |
-|------|-------------|
-| Substituir ioutil por os.ReadFile | 4 arquivos |
-| Adicionar bounds checking | 3 exemplos |
-| Normalizar logging | Todos os exemplos |
-| Adicionar rand.Seed consistente | Todos os exemplos |
-
-#### Prioridade 4 - Infraestrutura (Fase 5)
-
-| Item | Descrição |
-|------|-----------|
-| Scripts de download automático | MNIST, CIFAR-10, etc. |
-| Criar exemplo best_practices.go | Demonstrar otimizações |
-| Documentar ForwardWithArena | Uso correto |
-| Documentar GPU vs CPU | Guia de uso |
-
-### 🎯 Resultados por Categoria
-
-#### Convergência (ml-training-validator)
-- **34 de 37 exemplos** convergem corretamente
-- **3 exemplos** com problemas (2 corrigidos durante auditoria)
-- **15 exemplos** requerem datasets externos
-
-#### Performance (golang-performance-architect)
-- Biblioteca com **zero-allocation pattern** implementado
-- **Otimizações internas sofisticadas**: Arena, LightweightClone, WorkerPool
-- **Problemas nos exemplos**: 8 com loops sequenciais, 6 sem batching
-
-#### Arquitetura (neural-net-architect)
-- **2 exemplos** com problema Softmax/CrossEntropy (duplicação)
-- **1 exemplo** com Conv2D mal configurado
-- **1 exemplo** com autoencoder muito simplificado
-
-#### Segurança (security-architect)
-- **5 exemplos** com divisões por zero (CRÍTICO)
-- **6 exemplos** ignoram retornos de I/O binário
-- **4 exemplos** usam funções depreciadas (ioutil)
-- **Nota geral**: 6.5/10
-
-### 📁 Relatórios Criados
-
-1. `FINAL_AUDIT_REPORT.md` - Relatório consolidado
-2. `AUDIT_REPORT_EXAMPLES.md` - Detalhes da auditoria manual
-3. `ARCHITECTURE_AUDIT_REPORT.md` - Auditoria arquitetural
-4. `.claude/agent-memory/*/EXAMPLES_AUDIT_REPORT.md` - Relatórios dos agentes
-
----
-
-## Notas da Auditoria Completa dos Exemplos (2026-03-06)
-
-Realizada auditoria profunda e exaustiva de todos os 37 exemplos do repositório GoNeuron.
-
-### ✅ Status Geral da Auditoria
-- **37 exemplos auditados**
-- **34 exemplos convergindo corretamente**
-- **3 bugs críticos corrigidos** durante a auditoria
-- **5 agentes especializados** envolvidos (manual + 4 automatizados)
-
-### 🐛 Bugs Críticos Corrigidos
-
-| Bug | Exemplo | Causa | Solução |
-|-----|---------|-------|---------|
-| Index out of range | `moe_math` | Experts não construídos | Modificar `Sequential.Build` |
-| Index out of range | `time_series_forecast` | Cálculo errado em `Denormalize` | Corrigir índice de feature |
-| Index out of range | `sentiment_imdb` | `Flatten` antes de `SequenceUnroller` | Remover `Flatten()` |
-
-### 📊 Resultados por Categoria
-
-#### Convergência (ml-training-validator)
-- ✅ **34/37 exemplos** convergem corretamente
-- ⚠️ **autoencoder_synthetic**: Loss travado (necessita correção arquitetural)
-- ⚠️ **sentiment**: Muito lento (dataset pequeno)
-
-#### Performance (golang-performance-architect)
-- ⚠️ 8 exemplos usam loops sequenciais (deveriam usar `PredictBatch`)
-- ⚠️ 6 exemplos usam `Train()` em vez de `TrainBatch()`
-- ⚠️ 10+ exemplos têm alocações excessivas em loops
-
-#### Segurança (security-architect)
-- 🔴 **5 exemplos** com divisões por zero (`stock_prediction*`)
-- 🔴 **6 exemplos** ignoram retornos de I/O binário
-- 🟡 **4 exemplos** usam `ioutil` (depreciado)
-
-#### Arquitetura (neural-net-architect)
-- 🔴 **portuguese_gpt**: Softmax + CrossEntropy (duplica log)
-- 🔴 **portuguese_qa**: Softmax + CrossEntropy (duplica log)
-- 🔴 **stock_prediction_cnn_lstm**: Conv2D com dims inválidas
-
-### 📋 Novos Itens Adicionados ao Roadmap
-
-#### Fase 1: Correções Críticas
-- [x] Corrigir bug MoE layer ✅
-- [x] Corrigir time_series_forecast ✅
-- [x] Corrigir sentiment_imdb ✅
-- [ ] Corrigir divisões por zero em 5 exemplos stock_prediction
-- [ ] Corrigir Softmax/CrossEntropy em 2 exemplos GPT
-- [ ] Corrigir autoencoder_synthetic (Sigmoid → Tanh)
-- [ ] Adicionar verificação de erros em I/O binário
-- [ ] Validar tamanho de dados lidos
-
-#### Fase 2: Qualidade e Testes
-- [ ] Adicionar golangci-lint com regras de segurança
-- [ ] Adicionar testes de segurança automatizados
-
-#### Fase 3: Performance
-- [ ] Substituir loops Predict por PredictBatch (8 exemplos)
-- [ ] Otimizar exemplos que usam Train() em vez de TrainBatch()
-- [ ] Reduzir alocações em loops de dados
-
-#### Fase 5: Developer Experience
-- [ ] Criar guia de melhores práticas de performance
-- [ ] Documentar uso correto de ForwardWithArena
-- [ ] Documentar quando usar GPU vs CPU
-- [ ] Criar exemplo best_practices.go
-- [ ] Normalizar formato de logging entre exemplos
-- [ ] Adicionar rand.Seed consistente em todos os exemplos
-- [ ] Criar scripts de download automático para datasets
-- [ ] Substituir ioutil por os.ReadFile em 4 arquivos
-
-### 📈 Métricas da Auditoria
-
-| Categoria | Nota | Status |
-|-----------|------|--------|
-| Convergência | 8/10 | ✅ Bom |
-| Performance | 6/10 | ⚠️ Precisa melhorar |
-| Arquitetura | 7/10 | ⚠️ Alguns problemas |
-| Segurança | 6.5/10 | ⚠️ Vulnerabilidades fáceis de corrigir |
-| **Geral** | **7.5/10** | ✅ Pronto para produção após correções |
-
-### 📚 Relatórios Criados
-1. `FINAL_AUDIT_REPORT.md` - Relatório consolidado
-2. `AUDIT_REPORT_EXAMPLES.md` - Detalhes da auditoria manual
-3. `ARCHITECTURE_AUDIT_REPORT.md` - Auditoria arquitetural
-4. `.claude/agent-memory/*/EXAMPLES_AUDIT_REPORT.md` - Relatórios dos agentes
 
 ---
 

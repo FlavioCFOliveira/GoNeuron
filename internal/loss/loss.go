@@ -12,6 +12,7 @@ var (
 	ErrDivisibleBy3     = errors.New("prediction length must be divisible by 3")
 	ErrDivisibleBy2     = errors.New("prediction length must be divisible by 2")
 	ErrInvalidDimension = errors.New("invalid dimension")
+	ErrEmptyInput       = errors.New("input slice is empty")
 )
 
 // BackwardInPlacer is an optional interface for loss functions that support
@@ -38,6 +39,9 @@ type MSE struct{}
 // Forward computes mean squared error: (1/n) * sum((y_pred - y_true)^2)
 func (m MSE) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -54,6 +58,9 @@ func (m MSE) Forward(yPred, yTrue []float32) (float32, error) {
 // Note: Returned slice is newly allocated for safety.
 func (m MSE) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -70,6 +77,9 @@ func (m MSE) Backward(yPred, yTrue []float32) ([]float32, error) {
 // This avoids allocation when grad slice is pre-allocated.
 func (m MSE) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -87,6 +97,9 @@ type CrossEntropy struct{}
 // Forward computes cross entropy: -sum(y_true * log(y_pred + eps))
 func (c CrossEntropy) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -109,6 +122,9 @@ func (c CrossEntropy) Forward(yPred, yTrue []float32) (float32, error) {
 // This assumes y_pred contains probabilities from softmax and y_true is one-hot encoded.
 func (c CrossEntropy) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -124,6 +140,9 @@ func (c CrossEntropy) Backward(yPred, yTrue []float32) ([]float32, error) {
 // Combined gradient: y_pred - y_true (when yPred is from softmax)
 func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -147,6 +166,9 @@ func NewHuber(delta float32) *Huber {
 // Forward computes Huber loss.
 func (h Huber) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -166,6 +188,9 @@ func (h Huber) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for Huber loss.
 func (h Huber) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -185,6 +210,9 @@ func (h Huber) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (h Huber) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -206,6 +234,9 @@ type L1Loss struct{}
 // Forward computes mean absolute error: (1/n) * sum(|y_pred - y_true|)
 func (l L1Loss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -220,6 +251,9 @@ func (l L1Loss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for L1 loss: dL/dy_pred = (1/n) * sign(y_pred - y_true)
 func (l L1Loss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -242,6 +276,9 @@ func (l L1Loss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (l L1Loss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -267,6 +304,9 @@ type BCELoss struct{}
 // Forward computes binary cross entropy: -(1/n) * sum(y*log(p) + (1-y)*log(1-p))
 func (b BCELoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -292,6 +332,9 @@ func (b BCELoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Note: The gradient is normalized by n since the loss is averaged.
 func (b BCELoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -316,6 +359,9 @@ func (b BCELoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (b BCELoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -340,6 +386,9 @@ type BCEWithLogitsLoss struct{}
 // Forward computes BCE loss with sigmoid applied internally for stability.
 func (b BCEWithLogitsLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -364,6 +413,9 @@ func (b BCEWithLogitsLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Gradient is: sigmoid(x) - y
 func (b BCEWithLogitsLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -380,6 +432,9 @@ func (b BCEWithLogitsLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (b BCEWithLogitsLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -401,6 +456,9 @@ type NLLLoss struct{}
 // Input should be log-probabilities (e.g., output of LogSoftmax).
 func (n NLLLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	nLen := len(yPred)
+	if nLen == 0 {
+		return 0, ErrEmptyInput
+	}
 	if nLen != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -423,6 +481,9 @@ func (n NLLLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // This is combined with LogSoftmax's gradient in the Dense layer.
 func (n NLLLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	nLen := len(yPred)
+	if nLen == 0 {
+		return nil, ErrEmptyInput
+	}
 	if nLen != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -438,6 +499,9 @@ func (n NLLLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (n NLLLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	nLen := len(yPred)
+	if nLen == 0 {
+		return ErrEmptyInput
+	}
 	if nLen != len(yTrue) || nLen != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -464,6 +528,9 @@ func NewCosineEmbeddingLoss(margin float32) *CosineEmbeddingLoss {
 // For y=-1 (dissimilar): loss = max(0, cos(x1, x2) - margin)
 func (c CosineEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -488,6 +555,9 @@ func (c CosineEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for cosine embedding loss.
 func (c CosineEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -513,6 +583,9 @@ func (c CosineEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error)
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (c CosineEmbeddingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -549,6 +622,9 @@ func NewHingeEmbeddingLoss(margin float32) *HingeEmbeddingLoss {
 // For y=-1: loss = max(0, margin - x)
 func (h HingeEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -573,6 +649,9 @@ func (h HingeEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for hinge embedding loss.
 func (h HingeEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -598,6 +677,9 @@ func (h HingeEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) 
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (h HingeEmbeddingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -639,6 +721,9 @@ func NewTripletMarginLoss(margin float32, p int) *TripletMarginLoss {
 // yPred contains [anchor, positive, negative] concatenated.
 func (t TripletMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -676,6 +761,9 @@ func (t TripletMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for triplet margin loss.
 func (t TripletMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -732,6 +820,9 @@ func (t TripletMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (t TripletMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return ErrLengthMismatch
 	}
@@ -802,6 +893,9 @@ func NewMarginRankingLoss(margin float32) *MarginRankingLoss {
 // yTrue contains targets (+1 or -1) for each pair (length = nPairs).
 func (m MarginRankingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n%2 != 0 {
 		return 0, ErrDivisibleBy2
 	}
@@ -830,6 +924,9 @@ func (m MarginRankingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for margin ranking loss.
 func (m MarginRankingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n%2 != 0 {
 		return nil, ErrDivisibleBy2
 	}
@@ -861,6 +958,9 @@ func (m MarginRankingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (m MarginRankingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n%2 != 0 {
 		return ErrDivisibleBy2
 	}
@@ -895,6 +995,9 @@ type KLDivLoss struct{}
 // Forward computes KL divergence: sum(y_true * log(y_true / y_pred)) / n
 func (k KLDivLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -920,6 +1023,9 @@ func (k KLDivLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for KL divergence: -y_true / (y_pred * n)
 func (k KLDivLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -939,6 +1045,9 @@ func (k KLDivLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (k KLDivLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -970,6 +1079,9 @@ func NewMultiMarginLoss(margin float32, p int) *MultiMarginLoss {
 // yTrue contains integer class indices.
 func (m MultiMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -1007,6 +1119,9 @@ func (m MultiMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for multi-class margin loss.
 func (m MultiMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -1047,6 +1162,9 @@ func (m MultiMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (m MultiMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}
@@ -1087,6 +1205,9 @@ type MultiLabelSoftMarginLoss struct{}
 // Loss = -sum(y*log(σ(x)) + (1-y)*log(1-σ(x))) / n
 func (m MultiLabelSoftMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return 0, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return 0, ErrLengthMismatch
 	}
@@ -1118,6 +1239,9 @@ func (m MultiLabelSoftMarginLoss) Forward(yPred, yTrue []float32) (float32, erro
 // Backward computes gradient for multi-label soft margin loss.
 func (m MultiLabelSoftMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
 	if n != len(yTrue) {
 		return nil, ErrLengthMismatch
 	}
@@ -1141,6 +1265,9 @@ func (m MultiLabelSoftMarginLoss) Backward(yPred, yTrue []float32) ([]float32, e
 // BackwardInPlace computes gradient and stores it in the grad slice.
 func (m MultiLabelSoftMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
+	if n == 0 {
+		return ErrEmptyInput
+	}
 	if n != len(yTrue) || n != len(grad) {
 		return ErrLengthMismatch
 	}

@@ -17,11 +17,11 @@ func main() {
 	for i := 0; i < numSamples; i++ {
 		data[i] = make([]float32, dim)
 		// Intrinsic 2D information
-		x := rand.Float32()
-		y := rand.Float32()
+		x := rand.Float32()*2 - 1 // Scale to [-1, 1]
+		y := rand.Float32()*2 - 1 // Scale to [-1, 1]
 		for j := 0; j < dim; j++ {
 			// Each dimension is a linear combination of x, y plus noise
-			data[i][j] = x*rand.Float32() + y*rand.Float32() + rand.Float32()*0.1
+			data[i][j] = x*rand.Float32() + y*rand.Float32() + rand.Float32()*0.1 - 0.05 // Centered around 0
 		}
 	}
 
@@ -30,7 +30,7 @@ func main() {
 		// Encoder
 		goneuron.Dense(2, goneuron.ReLU),
 		// Decoder
-		goneuron.Dense(10, goneuron.Tanh), // Using Tanh for unnormalized data (data is in [0,1) range from rand.Float32)
+		goneuron.Dense(10, goneuron.Tanh), // Using Tanh for normalized data in [-1, 1] range
 	)
 
 	model.Compile(goneuron.Adam(0.01), goneuron.MSE)
