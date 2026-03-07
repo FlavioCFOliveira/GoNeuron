@@ -108,6 +108,9 @@ func loadMNISTLabels(filename string) ([][]float32, error) {
 }
 
 func argmax(v []float32) int {
+	if len(v) == 0 {
+		return 0
+	}
 	maxIdx := 0
 	maxVal := v[0]
 	for i := 1; i < len(v); i++ {
