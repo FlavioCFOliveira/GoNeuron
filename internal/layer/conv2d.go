@@ -43,6 +43,7 @@ type Conv2D struct {
 	gradWeights []float32
 	gradBiases  []float32
 	gradInBuf   []float32
+	scratchBuf  []float32 // Pre-allocated for temporary operations (e.g., grad * activation')
 
 	// Saved input for backward pass
 	savedInput        []float32
@@ -62,6 +63,12 @@ type Conv2D struct {
 	bufGradIn  *MetalBuffer
 	bufGradW   *MetalBuffer
 	bufGradB   *MetalBuffer
+
+	// Buffer pooling for Metal - stores max allocated sizes to avoid reallocation
+	maxInputSize   int
+	maxOutputSize  int
+	maxGradOutSize int
+	maxGradInSize  int
 }
 
 // NewConv2D creates a new 2D convolutional layer.
@@ -115,6 +122,7 @@ func (c *Conv2D) Build(inChannels int) {
 	c.outputBuf = make([]float32, 0)
 	c.gradInBuf = make([]float32, 0)
 	c.savedInput = make([]float32, 0)
+	c.scratchBuf = make([]float32, 0)
 
 	// GPU initialization if needed
 	if c.device.Type() == GPU {
@@ -410,21 +418,26 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		outH, outW := c.computeOutputSize(inputHeight, inputWidth)
 		requiredOutput := c.outChannels * outH * outW
 
-		// Ensure buffers
-		if c.bufInput == nil || c.bufInput.length < len(input) {
+		// Ensure buffers with pooling - pre-allocate to max size seen
+		if len(input) > c.maxInputSize {
+			c.maxInputSize = len(input)
+		}
+		if c.bufInput == nil || c.bufInput.length < c.maxInputSize {
 			if c.bufInput != nil {
 				c.bufInput.Free()
 			}
-			c.bufInput = md.CreateBuffer(input)
-		} else {
-			c.bufInput.Update(input)
+			c.bufInput = md.CreateEmptyBuffer(c.maxInputSize)
 		}
+		c.bufInput.Update(input)
 
-		if c.bufOutput == nil || c.bufOutput.length < requiredOutput {
+		if requiredOutput > c.maxOutputSize {
+			c.maxOutputSize = requiredOutput
+		}
+		if c.bufOutput == nil || c.bufOutput.length < c.maxOutputSize {
 			if c.bufOutput != nil {
 				c.bufOutput.Free()
 			}
-			c.bufOutput = md.CreateEmptyBuffer(requiredOutput)
+			c.bufOutput = md.CreateEmptyBuffer(c.maxOutputSize)
 		}
 
 		md.Conv2DForward(c.metalState, c.bufInput, c.bufOutput, 1, inputHeight, inputWidth, outH, outW)
@@ -614,7 +627,10 @@ func (c *Conv2D) Backward(grad []float32) ([]float32, error) {
 	gradInput := c.gradInBuf[:inChannels*inputHeight*inputWidth]
 
 	if md, ok := c.device.(*MetalDevice); ok && c.metalState != nil {
-		// Ensure weight gradient buffers exist
+		// Ensure weight gradient buffers exist with pooling
+		if len(grad) > c.maxGradOutSize {
+			c.maxGradOutSize = len(grad)
+		}
 		if c.bufGradW == nil {
 			c.bufGradW = md.CreateEmptyBuffer(len(c.weights))
 		}
@@ -622,31 +638,34 @@ func (c *Conv2D) Backward(grad []float32) ([]float32, error) {
 			c.bufGradB = md.CreateEmptyBuffer(len(c.biases))
 		}
 
-		if c.bufGradOut == nil || c.bufGradOut.length < len(grad) {
+		if c.bufGradOut == nil || c.bufGradOut.length < c.maxGradOutSize {
 			if c.bufGradOut != nil {
 				c.bufGradOut.Free()
 			}
-			c.bufGradOut = md.CreateBuffer(grad)
-		} else {
-			c.bufGradOut.Update(grad)
+			c.bufGradOut = md.CreateEmptyBuffer(c.maxGradOutSize)
 		}
 
-		if c.bufGradIn == nil || c.bufGradIn.length < len(gradInput) {
+		if len(gradInput) > c.maxGradInSize {
+			c.maxGradInSize = len(gradInput)
+		}
+		if c.bufGradIn == nil || c.bufGradIn.length < c.maxGradInSize {
 			if c.bufGradIn != nil {
 				c.bufGradIn.Free()
 			}
-			c.bufGradIn = md.CreateEmptyBuffer(len(gradInput))
+			c.bufGradIn = md.CreateEmptyBuffer(c.maxGradInSize)
 		}
 
-		// We need to handle activation derivative if not fused
+		// Apply activation derivative using pre-allocated scratch buffer
 		// dL/dz = dL/d(output) * activation'(z)
-		// Since we didn't fuse, we do it here
-		gradCopy := make([]float32, len(grad))
-		copy(gradCopy, grad)
-		for i := range gradCopy {
-			gradCopy[i] *= c.activation.Derivative(c.preActBuf[i])
+		// Since we didn't fuse, we do it here using scratch buffer
+		if cap(c.scratchBuf) < len(grad) {
+			c.scratchBuf = make([]float32, len(grad))
 		}
-		c.bufGradOut.Update(gradCopy)
+		scratch := c.scratchBuf[:len(grad)]
+		for i := range grad {
+			scratch[i] = grad[i] * c.activation.Derivative(c.preActBuf[i])
+		}
+		c.bufGradOut.Update(scratch)
 
 		md.Conv2DBackward(c.metalState, c.bufInput, c.bufGradOut, c.bufGradIn, c.bufGradW, c.bufGradB, 1, inputHeight, inputWidth, outH, outW)
 

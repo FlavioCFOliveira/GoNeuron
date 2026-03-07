@@ -147,6 +147,7 @@ type Dense struct {
 	gradBBuf      []float32 // View of grads
 	gradInBuf     []float32
 	dzBuf         []float32
+	softmaxBuf    []float32 // Pre-allocated for LogSoftmax backward
 
 	training bool
 
@@ -230,6 +231,7 @@ func (d *Dense) Build(in int) {
 	d.preActBuf = make([]float32, out)
 	d.gradInBuf = make([]float32, in)
 	d.dzBuf = make([]float32, out)
+	d.softmaxBuf = make([]float32, out)
 
 	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
 		d.bufWeights = metal.CreateBuffer(d.weights)
@@ -286,11 +288,9 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 			actType = getActivationType(d.act)
 		}
 		metal.MatMulFusedPersistent(d.bufWeights, d.bufIn, d.bufBiases, d.bufOut, outSize, 1, inSize, actType)
+		d.bufOut.Read(preAct)
 		if actType != MetalActivationNone {
-			d.bufOut.Read(output)
-			copy(preAct, output)
-		} else {
-			d.bufOut.Read(preAct)
+			copy(output, preAct)
 		}
 		metalUsed = true
 	} else {
@@ -407,7 +407,7 @@ func (d *Dense) Backward(grad []float32) ([]float32, error) {
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
 			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
 				// For LogSoftmax, we need softmax(preAct)
-				softmax := make([]float32, outSize)
+				softmax := d.softmaxBuf[:outSize]
 				for i := range softmax {
 					softmax[i] = float32(math.Exp(float64(output[i])))
 				}
@@ -883,7 +883,7 @@ func (d *Dense) AccumulateBackward(grad []float32) ([]float32, error) {
 		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
 			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
 				// For LogSoftmax, we need softmax(preAct)
-				softmax := make([]float32, outSize)
+				softmax := d.softmaxBuf[:outSize]
 				for i := range softmax {
 					softmax[i] = float32(math.Exp(float64(output[i])))
 				}
