@@ -4,6 +4,7 @@ package layer
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 // Embedding implements an embedding layer for categorical inputs.
@@ -29,6 +30,9 @@ type Embedding struct {
 	training bool
 
 	device Device
+
+	// Arena protection
+	arenaMu sync.Mutex
 }
 
 // NewEmbedding creates a new embedding layer.
@@ -81,8 +85,9 @@ func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		e.outputBuf = make([]float32, outputSize)
 	}
 
-	// Save indices for backward pass
+	// Save indices for backward pass - protegido por mutex
 	if arena != nil && offset != nil {
+		e.arenaMu.Lock()
 		if len(*arena) < *offset+batchSize {
 			newArena := make([]float32, (*offset+batchSize)*2)
 			copy(newArena, *arena)
@@ -99,6 +104,7 @@ func (e *Embedding) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 			e.savedIndices[i] = int(x[i])
 		}
 		*offset += batchSize
+		e.arenaMu.Unlock()
 	} else {
 		if cap(e.savedIndices) < batchSize {
 			e.savedIndices = make([]int, batchSize)

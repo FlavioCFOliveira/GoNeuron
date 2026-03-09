@@ -4,6 +4,7 @@ package layer
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 // SwiGLU implements the Swish-Gated Linear Unit.
@@ -38,6 +39,9 @@ type SwiGLU struct {
 
 	training bool
 	device   Device
+
+	// Arena protection
+	arenaMu sync.Mutex
 }
 
 // NewSwiGLU creates a new SwiGLU layer.
@@ -102,6 +106,7 @@ func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([
 
 	// Save input
 	if arena != nil && offset != nil {
+		s.arenaMu.Lock()
 		s.arena = *arena
 		if len(*arena) < *offset+inSize {
 			newArena := make([]float32, (*offset+inSize)*2)
@@ -112,6 +117,7 @@ func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([
 		copy((*arena)[*offset:*offset+inSize], x)
 		s.savedInputOffsets = append(s.savedInputOffsets, *offset)
 		*offset += inSize
+		s.arenaMu.Unlock()
 	} else {
 		// Internal arena fallback
 		if cap(s.arena) < inSize {
@@ -137,8 +143,9 @@ func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([
 		s.upBuf[o] = sumV
 	}
 
-	// Save pre-activations
+	// Save pre-activations - protegido por mutex
 	if arena != nil && offset != nil {
+		s.arenaMu.Lock()
 		if len(*arena) < *offset+2*outSize {
 			newArena := make([]float32, (*offset+2*outSize)*2)
 			copy(newArena, *arena)
@@ -152,6 +159,7 @@ func (s *SwiGLU) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([
 		copy((*arena)[*offset:*offset+outSize], s.upBuf)
 		s.savedUpOffsets = append(s.savedUpOffsets, *offset)
 		*offset += outSize
+		s.arenaMu.Unlock()
 	}
 
 	// SwiGLU(x) = Swish(gate) * up

@@ -3,6 +3,7 @@ package layer
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"math"
@@ -29,6 +30,9 @@ type GlobalAttention struct {
 	timeStep    int
 
 	training bool
+
+	// Arena protection
+	arenaMu sync.Mutex
 }
 
 // NewGlobalAttention creates a new global attention layer.
@@ -63,6 +67,7 @@ func (g *GlobalAttention) SetTraining(training bool) {
 func (g *GlobalAttention) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
 	var saved []float32
 	if arena != nil && offset != nil {
+		g.arenaMu.Lock()
 		inSize := len(x)
 		if len(*arena) < *offset+inSize {
 			newArena := make([]float32, (*offset+inSize)*2)
@@ -72,6 +77,7 @@ func (g *GlobalAttention) ForwardWithArena(x []float32, arena *[]float32, offset
 		saved = (*arena)[*offset : *offset+inSize]
 		copy(saved, x)
 		*offset += inSize
+		g.arenaMu.Unlock()
 	} else {
 		saved = make([]float32, len(x))
 		copy(saved, x)

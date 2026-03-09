@@ -4,6 +4,7 @@ package layer
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 // LayerNorm implements layer normalization.
@@ -46,6 +47,9 @@ type LayerNorm struct {
 	bufGamma  *MetalBuffer
 	bufBeta   *MetalBuffer
 	bufGradIn *MetalBuffer
+
+	// Arena protection
+	arenaMu sync.Mutex
 }
 
 // NewLayerNorm creates a new layer normalization layer.
@@ -165,6 +169,7 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 	}
 
 	if arena != nil && offset != nil {
+		l.arenaMu.Lock()
 		l.arena = *arena
 		// Save input, means and stds to arena
 		total := len(x)
@@ -187,6 +192,7 @@ func (l *LayerNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int)
 		l.savedStdOffsets = append(l.savedStdOffsets, *offset)
 		l.inputStds = (*arena)[*offset : *offset+numSamples]
 		*offset += numSamples
+		l.arenaMu.Unlock()
 	} else {
 		if len(l.inputMeans) < numSamples {
 			l.inputMeans = make([]float32, numSamples)

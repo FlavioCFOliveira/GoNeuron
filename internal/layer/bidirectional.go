@@ -20,6 +20,9 @@ type Bidirectional struct {
 	forwardHistory  [][]float32
 	backwardHistory [][]float32
 	timeStep        int
+
+	// Arena protection
+	arenaMu sync.Mutex
 }
 
 // NewBidirectional creates a new bidirectional wrapper for the given layer.
@@ -59,9 +62,10 @@ func (b *Bidirectional) SetTraining(training bool) {
 }
 
 func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
-	// Store input for backward pass
+	// Store input for backward pass - protegido por mutex
 	var input []float32
 	if arena != nil && offset != nil {
+		b.arenaMu.Lock()
 		inSize := len(x)
 		if len(*arena) < *offset+inSize {
 			newArena := make([]float32, (*offset+inSize)*2)
@@ -71,6 +75,7 @@ func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *
 		input = (*arena)[*offset : *offset+inSize]
 		copy(input, x)
 		*offset += inSize
+		b.arenaMu.Unlock()
 	} else {
 		input = make([]float32, len(x))
 		copy(input, x)
@@ -92,9 +97,10 @@ func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *
 		}
 	}
 
-	// Store forward output history
+	// Store forward output history - protegido por mutex
 	var fOutCopy []float32
 	if arena != nil && offset != nil {
+		b.arenaMu.Lock()
 		outSize := len(fOut)
 		if len(*arena) < *offset+outSize {
 			newArena := make([]float32, (*offset+outSize)*2)
@@ -104,6 +110,7 @@ func (b *Bidirectional) ForwardWithArena(x []float32, arena *[]float32, offset *
 		fOutCopy = (*arena)[*offset : *offset+outSize]
 		copy(fOutCopy, fOut)
 		*offset += outSize
+		b.arenaMu.Unlock()
 	} else {
 		fOutCopy = make([]float32, len(fOut))
 		copy(fOutCopy, fOut)

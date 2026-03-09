@@ -4,6 +4,7 @@ package layer
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 // RMSNorm implements Root Mean Square Layer Normalization.
@@ -38,6 +39,9 @@ type RMSNorm struct {
 	bufOut    *MetalBuffer
 	bufGamma  *MetalBuffer
 	bufGradIn *MetalBuffer
+
+	// Arena protection
+	arenaMu sync.Mutex
 }
 
 // NewRMSNorm creates a new RMS normalization layer.
@@ -133,6 +137,7 @@ func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) (
 	}
 
 	if arena != nil && offset != nil {
+		r.arenaMu.Lock()
 		r.arena = *arena
 		total := len(x)
 		required := total + numSamples
@@ -150,6 +155,7 @@ func (r *RMSNorm) ForwardWithArena(x []float32, arena *[]float32, offset *int) (
 		r.savedRMSOffsets = append(r.savedRMSOffsets, *offset)
 		r.rmsBuf = (*arena)[*offset : *offset+numSamples]
 		*offset += numSamples
+		r.arenaMu.Unlock()
 	} else {
 		if len(r.rmsBuf) < numSamples {
 			r.rmsBuf = make([]float32, numSamples)
