@@ -37,7 +37,7 @@ func TestMultiHeadAttention(t *testing.T) {
 	dim := 16
 	numHeads := 4
 	seqLen := 5
-	mha , _ := NewMultiHeadAttention(dim, numHeads, seqLen, false)
+	mha := NewMultiHeadAttention(dim, numHeads, seqLen, false)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {
@@ -54,7 +54,7 @@ func TestMultiHeadAttentionCausal(t *testing.T) {
 	dim := 8
 	numHeads := 2
 	seqLen := 4
-	mha , _ := NewMultiHeadAttention(dim, numHeads, seqLen, true)
+	mha := NewMultiHeadAttention(dim, numHeads, seqLen, true)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {

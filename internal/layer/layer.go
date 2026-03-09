@@ -4,10 +4,11 @@ package layer
 import (
 	"errors"
 	"fmt"
+	"math"
+	"math/bits"
 	"sync"
 
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
-	"math"
 )
 
 // Common errors for layer operations.
@@ -19,6 +20,42 @@ var (
 	ErrIndexOutOfBounds   = errors.New("index out of bounds")
 	ErrInvalidShape       = errors.New("invalid shape")
 )
+
+// maxBufferSize defines the maximum allowed buffer size to prevent memory exhaustion
+const maxBufferSize = 1 << 30 // 1 billion elements (~4GB for float32)
+
+// ErrBufferTooLarge is returned when a buffer size exceeds the maximum allowed
+var ErrBufferTooLarge = fmt.Errorf("buffer size exceeds maximum allowed (%d elements)", maxBufferSize)
+
+// CheckOverflow checks if the multiplication of two positive integers would overflow
+// or exceed the maximum buffer size. Returns the product and an error if overflow occurs.
+func CheckOverflow(a, b int) (int, error) {
+	if a <= 0 || b <= 0 {
+		return 0, nil
+	}
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	if hi != 0 || lo > uint64(maxBufferSize) {
+		return 0, ErrBufferTooLarge
+	}
+	return int(lo), nil
+}
+
+// CheckOverflowSum checks if the sum of multiple integers would overflow.
+// Returns the sum and an error if overflow occurs.
+func CheckOverflowSum(values ...int) (int, error) {
+	var sum int
+	for _, v := range values {
+		if v < 0 {
+			return 0, fmt.Errorf("negative value in sum: %d", v)
+		}
+		newSum := sum + v
+		if newSum < sum {
+			return 0, ErrBufferTooLarge
+		}
+		sum = newSum
+	}
+	return sum, nil
+}
 
 // RNG is a simple, fast random number generator using LCG for deterministic behavior.
 type RNG struct {
@@ -92,7 +129,8 @@ type Layer interface {
 type DeferredLayer interface {
 	Layer
 	// Build initializes the layer with the given input size.
-	Build(inSize int)
+	// Returns error if overflow is detected in buffer calculations.
+	Build(inSize int) error
 }
 
 // ArenaLayer is an optional interface for layers that support zero-allocation activation saving.

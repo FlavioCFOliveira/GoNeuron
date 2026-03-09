@@ -8,7 +8,7 @@ import (
 func TestSwiGLU(t *testing.T) {
 	in := 4
 	out := 2
-	s := NewSwiGLU(in, out)
+	s, _ := NewSwiGLU(in, out)
 
 	x := []float32{1, 2, 3, 4}
 
@@ -31,7 +31,7 @@ func TestSwiGLU(t *testing.T) {
 func TestSwiGLUMathematics(t *testing.T) {
 	in := 1
 	out := 1
-	s := NewSwiGLU(in, out)
+	s, _ := NewSwiGLU(in, out)
 
 	// Set parameters manually
 	// w=2, v=3

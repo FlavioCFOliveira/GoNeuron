@@ -527,3 +527,21 @@ type LogField = logger.Field
 func Log(key string, value interface{}) LogField {
 	return logger.F(key, value)
 }
+
+// ArgMax returns the index of the maximum value in the slice.
+// Returns -1 if the slice is empty or nil.
+// Safe bounds checking is performed.
+func ArgMax(v []float32) int {
+	if len(v) == 0 {
+		return -1
+	}
+	maxIdx := 0
+	maxVal := v[0]
+	for i := 1; i < len(v); i++ {
+		if v[i] > maxVal {
+			maxVal = v[i]
+			maxIdx = i
+		}
+	}
+	return maxIdx
+}

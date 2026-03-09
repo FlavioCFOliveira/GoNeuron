@@ -299,7 +299,7 @@ func TestDivisionByZeroProtection(t *testing.T) {
 	})
 
 	t.Run("RMSNorm with zero input", func(t *testing.T) {
-		l := NewRMSNorm(4, 1e-5)
+		l, _ := NewRMSNorm(4, 1e-5)
 
 		// All zeros input
 		x := []float32{0, 0, 0, 0}

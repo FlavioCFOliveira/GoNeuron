@@ -658,18 +658,22 @@ func TestLSTMForgetGateBias(t *testing.T) {
 
 // TestLayerInheritance tests layer type checking.
 func TestLayerInheritance(t *testing.T) {
-	var d Layer = NewDense(2, 2, activations.Tanh{})
-	var c Layer = NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
-	var l Layer = NewLSTM(2, 3)
+	d, _ := NewDense(2, 2, activations.Tanh{})
+	c, _ := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
+	l, _ := NewLSTM(2, 3)
+
+	var dLayer Layer = d
+	var cLayer Layer = c
+	var lLayer Layer = l
 
 	// Test type assertions
-	if _, ok := d.(*Dense); !ok {
+	if _, ok := dLayer.(*Dense); !ok {
 		t.Error("Dense is not *Dense")
 	}
-	if _, ok := c.(*Conv2D); !ok {
+	if _, ok := cLayer.(*Conv2D); !ok {
 		t.Error("Conv2D is not *Conv2D")
 	}
-	if _, ok := l.(*LSTM); !ok {
+	if _, ok := lLayer.(*LSTM); !ok {
 		t.Error("LSTM is not *LSTM")
 	}
 }

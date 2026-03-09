@@ -48,7 +48,7 @@ func NewPositionalEncoding(seqLen, dim int) (*PositionalEncoding, error) {
 	return p, nil
 }
 
-func (p *PositionalEncoding) Build(inSize int) {
+func (p *PositionalEncoding) Build(inSize int) error {
 	if p.dim == -1 {
 		p.dim = inSize / p.seqLen
 	}
@@ -64,6 +64,7 @@ func (p *PositionalEncoding) Build(inSize int) {
 
 	p.outputBuf = make([]float32, seqLen*dim)
 	p.gradBuf = make([]float32, seqLen*dim)
+	return nil
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -312,7 +313,7 @@ func NewMultiHeadAttentionE(dim, numHeads, seqLen int, causal bool) (*MultiHeadA
 	return m, nil
 }
 
-func (m *MultiHeadAttention) Build(inSize int) {
+func (m *MultiHeadAttention) Build(inSize int) error {
 	if m.dim == -1 {
 		if inSize%m.seqLen == 0 && inSize > m.seqLen {
 			m.dim = inSize / m.seqLen
@@ -323,8 +324,7 @@ func (m *MultiHeadAttention) Build(inSize int) {
 		if m.headDim*m.numHeads != m.dim {
 			// Cannot return error from Build(), so we log and set to invalid state
 			// This will be caught in Forward with a proper error
-			m.dim = -1 // Mark as invalid
-			return
+			return fmt.Errorf("MultiHeadAttention: dim not divisible by numHeads")
 		}
 	}
 
@@ -365,6 +365,7 @@ func (m *MultiHeadAttention) Build(inSize int) {
 	m.gradQBuf = make([]float32, seqLen*dim)
 	m.gradKBuf = make([]float32, seqLen*dim)
 	m.gradVBuf = make([]float32, seqLen*dim)
+	return nil
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -932,7 +933,7 @@ func NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim int, causal bool, actT
 	return t, nil
 }
 
-func (t *TransformerBlock) Build(inSize int) {
+func (t *TransformerBlock) Build(inSize int) error {
 	if t.dim == -1 {
 		if inSize%t.seqLen == 0 && inSize > t.seqLen {
 			t.dim = inSize / t.seqLen
@@ -1004,6 +1005,7 @@ func (t *TransformerBlock) Build(inSize int) {
 	t.combinedGradBuf = make([]float32, seqLen*dim)
 	t.gradRes1Buf = make([]float32, seqLen*dim)
 	t.gradInBuf = make([]float32, seqLen*dim)
+	return nil
 }
 
 // SetTraining sets whether the layer is in training mode.

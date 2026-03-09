@@ -574,16 +574,15 @@ func TestGradientShapes(t *testing.T) {
 		inputSize        int
 		expectedGradSize int // For recurrent layers, grad size may differ from input size
 	}{
-		{"Dense", d, _ := NewDense(4, 3, activations.ReLU{})
-	layers = append(layers, d), 4, 4},
+		{"Dense", func() Layer { l, _ := NewDense(4, 3, activations.ReLU{}); l.Build(4); return l }(), 4, 4},
 		{"Conv2D", func() Layer { l , _ := NewConv2D(1, 2, 3, 1, 0, activations.ReLU{}); l.Build(1); return l }(), 9, 9},
 		// LSTM/GRU process one timestep at a time: input size = inSize, output size = outSize
 		// Backward returns gradient w.r.t input (inSize), not the full sequence
-		{"LSTM", NewLSTM(3, 2), 3, 3},
-		{"GRU", NewGRU(3, 2), 3, 3},
-		{"Embedding", NewEmbedding(10, 4), 3, 3},
+		{"LSTM", func() Layer { l, _ := NewLSTM(3, 2); return l }(), 3, 3},
+		{"GRU", func() Layer { l, _ := NewGRU(3, 2); return l }(), 3, 3},
+		{"Embedding", func() Layer { l, _ := NewEmbedding(10, 4); return l }(), 3, 3},
 		{"Flatten", func() Layer { l, _ := NewFlatten(); l.Build(12); return l }(), 12, 12},
-		{"Dropout", NewDropout(0.5, 10), 10, 10},
+		{"Dropout", func() Layer { l, _ := NewDropout(0.5, 10); return l }(), 10, 10},
 	}
 
 	for _, tt := range tests {
@@ -955,7 +954,7 @@ func TestLayerNormNumericalGradient(t *testing.T) {
 
 // TestRMSNormNumericalGradient validates RMSNorm gradients using finite differences.
 func TestRMSNormNumericalGradient(t *testing.T) {
-	l := NewRMSNorm(4, 1e-5)
+	l, _ := NewRMSNorm(4, 1e-5)
 
 	// Initialize with small weights
 	params := l.Params()

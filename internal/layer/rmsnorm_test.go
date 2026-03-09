@@ -8,7 +8,7 @@ import (
 func TestRMSNorm(t *testing.T) {
 	dim := 4
 	eps := float32(1e-5)
-	ln := NewRMSNorm(dim, eps)
+	ln, _ := NewRMSNorm(dim, eps)
 
 	x := []float32{1, 2, 3, 4}
 
@@ -39,7 +39,7 @@ func TestRMSNorm(t *testing.T) {
 func TestRMSNormBackward(t *testing.T) {
 	dim := 8
 	eps := float32(1e-5)
-	l := NewRMSNorm(dim, eps)
+	l, _ := NewRMSNorm(dim, eps)
 
 	x := make([]float32, dim)
 	for i := range x {

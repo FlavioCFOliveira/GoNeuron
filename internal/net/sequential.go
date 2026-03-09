@@ -22,18 +22,23 @@ func NewSequential(layers ...layer.Layer) *Sequential {
 }
 
 // Compile configures the model for training.
-func (s *Sequential) Compile(optimizer opt.Optimizer, lossFn loss.Loss) {
+// Returns error if build fails due to overflow or invalid dimensions.
+func (s *Sequential) Compile(optimizer opt.Optimizer, lossFn loss.Loss) error {
 	s.opt = optimizer
 	s.loss = lossFn
 
 	// If first layer has size, we can build immediately
 	if len(s.layers) > 0 && s.layers[0].InSize() > 0 {
-		s.Build(s.layers[0].InSize())
+		if err := s.Build(s.layers[0].InSize()); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Build performs shape inference and initializes buffers.
-func (s *Sequential) Build(firstInSize int) {
+// Returns error if overflow is detected in buffer calculations.
+func (s *Sequential) Build(firstInSize int) error {
 	lastOutSize := firstInSize
 	var lastH, lastW int
 
@@ -63,7 +68,9 @@ func (s *Sequential) Build(firstInSize int) {
 		if dl, ok := l.(layer.DeferredLayer); ok {
 			// Always build deferred layers to ensure correct dimensions
 			// This is important for complex layers like MoE that contain sub-layers
-			dl.Build(buildSize)
+			if err := dl.Build(buildSize); err != nil {
+				return fmt.Errorf("failed to build layer: %w", err)
+			}
 		}
 		lastOutSize = l.OutSize()
 
@@ -76,6 +83,7 @@ func (s *Sequential) Build(firstInSize int) {
 	}
 
 	s.initBuffers()
+	return nil
 }
 
 func (s *Sequential) checkDeferredBuild(x []float32) {

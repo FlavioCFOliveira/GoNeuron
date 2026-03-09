@@ -9,7 +9,7 @@ import (
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
 
-// Max gradient norm for clipping
+// maxGradientNorm for gradient clipping
 const maxGradientNorm = 1.0
 
 // LSTM is a Long Short-Term Memory layer optimized for performance.
@@ -131,29 +131,52 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) (*LSTM, error) {
 	}
 
 	if inSize != -1 {
-		l.Build(inSize)
+		if err := l.Build(inSize); err != nil {
+			return nil, err
+		}
 	}
 
 	return l, nil
 }
 
 // Build initializes the layer with the given input size.
-func (l *LSTM) Build(inSize int) {
+// Returns error if overflow is detected in buffer size calculations.
+func (l *LSTM) Build(inSize int) error {
 	l.inSize = inSize
 	outSize := l.outSize
 
 	if inSize <= 0 || outSize <= 0 {
-		return
+		return fmt.Errorf("invalid dimensions: inSize=%d, outSize=%d", inSize, outSize)
 	}
+
+	// Check for overflow in weight calculations using math/bits
+	// weightInSize = outSize * 4 * inSize
+	if _, err := CheckOverflow(outSize*4, inSize); err != nil {
+		return fmt.Errorf("weight input size overflow: %w", err)
+	}
+	weightInSize := outSize * 4 * inSize
+
+	// weightRecSize = outSize * 4 * outSize
+	if _, err := CheckOverflow(outSize*4, outSize); err != nil {
+		return fmt.Errorf("weight recurrent size overflow: %w", err)
+	}
+	weightRecSize := outSize * 4 * outSize
+
+	// biasSize = outSize * 4
+	if _, err := CheckOverflow(outSize, 4); err != nil {
+		return fmt.Errorf("bias size overflow: %w", err)
+	}
+	biasSize := outSize * 4
+
+	// totalParams = weightInSize + weightRecSize + biasSize
+	if _, err := CheckOverflowSum(weightInSize, weightRecSize, biasSize); err != nil {
+		return fmt.Errorf("total params overflow: %w", err)
+	}
+	totalParams := weightInSize + weightRecSize + biasSize
 
 	// Xavier/Glorot initialization for LSTM with 4 gates
 	inputScale := float32(math.Sqrt(2.0 / float64(inSize+4*outSize)))
 	recurrentScale := float32(math.Sqrt(2.0 / float64(outSize+4*outSize)))
-
-	weightInSize := outSize * 4 * inSize
-	weightRecSize := outSize * 4 * outSize
-	biasSize := outSize * 4
-	totalParams := weightInSize + weightRecSize + biasSize
 	l.params = make([]float32, totalParams)
 
 	l.inputWeights = l.params[:weightInSize]
@@ -214,6 +237,8 @@ func (l *LSTM) Build(inSize int) {
 		l.bufO = metal.CreateEmptyBuffer(outSize)
 		l.bufX = metal.CreateEmptyBuffer(inSize)
 	}
+
+	return nil
 }
 
 // Reset resets the LSTM state for a new sequence.

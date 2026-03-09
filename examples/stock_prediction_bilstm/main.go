@@ -181,7 +181,6 @@ func main() {
 	network.Fit(xTrain, yTrain, epochs, batchSize, net.Logger{Interval: 100})
 
 	// Evaluation
-	network.SetTraining(false)
 	predictions, err := network.ForwardBatch(xTest)
 	if err != nil {
 		log.Fatalf("Failed to predict: %v", err)
