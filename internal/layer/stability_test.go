@@ -23,7 +23,7 @@ func TestDenseNumericalStability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := NewDense(4, 3, activations.Tanh{})
+			l , _ := NewDense(4, 3, activations.Tanh{})
 
 			// Initialize weights with small values for stability
 			params := l.Params()
@@ -93,7 +93,7 @@ func TestConv2DNumericalStability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := NewConv2D(1, 2, 3, 1, 1, activations.ReLU{})
+			l , _ := NewConv2D(1, 2, 3, 1, 1, activations.ReLU{})
 			l.Build(1)
 
 			// Initialize with small weights
@@ -136,7 +136,7 @@ func TestLSTMNumericalStability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := NewLSTM(3, 2)
+			l , _ := NewLSTM(3, 2)
 
 			// Initialize with small weights
 			params := l.Params()
@@ -181,7 +181,7 @@ func TestBatchNormNumericalStability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := NewBatchNorm2D(2, 1e-5, 0.1, true)
+			l , _ := NewBatchNorm2D(2, 1e-5, 0.1, true)
 			l.ClearGradients()
 			l.SetTraining(true)
 
@@ -262,7 +262,7 @@ func TestActivationsNumericalStability(t *testing.T) {
 // TestDivisionByZeroProtection tests protection against division by zero.
 func TestDivisionByZeroProtection(t *testing.T) {
 	t.Run("BatchNorm with zero variance", func(t *testing.T) {
-		l := NewBatchNorm2D(2, 1e-5, 0.1, true)
+		l , _ := NewBatchNorm2D(2, 1e-5, 0.1, true)
 
 		// Input with zero variance (all same values)
 		x := []float32{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}
@@ -282,7 +282,7 @@ func TestDivisionByZeroProtection(t *testing.T) {
 	})
 
 	t.Run("LayerNorm with single element", func(t *testing.T) {
-		l := NewLayerNorm(1, 1e-5, true)
+		l , _ := NewLayerNorm(1, 1e-5, true)
 
 		// Single element input
 		x := []float32{5.0}
@@ -321,14 +321,14 @@ func TestDivisionByZeroProtection(t *testing.T) {
 // TestEdgeCases tests various edge cases.
 func TestEdgeCases(t *testing.T) {
 	t.Run("Empty input Dense", func(t *testing.T) {
-		l := NewDense(0, 2, activations.ReLU{})
+		l , _ := NewDense(0, 2, activations.ReLU{})
 		if l != nil {
 			t.Error("Dense should return nil for zero input size")
 		}
 	})
 
 	t.Run("Single element Dense", func(t *testing.T) {
-		l := NewDense(1, 1, activations.ReLU{})
+		l , _ := NewDense(1, 1, activations.ReLU{})
 		x := []float32{0.5}
 
 		output, err := l.Forward(x)
@@ -342,7 +342,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Large batch simulation", func(t *testing.T) {
-		l := NewDense(100, 50, activations.ReLU{})
+		l , _ := NewDense(100, 50, activations.ReLU{})
 
 		// Large input
 		x := make([]float32, 100)

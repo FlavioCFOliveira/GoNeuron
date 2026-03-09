@@ -7,7 +7,7 @@ import (
 
 func TestEmbeddingForward(t *testing.T) {
 	// Test basic embedding lookup
-	emb := NewEmbedding(5, 3)
+	emb , _ := NewEmbedding(5, 3)
 
 	// Input indices
 	input := []float32{0, 2, 4}
@@ -34,7 +34,7 @@ func TestEmbeddingForward(t *testing.T) {
 }
 
 func TestEmbeddingBackward(t *testing.T) {
-	emb := NewEmbedding(5, 3)
+	emb , _ := NewEmbedding(5, 3)
 
 	input := []float32{0, 2, 4}
 	emb.Forward(input)
@@ -93,7 +93,7 @@ func TestEmbeddingBackward(t *testing.T) {
 }
 
 func TestEmbeddingParams(t *testing.T) {
-	emb := NewEmbedding(4, 2)
+	emb , _ := NewEmbedding(4, 2)
 
 	// Test Params and SetParams
 	params := emb.Params()
@@ -118,7 +118,7 @@ func TestEmbeddingParams(t *testing.T) {
 }
 
 func TestEmbeddingInOutSize(t *testing.T) {
-	emb := NewEmbedding(10, 5)
+	emb , _ := NewEmbedding(10, 5)
 
 	if emb.InSize() != 10 {
 		t.Errorf("InSize = %d, expected 10", emb.InSize())
@@ -129,7 +129,7 @@ func TestEmbeddingInOutSize(t *testing.T) {
 }
 
 func TestEmbeddingGetWeight(t *testing.T) {
-	emb := NewEmbedding(3, 4)
+	emb , _ := NewEmbedding(3, 4)
 
 	// Get specific weight
 	weight := emb.GetWeight(1)
@@ -148,7 +148,7 @@ func TestEmbeddingGetWeight(t *testing.T) {
 }
 
 func TestEmbeddingSetWeight(t *testing.T) {
-	emb := NewEmbedding(3, 4)
+	emb , _ := NewEmbedding(3, 4)
 
 	// Set specific weight
 	newWeight := []float32{1, 2, 3, 4}
@@ -164,7 +164,7 @@ func TestEmbeddingSetWeight(t *testing.T) {
 }
 
 func TestEmbeddingOutOfBounds(t *testing.T) {
-	emb := NewEmbedding(3, 2)
+	emb , _ := NewEmbedding(3, 2)
 
 	// Use out-of-bounds index
 	input := []float32{100}
@@ -180,7 +180,7 @@ func TestEmbeddingOutOfBounds(t *testing.T) {
 }
 
 func TestEmbeddingBatch(t *testing.T) {
-	emb := NewEmbedding(5, 3)
+	emb , _ := NewEmbedding(5, 3)
 
 	// Batch of 4 indices
 	input := []float32{0, 1, 2, 3}
@@ -206,7 +206,7 @@ func TestEmbeddingBatch(t *testing.T) {
 }
 
 func TestEmbeddingReset(t *testing.T) {
-	emb := NewEmbedding(3, 2)
+	emb , _ := NewEmbedding(3, 2)
 
 	input := []float32{0, 1}
 	emb.Forward(input)
@@ -221,7 +221,7 @@ func TestEmbeddingReset(t *testing.T) {
 }
 
 func BenchmarkEmbeddingForward(b *testing.B) {
-	emb := NewEmbedding(10000, 128)
+	emb , _ := NewEmbedding(10000, 128)
 
 	// Batch of 32 indices
 	input := make([]float32, 32)
@@ -236,7 +236,7 @@ func BenchmarkEmbeddingForward(b *testing.B) {
 }
 
 func BenchmarkEmbeddingBackward(b *testing.B) {
-	emb := NewEmbedding(10000, 128)
+	emb , _ := NewEmbedding(10000, 128)
 
 	input := make([]float32, 32)
 	for i := range input {

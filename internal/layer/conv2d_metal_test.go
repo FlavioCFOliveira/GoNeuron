@@ -20,8 +20,8 @@ func TestMetalConv2D(t *testing.T) {
 	inH, inW := 8, 8
 
 	// Create layers: one for CPU (reference) and one for Metal
-	convCPU := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
-	convMetal := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
+	convCPU , _ := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
+	convMetal , _ := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
 
 	// Sync parameters
 	convMetal.SetParams(convCPU.Params())
@@ -96,8 +96,8 @@ func TestMetalConv2DBatch(t *testing.T) {
 	padding := 1
 	inH, inW := 10, 10
 
-	convCPU := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
-	convMetal := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
+	convCPU , _ := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
+	convMetal , _ := NewConv2D(inChannels, outChannels, kernelSize, stride, padding, activations.Linear{})
 
 	convMetal.SetParams(convCPU.Params())
 	convMetal.SetDevice(metal)

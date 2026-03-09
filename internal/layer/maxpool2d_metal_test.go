@@ -18,8 +18,8 @@ func TestMetalMaxPool2D(t *testing.T) {
 	inH, inW := 4, 4
 
 	// Create layers
-	poolCPU := NewMaxPool2D(inChannels, kernelSize, stride, padding)
-	poolMetal := NewMaxPool2D(inChannels, kernelSize, stride, padding)
+	poolCPU , _ := NewMaxPool2D(inChannels, kernelSize, stride, padding)
+	poolMetal , _ := NewMaxPool2D(inChannels, kernelSize, stride, padding)
 
 	poolMetal.SetDevice(metal)
 
@@ -81,8 +81,8 @@ func TestMetalMaxPool2DBatch(t *testing.T) {
 	padding := 0
 	inH, inW := 4, 4
 
-	poolCPU := NewMaxPool2D(inChannels, kernelSize, stride, padding)
-	poolMetal := NewMaxPool2D(inChannels, kernelSize, stride, padding)
+	poolCPU , _ := NewMaxPool2D(inChannels, kernelSize, stride, padding)
+	poolMetal , _ := NewMaxPool2D(inChannels, kernelSize, stride, padding)
 
 	poolMetal.SetDevice(metal)
 

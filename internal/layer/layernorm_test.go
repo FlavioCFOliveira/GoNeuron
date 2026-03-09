@@ -7,7 +7,7 @@ import (
 
 func TestLayerNormForward(t *testing.T) {
 	// Test layer normalization with affine transformation
-	ln := NewLayerNorm(4, 1e-5, true)
+	ln , _ := NewLayerNorm(4, 1e-5, true)
 
 	// Input: [1, 2, 3, 4]
 	// Mean = 2.5, Std = sqrt(1.25) ≈ 1.118
@@ -36,7 +36,7 @@ func TestLayerNormForward(t *testing.T) {
 
 func TestLayerNormWithAffine(t *testing.T) {
 	// Test with custom gamma and beta
-	ln := NewLayerNorm(4, 1e-5, true)
+	ln , _ := NewLayerNorm(4, 1e-5, true)
 
 	// Set gamma = [2, 2, 2, 2], beta = [1, 1, 1, 1]
 	// After normalization, output = 2 * normalized + 1
@@ -67,7 +67,7 @@ func TestLayerNormWithAffine(t *testing.T) {
 
 func TestLayerNormWithoutAffine(t *testing.T) {
 	// Test without affine transformation
-	ln := NewLayerNorm(4, 1e-5, false)
+	ln , _ := NewLayerNorm(4, 1e-5, false)
 
 	input := []float32{1, 2, 3, 4}
 	output, _ := ln.Forward(input)
@@ -97,7 +97,7 @@ func TestLayerNormWithoutAffine(t *testing.T) {
 
 func TestLayerNormBatch(t *testing.T) {
 	// Test with batch input: 2 samples of 4 features each
-	ln := NewLayerNorm(4, 1e-5, false)
+	ln , _ := NewLayerNorm(4, 1e-5, false)
 
 	// Input: [1, 2, 3, 4, 5, 6, 7, 8] (2 batches of 4)
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8}
@@ -123,7 +123,7 @@ func TestLayerNormBatch(t *testing.T) {
 }
 
 func TestLayerNormBackward(t *testing.T) {
-	ln := NewLayerNorm(4, 1e-5, false)
+	ln , _ := NewLayerNorm(4, 1e-5, false)
 
 	input := []float32{1, 2, 3, 4}
 	ln.Forward(input)
@@ -145,7 +145,7 @@ func TestLayerNormBackward(t *testing.T) {
 }
 
 func TestLayerNormParams(t *testing.T) {
-	ln := NewLayerNorm(4, 1e-5, true)
+	ln , _ := NewLayerNorm(4, 1e-5, true)
 
 	// Test Params and SetParams
 	params := ln.Params()
@@ -170,7 +170,7 @@ func TestLayerNormParams(t *testing.T) {
 }
 
 func TestLayerNormInOutSize(t *testing.T) {
-	ln := NewLayerNorm(10, 1e-5, false)
+	ln , _ := NewLayerNorm(10, 1e-5, false)
 
 	if ln.InSize() != 10 {
 		t.Errorf("InSize = %d, expected 10", ln.InSize())
@@ -181,7 +181,7 @@ func TestLayerNormInOutSize(t *testing.T) {
 }
 
 func TestLayerNormEps(t *testing.T) {
-	ln := NewLayerNorm(4, float32(1e-6), false)
+	ln , _ := NewLayerNorm(4, float32(1e-6), false)
 
 	if ln.GetEps() != 1e-6 {
 		t.Errorf("Eps = %f, expected 1e-6", ln.GetEps())
@@ -190,7 +190,7 @@ func TestLayerNormEps(t *testing.T) {
 
 func TestLayerNormNumericalStability(t *testing.T) {
 	// Test with constant input (zero variance)
-	ln := NewLayerNorm(4, 1e-5, false)
+	ln , _ := NewLayerNorm(4, 1e-5, false)
 
 	input := []float32{5, 5, 5, 5}
 	output, _ := ln.Forward(input)
@@ -204,7 +204,7 @@ func TestLayerNormNumericalStability(t *testing.T) {
 }
 
 func BenchmarkLayerNormForward(b *testing.B) {
-	ln := NewLayerNorm(1024, 1e-5, true)
+	ln , _ := NewLayerNorm(1024, 1e-5, true)
 
 	input := make([]float32, 1024)
 	for i := range input {
@@ -218,7 +218,7 @@ func BenchmarkLayerNormForward(b *testing.B) {
 }
 
 func BenchmarkLayerNormBackward(b *testing.B) {
-	ln := NewLayerNorm(1024, 1e-5, true)
+	ln , _ := NewLayerNorm(1024, 1e-5, true)
 
 	input := make([]float32, 1024)
 	for i := range input {

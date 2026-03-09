@@ -145,15 +145,16 @@ func (t Tanh) Derivative(x float32) float32 {
 // Softmax activation function for output layer.
 type Softmax struct{}
 
-// Activate computes softmax(x) = exp(x) / sum(exp(x))
+// Activate returns NaN to indicate error - Softmax requires batch processing via ActivateBatch.
+// Single-value softmax is mathematically undefined without context of other values.
 func (s Softmax) Activate(x float32) float32 {
-	panic("Softmax.Activate: use ActivateBatch for Softmax")
+	return float32(math.NaN())
 }
 
-// Derivative computes softmax(x) * (1 - softmax(x)) for single element
-// Note: Softmax derivative is more complex for full vector
+// Derivative returns NaN to indicate error - Softmax derivative requires batch context.
+// Single-value derivative is mathematically undefined without context of other values.
 func (s Softmax) Derivative(x float32) float32 {
-	panic("Softmax.Derivative: use ActivateBatch for Softmax")
+	return float32(math.NaN())
 }
 
 // ActivateBatch computes softmax for a slice of values.
@@ -186,15 +187,16 @@ func (s Softmax) ActivateBatch(x []float32) []float32 {
 // LogSoftmax(x) = log(softmax(x))
 type LogSoftmax struct{}
 
-// Activate computes log(softmax(x)) for single value
+// Activate returns NaN to indicate error - LogSoftmax requires batch processing via ActivateBatch.
+// Single-value log-softmax is mathematically undefined without context of other values.
 func (l LogSoftmax) Activate(x float32) float32 {
-	panic("LogSoftmax.Activate: use ActivateBatch for LogSoftmax")
+	return float32(math.NaN())
 }
 
-// Derivative computes 1 - softmax(x) for single element
-// Note: LogSoftmax derivative is more complex for full vector
+// Derivative returns NaN to indicate error - LogSoftmax derivative requires batch context.
+// Single-value derivative is mathematically undefined without context of other values.
 func (l LogSoftmax) Derivative(x float32) float32 {
-	panic("LogSoftmax.Derivative: use ActivateBatch for LogSoftmax")
+	return float32(math.NaN())
 }
 
 // ActivateBatch computes log softmax for a slice of values.

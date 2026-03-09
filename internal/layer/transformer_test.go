@@ -7,7 +7,7 @@ import (
 func TestPositionalEncoding(t *testing.T) {
 	seqLen := 5
 	dim := 8
-	pe := NewPositionalEncoding(seqLen, dim)
+	pe , _ := NewPositionalEncoding(seqLen, dim)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {
@@ -37,7 +37,7 @@ func TestMultiHeadAttention(t *testing.T) {
 	dim := 16
 	numHeads := 4
 	seqLen := 5
-	mha := NewMultiHeadAttention(dim, numHeads, seqLen, false)
+	mha , _ := NewMultiHeadAttention(dim, numHeads, seqLen, false)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {
@@ -54,7 +54,7 @@ func TestMultiHeadAttentionCausal(t *testing.T) {
 	dim := 8
 	numHeads := 2
 	seqLen := 4
-	mha := NewMultiHeadAttention(dim, numHeads, seqLen, true)
+	mha , _ := NewMultiHeadAttention(dim, numHeads, seqLen, true)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {
@@ -86,7 +86,7 @@ func TestTransformerBlock(t *testing.T) {
 	numHeads := 4
 	seqLen := 5
 	ffDim := 32
-	tb := NewTransformerBlock(dim, numHeads, seqLen, ffDim, false)
+	tb , _ := NewTransformerBlock(dim, numHeads, seqLen, ffDim, false)
 
 	input := make([]float32, seqLen*dim)
 	for i := range input {
@@ -102,7 +102,7 @@ func TestTransformerBlock(t *testing.T) {
 func TestGlobalAveragePooling1D(t *testing.T) {
 	seqLen := 4
 	dim := 2
-	gap := NewGlobalAveragePooling1D(seqLen, dim)
+	gap , _ := NewGlobalAveragePooling1D(seqLen, dim)
 
 	// [[1, 2], [3, 4], [5, 6], [7, 8]]
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8}

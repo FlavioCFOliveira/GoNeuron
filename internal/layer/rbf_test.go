@@ -7,7 +7,7 @@ import (
 
 func TestRBFForward(t *testing.T) {
 	// 2 inputs, 2 centers, 1 output
-	r := NewRBF(2, 2, 1, 1.0)
+	r , _ := NewRBF(2, 2, 1, 1.0)
 
 	// Manually set centers
 	// c0 = [0, 0], c1 = [1, 1]
@@ -38,7 +38,7 @@ func TestRBFForward(t *testing.T) {
 }
 
 func TestRBFFlow(t *testing.T) {
-	r := NewRBF(2, 4, 2, 0.5)
+	r , _ := NewRBF(2, 4, 2, 0.5)
 	input := []float32{0.5, -0.5}
 
 	// Forward pass
@@ -69,7 +69,7 @@ func TestRBFFlow(t *testing.T) {
 }
 
 func TestRBFNumericalGradient(t *testing.T) {
-	r := NewRBF(2, 3, 1, 1.0)
+	r , _ := NewRBF(2, 3, 1, 1.0)
 	input := []float32{0.1, 0.2}
 
 	eps := float32(1e-4)

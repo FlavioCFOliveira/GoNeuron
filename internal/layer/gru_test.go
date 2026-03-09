@@ -7,7 +7,7 @@ import (
 
 func TestGRUForward(t *testing.T) {
 	// Test GRU forward pass with known inputs
-	gru := NewGRU(3, 5)
+	gru , _ := NewGRU(3, 5)
 
 	// Input vector
 	x := []float32{1.0, 0.5, -0.5}
@@ -29,7 +29,7 @@ func TestGRUForward(t *testing.T) {
 }
 
 func TestGRUBackward(t *testing.T) {
-	gru := NewGRU(3, 5)
+	gru , _ := NewGRU(3, 5)
 
 	// Forward pass
 	x := []float32{1.0, 0.5, -0.5}
@@ -61,7 +61,7 @@ func TestGRUBackward(t *testing.T) {
 }
 
 func TestGRUParams(t *testing.T) {
-	gru := NewGRU(4, 8)
+	gru , _ := NewGRU(4, 8)
 
 	// Test Params and SetParams
 	params := gru.Params()
@@ -90,7 +90,7 @@ func TestGRUParams(t *testing.T) {
 }
 
 func TestGRUInOutSize(t *testing.T) {
-	gru := NewGRU(10, 20)
+	gru , _ := NewGRU(10, 20)
 
 	if gru.InSize() != 10 {
 		t.Errorf("InSize = %d, expected 10", gru.InSize())
@@ -101,7 +101,7 @@ func TestGRUInOutSize(t *testing.T) {
 }
 
 func TestGRUReset(t *testing.T) {
-	gru := NewGRU(3, 5)
+	gru , _ := NewGRU(3, 5)
 
 	// Forward pass
 	x := []float32{1.0, 0.5, -0.5}
@@ -127,7 +127,7 @@ func TestGRUReset(t *testing.T) {
 
 func TestGRUSequence(t *testing.T) {
 	// Test GRU with a sequence of inputs
-	gru := NewGRU(3, 5)
+	gru , _ := NewGRU(3, 5)
 
 	// Multiple time steps
 	sequence := [][]float32{
@@ -160,7 +160,7 @@ func TestGRUSequence(t *testing.T) {
 }
 
 func TestGRUGradients(t *testing.T) {
-	gru := NewGRU(3, 5)
+	gru , _ := NewGRU(3, 5)
 
 	// Forward pass
 	x := []float32{1.0, 0.5, -0.5}
@@ -200,7 +200,7 @@ func TestGRUGradients(t *testing.T) {
 
 func TestGRUSequenceBackprop(t *testing.T) {
 	// Test BPTT with multiple time steps
-	gru := NewGRU(3, 5)
+	gru , _ := NewGRU(3, 5)
 
 	// Forward pass for sequence
 	sequence := [][]float32{
@@ -237,8 +237,8 @@ func TestGRUSequenceBackprop(t *testing.T) {
 
 func TestGRUParamsConsistency(t *testing.T) {
 	// Test that Params and SetParams are consistent
-	gru1 := NewGRU(4, 8)
-	gru2 := NewGRU(4, 8)
+	gru1 , _ := NewGRU(4, 8)
+	gru2 , _ := NewGRU(4, 8)
 
 	// Get params from gru1
 	params := gru1.Params()
@@ -260,7 +260,7 @@ func TestGRUParamsConsistency(t *testing.T) {
 }
 
 func BenchmarkGRUForward(b *testing.B) {
-	gru := NewGRU(64, 128)
+	gru , _ := NewGRU(64, 128)
 
 	// Input vector
 	x := make([]float32, 64)
@@ -275,7 +275,7 @@ func BenchmarkGRUForward(b *testing.B) {
 }
 
 func BenchmarkGRUBackward(b *testing.B) {
-	gru := NewGRU(64, 128)
+	gru , _ := NewGRU(64, 128)
 
 	// Input vector
 	x := make([]float32, 64)
@@ -297,7 +297,7 @@ func BenchmarkGRUBackward(b *testing.B) {
 }
 
 func BenchmarkGRUFull(b *testing.B) {
-	gru := NewGRU(64, 128)
+	gru , _ := NewGRU(64, 128)
 
 	// Input vector
 	x := make([]float32, 64)
@@ -313,7 +313,7 @@ func BenchmarkGRUFull(b *testing.B) {
 }
 
 func BenchmarkGRUSequence(b *testing.B) {
-	gru := NewGRU(32, 64)
+	gru , _ := NewGRU(32, 64)
 
 	// Sequence of 10 time steps
 	sequence := make([][]float32, 10)
@@ -340,7 +340,7 @@ func BenchmarkGRUSequence(b *testing.B) {
 }
 
 func BenchmarkGRUParams(b *testing.B) {
-	gru := NewGRU(128, 256)
+	gru , _ := NewGRU(128, 256)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -349,7 +349,7 @@ func BenchmarkGRUParams(b *testing.B) {
 }
 
 func BenchmarkGRUSetParams(b *testing.B) {
-	gru := NewGRU(128, 256)
+	gru , _ := NewGRU(128, 256)
 
 	params := gru.Params()
 	b.ResetTimer()

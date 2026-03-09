@@ -15,7 +15,7 @@ func TestAvgPool2DBatch(t *testing.T) {
 
 	for _, dev := range devices {
 		t.Run(dev.Type().String(), func(t *testing.T) {
-			pool := NewAvgPool2D(1, 2, 2, 0)
+			pool , _ := NewAvgPool2D(1, 2, 2, 0)
 			pool.SetDevice(dev)
 
 			batchSize := 2
@@ -73,7 +73,7 @@ func TestDropoutBatch(t *testing.T) {
 		t.Run(dev.Type().String(), func(t *testing.T) {
 			inSize := 100
 			batchSize := 2
-			dropout := NewDropout(0.5, inSize)
+			dropout , _ := NewDropout(0.5, inSize)
 			dropout.SetDevice(dev)
 			dropout.SetTraining(true)
 

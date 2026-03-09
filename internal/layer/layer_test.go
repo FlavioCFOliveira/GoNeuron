@@ -14,7 +14,7 @@ func init() {
 }
 func TestDenseForward(t *testing.T) {
 	// Create a simple layer: 2 inputs -> 2 outputs with identity weights
-	d := NewDense(2, 2, activations.Tanh{})
+	d , _ := NewDense(2, 2, activations.Tanh{})
 
 	// Set weights to identity for predictable output
 	d.SetWeight(0, 0, 1.0)
@@ -45,7 +45,7 @@ func TestDenseForward(t *testing.T) {
 
 // TestDenseBackward tests backward pass correctness.
 func TestDenseBackward(t *testing.T) {
-	d := NewDense(2, 2, activations.Tanh{})
+	d , _ := NewDense(2, 2, activations.Tanh{})
 
 	// Set weights to identity
 	d.SetWeight(0, 0, 1.0)
@@ -81,7 +81,7 @@ func TestDenseBackward(t *testing.T) {
 
 // TestDenseParamsAndSetParams tests parameter handling.
 func TestDenseParamsAndSetParams(t *testing.T) {
-	d := NewDense(3, 2, activations.Tanh{})
+	d , _ := NewDense(3, 2, activations.Tanh{})
 
 	// Get initial params
 	initialParams := d.Params()
@@ -110,7 +110,7 @@ func TestDenseParamsAndSetParams(t *testing.T) {
 
 // TestDenseGradients tests gradient computation.
 func TestDenseGradients(t *testing.T) {
-	d := NewDense(2, 2, activations.Tanh{})
+	d , _ := NewDense(2, 2, activations.Tanh{})
 
 	input := []float32{1.0, 1.0}
 	d.Forward(input)
@@ -145,7 +145,7 @@ func TestDenseGradients(t *testing.T) {
 
 // TestDenseInSizeAndOutSize tests dimension getters.
 func TestDenseInSizeAndOutSize(t *testing.T) {
-	d := NewDense(10, 5, activations.Tanh{})
+	d , _ := NewDense(10, 5, activations.Tanh{})
 
 	if d.InSize() != 10 {
 		t.Errorf("InSize() = %d, want 10", d.InSize())
@@ -157,7 +157,7 @@ func TestDenseInSizeAndOutSize(t *testing.T) {
 
 // TestDenseActivation tests activation getter.
 func TestDenseActivation(t *testing.T) {
-	d := NewDense(2, 2, activations.ReLU{})
+	d , _ := NewDense(2, 2, activations.ReLU{})
 
 	if _, ok := d.GetActivation().(activations.ReLU); !ok {
 		t.Errorf("Activation() is not ReLU")
@@ -166,7 +166,7 @@ func TestDenseActivation(t *testing.T) {
 
 // TestDenseWeightSetGet tests individual weight access.
 func TestDenseWeightSetGet(t *testing.T) {
-	d := NewDense(3, 2, activations.Tanh{})
+	d , _ := NewDense(3, 2, activations.Tanh{})
 
 	// Set a weight
 	d.SetWeight(0, 1, 3.14)
@@ -180,7 +180,7 @@ func TestDenseWeightSetGet(t *testing.T) {
 
 // TestDenseBiasSetGet tests individual bias access.
 func TestDenseBiasSetGet(t *testing.T) {
-	d := NewDense(2, 3, activations.Tanh{})
+	d , _ := NewDense(2, 3, activations.Tanh{})
 
 	// Set a bias
 	d.SetBias(1, 2.71)
@@ -195,7 +195,7 @@ func TestDenseBiasSetGet(t *testing.T) {
 // TestDenseIdentityMapping tests that dense layer can learn identity.
 func TestDenseIdentityMapping(t *testing.T) {
 	// Create a layer that should learn identity mapping
-	d := NewDense(2, 2, activations.Tanh{})
+	d , _ := NewDense(2, 2, activations.Tanh{})
 
 	// Train for identity mapping
 	for i := 0; i < 1000; i++ {
@@ -238,7 +238,7 @@ func TestDenseIdentityMapping(t *testing.T) {
 // TestConv2DForward tests convolution forward pass.
 func TestConv2DForward(t *testing.T) {
 	// Simple 1x1 convolution - just verify output shape
-	c := NewConv2D(1, 1, 1, 1, 0, activations.Tanh{})
+	c , _ := NewConv2D(1, 1, 1, 1, 0, activations.Tanh{})
 
 	// Input: 2x2
 	input := []float32{1.0, 2.0, 3.0, 4.0} // 2x2 flattened
@@ -254,7 +254,7 @@ func TestConv2DForward(t *testing.T) {
 
 // TestConv2DBackward tests convolution backward pass.
 func TestConv2DBackward(t *testing.T) {
-	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
+	c , _ := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
 
 	// Input: 4x4
 	input := make([]float32, 16)
@@ -283,7 +283,7 @@ func TestConv2DBackward(t *testing.T) {
 
 // TestConv2DParamsAndSetParams tests parameter handling.
 func TestConv2DParamsAndSetParams(t *testing.T) {
-	c := NewConv2D(2, 3, 3, 1, 1, activations.Tanh{})
+	c , _ := NewConv2D(2, 3, 3, 1, 1, activations.Tanh{})
 
 	// Expected: 3 * 2 * 3 * 3 weights + 3 biases = 57
 	expectedLen := 3*2*3*3 + 3
@@ -312,7 +312,7 @@ func TestConv2DParamsAndSetParams(t *testing.T) {
 // TestConv2DOutputShape tests output shape calculation.
 func TestConv2DOutputShape(t *testing.T) {
 	// Test with padding
-	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{}) // 3x3 kernel, stride=1, padding=1
+	c , _ := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{}) // 3x3 kernel, stride=1, padding=1
 
 	// Input: 4x4 -> should output 4x4 with padding
 	input := make([]float32, 16)
@@ -327,7 +327,7 @@ func TestConv2DOutputShape(t *testing.T) {
 
 // TestConv2DInSizeAndOutSize tests dimension getters.
 func TestConv2DInSizeAndOutSize(t *testing.T) {
-	c := NewConv2D(3, 64, 3, 1, 1, activations.Tanh{})
+	c , _ := NewConv2D(3, 64, 3, 1, 1, activations.Tanh{})
 
 	if c.InSize() != 3 {
 		t.Errorf("InSize() = %d, want 3", c.InSize())
@@ -339,7 +339,7 @@ func TestConv2DInSizeAndOutSize(t *testing.T) {
 
 // TestLSTMForward tests LSTM forward pass.
 func TestLSTMForward(t *testing.T) {
-	l := NewLSTM(2, 3) // 2 input features, 3 hidden units
+	l , _ := NewLSTM(2, 3) // 2 input features, 3 hidden units
 
 	input := []float32{1.0, 2.0}
 	output, _ := l.Forward(input)
@@ -352,7 +352,7 @@ func TestLSTMForward(t *testing.T) {
 
 // TestLSTMForwardMultipleSteps tests multi-step forward.
 func TestLSTMForwardMultipleSteps(t *testing.T) {
-	l := NewLSTM(2, 3)
+	l , _ := NewLSTM(2, 3)
 
 	input := []float32{1.0, 2.0}
 
@@ -372,7 +372,7 @@ func TestLSTMForwardMultipleSteps(t *testing.T) {
 
 // TestLSTMBackward tests LSTM backward pass.
 func TestLSTMBackward(t *testing.T) {
-	l := NewLSTM(2, 3)
+	l , _ := NewLSTM(2, 3)
 
 	input := []float32{1.0, 2.0}
 	grad := []float32{0.1, 0.1, 0.1}
@@ -391,7 +391,7 @@ func TestLSTMBackward(t *testing.T) {
 
 // TestLSTMGradients tests gradient computation.
 func TestLSTMGradients(t *testing.T) {
-	l := NewLSTM(2, 3)
+	l , _ := NewLSTM(2, 3)
 
 	input := []float32{1.0, 2.0}
 	grad := []float32{0.1, 0.1, 0.1}
@@ -415,7 +415,7 @@ func TestLSTMGradients(t *testing.T) {
 
 // TestLSTMReset tests LSTM state reset.
 func TestLSTMReset(t *testing.T) {
-	l := NewLSTM(2, 3)
+	l , _ := NewLSTM(2, 3)
 
 	input := []float32{1.0, 2.0}
 
@@ -445,7 +445,7 @@ func TestLSTMReset(t *testing.T) {
 
 // TestLSTMParamsAndSetParams tests parameter handling.
 func TestLSTMParamsAndSetParams(t *testing.T) {
-	l := NewLSTM(4, 5)
+	l , _ := NewLSTM(4, 5)
 
 	params := l.Params()
 	expectedLen := 4*5*4 + 4*5*5 + 4*5 // inputW + recurrentW + biases = 80 + 100 + 20 = 200
@@ -472,7 +472,7 @@ func TestLSTMParamsAndSetParams(t *testing.T) {
 
 // TestLSTMInSizeAndOutSize tests dimension getters.
 func TestLSTMInSizeAndOutSize(t *testing.T) {
-	l := NewLSTM(10, 20)
+	l , _ := NewLSTM(10, 20)
 
 	if l.InSize() != 10 {
 		t.Errorf("InSize() = %d, want 10", l.InSize())
@@ -487,7 +487,7 @@ func TestDenseLayerInterface(t *testing.T) {
 	var _ Layer = &Dense{}
 
 	// Verify all methods exist and can be called
-	d := NewDense(2, 2, activations.Tanh{})
+	d , _ := NewDense(2, 2, activations.Tanh{})
 
 	x := []float32{1.0, 2.0}
 	y, _ := d.Forward(x)
@@ -519,7 +519,7 @@ func TestConv2DLayerInterface(t *testing.T) {
 	var _ Layer = &Conv2D{}
 
 	// Verify all required methods exist
-	c := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
+	c , _ := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
 
 	input := make([]float32, 9)
 	output, _ := c.Forward(input)
@@ -536,7 +536,7 @@ func TestLSTMLayerInterface(t *testing.T) {
 	var _ Layer = &LSTM{}
 
 	// Verify all required methods exist
-	l := NewLSTM(2, 3)
+	l , _ := NewLSTM(2, 3)
 
 	input := []float32{1.0, 2.0}
 	output, _ := l.Forward(input)
@@ -551,7 +551,7 @@ func TestDenseZeroInput(t *testing.T) {
 	// Note: Dense layers have biases that are randomly initialized,
 	// so zero input doesn't produce exactly zero output.
 	// This test verifies that the output is small (from small random biases).
-	d := NewDense(3, 2, activations.Tanh{})
+	d , _ := NewDense(3, 2, activations.Tanh{})
 
 	input := []float32{0.0, 0.0, 0.0}
 	output, _ := d.Forward(input)
@@ -568,7 +568,7 @@ func TestDenseZeroInput(t *testing.T) {
 
 // TestDenseLargeValues tests numerical stability with large values.
 func TestDenseLargeValues(t *testing.T) {
-	d := NewDense(2, 2, activations.Tanh{})
+	d , _ := NewDense(2, 2, activations.Tanh{})
 
 	// Large input values
 	input := []float32{100.0, 100.0}
@@ -584,7 +584,7 @@ func TestDenseLargeValues(t *testing.T) {
 
 // TestConv2DMultipleChannels tests convolution with multiple channels.
 func TestConv2DMultipleChannels(t *testing.T) {
-	c := NewConv2D(3, 2, 2, 1, 0, activations.Tanh{})
+	c , _ := NewConv2D(3, 2, 2, 1, 0, activations.Tanh{})
 
 	// Input: 3 channels, 4x4 = 48 elements
 	input := make([]float32, 48)
@@ -605,7 +605,7 @@ func TestConv2DMultipleChannels(t *testing.T) {
 // TestConv2DPadding tests zero padding behavior.
 func TestConv2DPadding(t *testing.T) {
 	// Without padding: 4x4 input, 3x3 kernel -> 2x2 output
-	c1 := NewConv2D(1, 1, 3, 1, 0, activations.Tanh{})
+	c1 , _ := NewConv2D(1, 1, 3, 1, 0, activations.Tanh{})
 	input := make([]float32, 16)
 	output1, _ := c1.Forward(input)
 
@@ -614,7 +614,7 @@ func TestConv2DPadding(t *testing.T) {
 	}
 
 	// With padding: 4x4 input, 3x3 kernel, padding=1 -> 4x4 output
-	c2 := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
+	c2 , _ := NewConv2D(1, 1, 3, 1, 1, activations.Tanh{})
 	output2, _ := c2.Forward(input)
 
 	if len(output2) != 16 { // 4x4
@@ -625,7 +625,7 @@ func TestConv2DPadding(t *testing.T) {
 // TestConv2DStride tests stride behavior.
 func TestConv2DStride(t *testing.T) {
 	// Stride=2: 4x4 input, 3x3 kernel, no padding -> 1x1 output
-	c := NewConv2D(1, 1, 3, 2, 0, activations.Tanh{})
+	c , _ := NewConv2D(1, 1, 3, 2, 0, activations.Tanh{})
 	input := make([]float32, 16)
 	output, _ := c.Forward(input)
 
@@ -636,7 +636,7 @@ func TestConv2DStride(t *testing.T) {
 
 // TestLSTMForgetGateBias tests forget gate bias initialization.
 func TestLSTMForgetGateBias(t *testing.T) {
-	l := NewLSTM(2, 3)
+	l , _ := NewLSTM(2, 3)
 
 	params := l.Params()
 	// Forget gate is gates 1 (indices 3-5 in bias)
@@ -676,7 +676,7 @@ func TestLayerInheritance(t *testing.T) {
 
 // TestDenseParamSlicing tests parameter slicing.
 func TestDenseParamSlicing(t *testing.T) {
-	d := NewDense(3, 2, activations.Tanh{})
+	d , _ := NewDense(3, 2, activations.Tanh{})
 
 	params := d.Params()
 	weights := params[:6] // 3*2 = 6
@@ -692,7 +692,7 @@ func TestDenseParamSlicing(t *testing.T) {
 
 // TestConv2DParamSlicing tests parameter slicing.
 func TestConv2DParamSlicing(t *testing.T) {
-	c := NewConv2D(2, 3, 2, 1, 0, activations.Tanh{})
+	c , _ := NewConv2D(2, 3, 2, 1, 0, activations.Tanh{})
 
 	params := c.Params()
 	// 3 * 2 * 2 * 2 + 3 = 27
@@ -714,7 +714,7 @@ func TestConv2DParamSlicing(t *testing.T) {
 
 // TestLSTMParamSlicing tests parameter slicing.
 func TestLSTMParamSlicing(t *testing.T) {
-	l := NewLSTM(4, 5)
+	l , _ := NewLSTM(4, 5)
 
 	params := l.Params()
 	// inputWeights: 4 gates * 5 hidden * 4 input = 80

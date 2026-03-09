@@ -7,7 +7,7 @@ import (
 
 func TestDropoutForwardTraining(t *testing.T) {
 	// Test that dropout zeros out neurons during training
-	dropout := NewDropout(0.5, 100)
+	dropout , _ := NewDropout(0.5, 100)
 	dropout.SetTraining(true)
 
 	// Create input with all ones
@@ -35,7 +35,7 @@ func TestDropoutForwardTraining(t *testing.T) {
 
 func TestDropoutForwardInference(t *testing.T) {
 	// Test that dropout passes inputs through unchanged during inference
-	dropout := NewDropout(0.5, 100)
+	dropout , _ := NewDropout(0.5, 100)
 	dropout.SetTraining(false)
 
 	input := make([]float32, 100)
@@ -55,7 +55,7 @@ func TestDropoutForwardInference(t *testing.T) {
 
 func TestDropoutBackward(t *testing.T) {
 	// Test gradient computation
-	dropout := NewDropout(0.5, 10)
+	dropout , _ := NewDropout(0.5, 10)
 	dropout.SetTraining(true)
 
 	// Generate output first
@@ -97,7 +97,7 @@ func TestDropoutBackward(t *testing.T) {
 
 func TestDropoutParams(t *testing.T) {
 	// Test that dropout has no learnable parameters
-	dropout := NewDropout(0.5, 10)
+	dropout , _ := NewDropout(0.5, 10)
 
 	params := dropout.Params()
 	if len(params) != 0 {
@@ -121,7 +121,7 @@ func TestDropoutParams(t *testing.T) {
 }
 
 func TestDropoutInOutSize(t *testing.T) {
-	dropout := NewDropout(0.5, 50)
+	dropout , _ := NewDropout(0.5, 50)
 
 	if dropout.InSize() != 50 {
 		t.Errorf("InSize = %d, expected 50", dropout.InSize())
@@ -133,7 +133,7 @@ func TestDropoutInOutSize(t *testing.T) {
 
 func TestDropoutReset(t *testing.T) {
 	// Test that reset produces same dropout mask
-	dropout := NewDropout(0.5, 10)
+	dropout , _ := NewDropout(0.5, 10)
 	dropout.SetTraining(true)
 
 	input := make([]float32, 10)
@@ -163,7 +163,7 @@ func TestDropoutReset(t *testing.T) {
 func TestDropoutPValue(t *testing.T) {
 	// Test different dropout probabilities
 	for _, p := range []float32{0.0, 0.25, 0.5, 0.75, 1.0} {
-		dropout := NewDropout(p, 100)
+		dropout , _ := NewDropout(p, 100)
 		dropout.SetTraining(true)
 
 		input := make([]float32, 100)
@@ -197,7 +197,7 @@ func TestDropoutPValue(t *testing.T) {
 }
 
 func BenchmarkDropoutForwardTraining(b *testing.B) {
-	dropout := NewDropout(0.5, 1024)
+	dropout , _ := NewDropout(0.5, 1024)
 	dropout.SetTraining(true)
 
 	input := make([]float32, 1024)
@@ -212,7 +212,7 @@ func BenchmarkDropoutForwardTraining(b *testing.B) {
 }
 
 func BenchmarkDropoutForwardInference(b *testing.B) {
-	dropout := NewDropout(0.5, 1024)
+	dropout , _ := NewDropout(0.5, 1024)
 	dropout.SetTraining(false)
 
 	input := make([]float32, 1024)
@@ -227,7 +227,7 @@ func BenchmarkDropoutForwardInference(b *testing.B) {
 }
 
 func BenchmarkDropoutBackward(b *testing.B) {
-	dropout := NewDropout(0.5, 1024)
+	dropout , _ := NewDropout(0.5, 1024)
 	dropout.SetTraining(true)
 
 	input := make([]float32, 1024)

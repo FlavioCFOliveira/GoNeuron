@@ -123,7 +123,7 @@ func (s *SequenceUnroller) ForwardWithArena(x []float32, arena *[]float32, offse
 		}
 	}
 
-	return s.outputBuf[:s.timeSteps*s.base.OutSize()], nil
+	return s.outputBuf[:s.OutSize()], nil
 }
 
 func (s *SequenceUnroller) Forward(x []float32) ([]float32, error) {

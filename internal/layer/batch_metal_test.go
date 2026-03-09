@@ -18,7 +18,7 @@ func TestMetalAvgPool2DBatch(t *testing.T) {
 	inputHeight := 4
 	inputWidth := 4
 
-	pool := NewAvgPool2D(1, kernelSize, stride, padding)
+	pool , _ := NewAvgPool2D(1, kernelSize, stride, padding)
 	pool.SetDevice(metal)
 
 	// Create batch input: batchSize x inputHeight x inputWidth
@@ -96,7 +96,7 @@ func TestMetalDropoutBatch(t *testing.T) {
 	inSize := 100
 	p := float32(0.5)
 
-	dropout := NewDropout(p, inSize)
+	dropout , _ := NewDropout(p, inSize)
 	dropout.SetDevice(metal)
 	dropout.SetTraining(true)
 

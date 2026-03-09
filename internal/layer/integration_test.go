@@ -8,7 +8,7 @@ import (
 
 func TestBatchNormIntegration(t *testing.T) {
 	// Test BatchNorm2D
-	bn := NewBatchNorm2D(4, 1e-5, 0.1, true)
+	bn , _ := NewBatchNorm2D(4, 1e-5, 0.1, true)
 
 	input := make([]float32, 8) // 2 batches x 4 features
 	for i := range input {
@@ -23,7 +23,7 @@ func TestBatchNormIntegration(t *testing.T) {
 
 func TestLayerNormIntegration(t *testing.T) {
 	// Test LayerNorm
-	ln := NewLayerNorm(8, 1e-5, true)
+	ln , _ := NewLayerNorm(8, 1e-5, true)
 
 	input := make([]float32, 8)
 	for i := range input {
@@ -37,7 +37,7 @@ func TestLayerNormIntegration(t *testing.T) {
 
 func TestEmbeddingIntegration(t *testing.T) {
 	// Test Embedding
-	emb := NewEmbedding(100, 16)
+	emb , _ := NewEmbedding(100, 16)
 
 	input := []float32{0, 5, 10, 15}
 	output, _ := emb.Forward(input)
@@ -47,7 +47,7 @@ func TestEmbeddingIntegration(t *testing.T) {
 
 func TestGRUIntegration(t *testing.T) {
 	// Test GRU
-	gru := NewGRU(5, 10)
+	gru , _ := NewGRU(5, 10)
 
 	input := make([]float32, 5)
 	for i := range input {
@@ -61,7 +61,7 @@ func TestGRUIntegration(t *testing.T) {
 
 func TestIntegrationValidateOutputs(t *testing.T) {
 	// Test Dropout
-	dropout := NewDropout(0.5, 10)
+	dropout , _ := NewDropout(0.5, 10)
 	dropout.SetTraining(false)
 	input1 := make([]float32, 10)
 	for i := range input1 {
@@ -78,7 +78,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	}
 
 	// Test MaxPool2D (single channel input)
-	maxPool := NewMaxPool2D(1, 2, 2, 0)
+	maxPool , _ := NewMaxPool2D(1, 2, 2, 0)
 	input2 := make([]float32, 64)
 	for i := range input2 {
 		input2[i] = float32(i % 16)
@@ -94,7 +94,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	}
 
 	// Test BatchNorm2D
-	bn := NewBatchNorm2D(4, 1e-5, 0.1, true)
+	bn , _ := NewBatchNorm2D(4, 1e-5, 0.1, true)
 	input3 := make([]float32, 8)
 	for i := range input3 {
 		input3[i] = float32(i)
@@ -110,7 +110,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	}
 
 	// Test LayerNorm
-	ln := NewLayerNorm(8, 1e-5, true)
+	ln , _ := NewLayerNorm(8, 1e-5, true)
 	input4 := make([]float32, 8)
 	for i := range input4 {
 		input4[i] = float32(i)
@@ -126,7 +126,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	}
 
 	// Test Embedding
-	emb := NewEmbedding(100, 16)
+	emb , _ := NewEmbedding(100, 16)
 	input5 := []float32{0, 5, 10, 15}
 	out5, _ := emb.Forward(input5)
 	for _, v := range out5 {
@@ -136,7 +136,7 @@ func TestIntegrationValidateOutputs(t *testing.T) {
 	}
 
 	// Test GRU
-	gru := NewGRU(5, 10)
+	gru , _ := NewGRU(5, 10)
 	input6 := make([]float32, 5)
 	for i := range input6 {
 		input6[i] = float32(i) * 0.1

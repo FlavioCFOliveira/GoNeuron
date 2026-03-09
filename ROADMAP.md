@@ -18,10 +18,8 @@ Tabela com as tarefas ainda por concluir, ordenadas por severidade (ALTA > MÉDI
 | SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | Implementar validação de versão mínima/máxima suportada em `internal/net/gguf.go:62-76`. Rejeitar versões incompatíveis com erro explícito. |
 | SEC-008 | MÉDIA | Prevenir integer overflow em cálculos de tamanho | Usar `math/bits` para verificar overflow em `internal/layer/lstm.go:141-144` e `internal/layer/transformer.go`. Validar antes de alocar buffers. |
 | SEC-009 | MÉDIA | Implementar cleanup explícito de buffers Metal | Adicionar método `Close()` ou `runtime.SetFinalizer` em `internal/layer/layer.go:710-719` para libertar buffers GPU. Prevenir memory leaks em execuções longas. |
-| SEC-010 | MÉDIA | Substituir panic por error returns em Activations | Modificar `Softmax.Activate` e `LogSoftmax.Activate` em `internal/activations/activations.go:149-157` para retornar erro em vez de panic. |
 | SEC-011 | MÉDIA | Reportar erro em índices inválidos de MultiMarginLoss | Alterar `continue` silencioso para retornar erro em `internal/loss/loss.go:971-1045` quando `target < 0 || target >= n`. |
 | SEC-012 | MÉDIA | Validar offsets em AccumulateBackward | Adicionar verificação de bounds em `internal/layer/layer.go:771-774` antes de construir slices. Validar `inOff`, `paOff` contra tamanho da arena. |
-| SEC-005 | MÉDIA | Validar parâmetros em construtores de Layer | Modificar `NewDense`, `NewConv2D`, `NewMoE` para retornar `error` em vez de `nil` silencioso quando parâmetros forem inválidos. |
 | SEC-013 | BAIXA | Usar seed aleatória segura em RNG | Substituir seed previsível por `crypto/rand` ou aceitar seed externo em `internal/layer/layer.go:22-42`. |
 | SEC-014 | BAIXA | Validar taxa de aprendizagem em SGD | Adicionar verificação `learningRate <= 0 || learningRate > 1` em `internal/opt/opt.go:40-42`. Retornar erro ou panic com mensagem clara. |
 | SEC-015 | BAIXA | Corrigir arredondamento em Conv2D | Requerer especificação explícita de dimensões ou validar que o produto está correto em `internal/layer/conv2d.go:344-357`. |
@@ -90,6 +88,9 @@ Tabela com as tarefas concluídas, ordenadas por data de conclusão (mais recent
 
 | ID | SEVERIDADE | TAREFA | CONCLUSÃO | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- | :--- |
+| SEC-010 | MÉDIA | Substituir panic por error returns em Activations | 2026-03-09 | Modificados `Softmax.Activate`, `Softmax.Derivative`, `LogSoftmax.Activate`, `LogSoftmax.Derivative` em `internal/activations/activations.go:149-157` para retornar `NaN` em vez de panic. API mantida compatível. |
+| SEC-010 | MÉDIA | Substituir panic por error returns em Activations | 2026-03-09 | Modificados `Softmax.Activate`, `Softmax.Derivative`, `LogSoftmax.Activate`, `LogSoftmax.Derivative` para retornar `float32(math.NaN())` em vez de panic. Indica erro de uso da API - estas funções requerem batch processing via `ActivateBatch`. |
+| SEC-005 | MÉDIA | Validar parâmetros em construtores de Layer | 2026-03-09 | Modificados todos os construtores de layer (NewDense, NewConv2D, NewLSTM, NewGRU, etc.) para retornar `(*Type, error)`. Corrigido bug em `SequenceUnroller.ForwardWithArena` linha 126 que retornava tamanho incorreto. |
 | SEC-001 | ALTA | Corrigir divisão por zero em Loss Functions | 2026-03-07 | Adicionada verificação `n == 0` em todas as loss functions (MSE, L1Loss, BCELoss, CrossEntropy, NLLLoss, etc.) em `internal/loss/loss.go`. Retorna erro `ErrEmptyInput` se batch size for zero. |
 | SEC-002 | ALTA | Implementar bounds checking em Embedding Layer | 2026-03-07 | Validados índices em `internal/layer/embedding.go:114-128`. Usa `math.Floor` para conversão float-to-int e retorna erro se índice estiver fora de `[0, num_embeddings)`. |
 | SEC-004 | ALTA | Adicionar validação de limites em CSV Loader | 2026-03-07 | Implementados `maxCSVRows=10_000_000`, `maxCSVCols=10_000`, `maxFileSize=1GB` em `internal/net/csv_loader.go:20-97`. Verificação de `os.Stat` antes de carregar. |

@@ -10,7 +10,7 @@ import (
 
 // TestConv1DCreation tests Conv1D layer creation
 func TestConv1DCreation(t *testing.T) {
-	c , _ := NewConv1D(3, 16, 5, 1, 2, activations.ReLU{})
+	c := NewConv1D(3, 16, 5, 1, 2, activations.ReLU{})
 
 	if c.InChannels() != 3 {
 		t.Errorf("InChannels = %d, want 3", c.InChannels())
@@ -56,7 +56,7 @@ func TestConv1DOutputLength(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c , _ := NewConv1D(tt.inChannels, tt.outChannels, tt.kernelSize, tt.stride, tt.padding, activations.ReLU{})
+			c := NewConv1D(tt.inChannels, tt.outChannels, tt.kernelSize, tt.stride, tt.padding, activations.ReLU{})
 			got := c.OutputLength(tt.inputLen)
 			if got != tt.want {
 				t.Errorf("OutputLength(%d) = %d, want %d", tt.inputLen, got, tt.want)
@@ -67,7 +67,7 @@ func TestConv1DOutputLength(t *testing.T) {
 
 // TestConv1DForward tests forward pass
 func TestConv1DForward(t *testing.T) {
-	c , _ := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
+	c := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
 
 	// Set simple weights for testing [1, 0, 1] and bias 0
 	c.weights = []float32{1, 0, 1}
@@ -97,7 +97,7 @@ func TestConv1DForward(t *testing.T) {
 
 // TestConv1DForwardWithActivation tests forward pass with activation
 func TestConv1DForwardWithActivation(t *testing.T) {
-	c , _ := NewConv1D(1, 1, 3, 1, 1, activations.ReLU{})
+	c := NewConv1D(1, 1, 3, 1, 1, activations.ReLU{})
 
 	// Set weights that will produce negative values
 	c.weights = []float32{-1, 0, -1}
@@ -117,7 +117,7 @@ func TestConv1DForwardWithActivation(t *testing.T) {
 
 // TestConv1DBackward tests backward pass
 func TestConv1DBackward(t *testing.T) {
-	c , _ := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
+	c := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
 	c.ClearGradients()
 
 	// Set simple weights
@@ -167,7 +167,7 @@ func TestConv1DBackward(t *testing.T) {
 // TestConv1DMultiChannel tests multi-channel convolution
 func TestConv1DMultiChannel(t *testing.T) {
 	// 2 input channels, 3 output channels
-	c , _ := NewConv1D(2, 3, 3, 1, 1, activations.ReLU{})
+	c := NewConv1D(2, 3, 3, 1, 1, activations.ReLU{})
 
 	inputLength := 10
 	x := make([]float32, 2*inputLength)
@@ -185,7 +185,7 @@ func TestConv1DMultiChannel(t *testing.T) {
 
 // TestConv1DParams tests parameter getters/setters
 func TestConv1DParams(t *testing.T) {
-	c , _ := NewConv1D(2, 3, 3, 1, 0, activations.ReLU{})
+	c := NewConv1D(2, 3, 3, 1, 0, activations.ReLU{})
 
 	// Get original params
 	original := c.Params()
@@ -209,7 +209,7 @@ func TestConv1DParams(t *testing.T) {
 
 // TestConv1DGradients tests gradient getters/clear
 func TestConv1DGradients(t *testing.T) {
-	c , _ := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
+	c := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
 
 	// Do forward and backward to get gradients
 	x := []float32{1, 2, 3, 4, 5}
@@ -259,7 +259,7 @@ func TestConv1DGradients(t *testing.T) {
 
 // TestConv1DStride tests convolution with stride > 1
 func TestConv1DStride(t *testing.T) {
-	c , _ := NewConv1D(1, 1, 3, 2, 1, activations.Linear{})
+	c := NewConv1D(1, 1, 3, 2, 1, activations.Linear{})
 
 	// Input length 8 with stride 2 should give output length 4
 	inputLength := 8
@@ -278,7 +278,7 @@ func TestConv1DStride(t *testing.T) {
 
 // TestConv1DAccumulateBackward tests gradient accumulation
 func TestConv1DAccumulateBackward(t *testing.T) {
-	c , _ := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
+	c := NewConv1D(1, 1, 3, 1, 1, activations.Linear{})
 	c.ClearGradients()
 
 	c.weights = []float32{1, 1, 1}
@@ -313,7 +313,7 @@ func TestConv1DAccumulateBackward(t *testing.T) {
 
 // BenchmarkConv1DForward benchmarks forward pass
 func BenchmarkConv1DForward(b *testing.B) {
-	c , _ := NewConv1D(3, 64, 5, 1, 2, activations.ReLU{})
+	c := NewConv1D(3, 64, 5, 1, 2, activations.ReLU{})
 
 	inputLength := 100
 	x := make([]float32, 3*inputLength)
@@ -329,7 +329,7 @@ func BenchmarkConv1DForward(b *testing.B) {
 
 // BenchmarkConv1DBackward benchmarks backward pass
 func BenchmarkConv1DBackward(b *testing.B) {
-	c , _ := NewConv1D(3, 64, 5, 1, 2, activations.ReLU{})
+	c := NewConv1D(3, 64, 5, 1, 2, activations.ReLU{})
 
 	inputLength := 100
 	x := make([]float32, 3*inputLength)

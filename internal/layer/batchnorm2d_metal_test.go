@@ -17,8 +17,8 @@ func TestMetalBatchNorm2D(t *testing.T) {
 	inH, inW := 4, 4
 
 	// Create layers
-	bnCPU := NewBatchNorm2D(numFeatures, eps, momentum, true)
-	bnMetal := NewBatchNorm2D(numFeatures, eps, momentum, true)
+	bnCPU , _ := NewBatchNorm2D(numFeatures, eps, momentum, true)
+	bnMetal , _ := NewBatchNorm2D(numFeatures, eps, momentum, true)
 
 	bnMetal.SetDevice(metal)
 	bnMetal.Build(numFeatures)
@@ -90,8 +90,8 @@ func TestMetalBatchNorm2DBatch(t *testing.T) {
 	momentum := float32(0.1)
 	inH, inW := 4, 4
 
-	bnCPU := NewBatchNorm2D(numFeatures, eps, momentum, true)
-	bnMetal := NewBatchNorm2D(numFeatures, eps, momentum, true)
+	bnCPU , _ := NewBatchNorm2D(numFeatures, eps, momentum, true)
+	bnMetal , _ := NewBatchNorm2D(numFeatures, eps, momentum, true)
 	bnMetal.SetDevice(metal)
 
 	input := make([]float32, batchSize*numFeatures*inH*inW)

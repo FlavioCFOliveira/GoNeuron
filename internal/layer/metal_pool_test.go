@@ -11,7 +11,7 @@ func TestMetalAvgPool2D(t *testing.T) {
 		t.Skip("Metal not available")
 	}
 
-	pool := NewAvgPool2D(1, 2, 2, 0)
+	pool , _ := NewAvgPool2D(1, 2, 2, 0)
 	pool.SetDevice(metal)
 
 	// 4x4 input
@@ -45,7 +45,7 @@ func TestMetalDropout(t *testing.T) {
 		t.Skip("Metal not available")
 	}
 
-	dropout := NewDropout(0.5, 100)
+	dropout , _ := NewDropout(0.5, 100)
 	dropout.SetDevice(metal)
 	dropout.SetTraining(true)
 

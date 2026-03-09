@@ -11,7 +11,7 @@ import (
 
 // TestDenseGradientFlow validates that Dense layer computes non-zero gradients.
 func TestDenseGradientFlow(t *testing.T) {
-	layer := NewDense(4, 3, activations.Tanh{})
+	layer , _ := NewDense(4, 3, activations.Tanh{})
 
 	// Initialize weights
 	params := layer.Params()
@@ -57,7 +57,7 @@ func TestDenseGradientFlow(t *testing.T) {
 
 // TestConv2DGradientFlow validates Conv2D backward pass.
 func TestConv2DGradientFlow(t *testing.T) {
-	layer := NewConv2D(1, 2, 3, 1, 1, activations.ReLU{})
+	layer , _ := NewConv2D(1, 2, 3, 1, 1, activations.ReLU{})
 	layer.Build(1)
 
 	// Initialize
@@ -106,7 +106,7 @@ func TestConv2DGradientFlow(t *testing.T) {
 // Note: LSTM processes one timestep at a time (input size = inSize, output size = outSize).
 func TestLSTMGradientFlow(t *testing.T) {
 	inSize, outSize := 3, 2
-	layer := NewLSTM(inSize, outSize)
+	layer , _ := NewLSTM(inSize, outSize)
 
 	// Initialize with small values
 	params := layer.Params()
@@ -158,7 +158,7 @@ func TestLSTMGradientFlow(t *testing.T) {
 // Note: GRU processes one timestep at a time (input size = inSize, output size = outSize).
 func TestGRUGradientFlow(t *testing.T) {
 	inSize, outSize := 3, 2
-	layer := NewGRU(inSize, outSize)
+	layer , _ := NewGRU(inSize, outSize)
 
 	// Initialize
 	params := layer.Params()
@@ -208,7 +208,7 @@ func TestGRUGradientFlow(t *testing.T) {
 
 // TestEmbeddingGradientFlow validates Embedding backward pass.
 func TestEmbeddingGradientFlow(t *testing.T) {
-	layer := NewEmbedding(10, 4)
+	layer , _ := NewEmbedding(10, 4)
 
 	// Initialize
 	params := layer.Params()
@@ -251,7 +251,7 @@ func TestEmbeddingGradientFlow(t *testing.T) {
 
 // TestBatchNorm2DGradientFlow validates BatchNorm2D backward pass.
 func TestBatchNorm2DGradientFlow(t *testing.T) {
-	layer := NewBatchNorm2D(2, 1e-5, 0.1, true)
+	layer , _ := NewBatchNorm2D(2, 1e-5, 0.1, true)
 
 	// Input: 2 channels, 2x2
 	x := []float32{
@@ -285,7 +285,7 @@ func TestBatchNorm2DGradientFlow(t *testing.T) {
 
 // TestMaxPool2DGradientFlow validates MaxPool2D backward pass.
 func TestMaxPool2DGradientFlow(t *testing.T) {
-	layer := NewMaxPool2D(1, 2, 2, 0)
+	layer , _ := NewMaxPool2D(1, 2, 2, 0)
 	layer.Build(1)
 
 	// Input: 1 channel, 4x4
@@ -328,7 +328,7 @@ func TestMaxPool2DGradientFlow(t *testing.T) {
 
 // TestAvgPool2DGradientFlow validates AvgPool2D backward pass.
 func TestAvgPool2DGradientFlow(t *testing.T) {
-	layer := NewAvgPool2D(1, 2, 2, 0)
+	layer , _ := NewAvgPool2D(1, 2, 2, 0)
 	layer.Build(1)
 
 	// Input
@@ -397,7 +397,7 @@ func TestFlattenGradientFlow(t *testing.T) {
 
 // TestDropoutGradientFlow validates Dropout backward pass.
 func TestDropoutGradientFlow(t *testing.T) {
-	layer := NewDropout(0.5, 10)
+	layer , _ := NewDropout(0.5, 10)
 	layer.SetTraining(true)
 
 	x := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
@@ -419,7 +419,7 @@ func TestDropoutGradientFlow(t *testing.T) {
 
 // TestTransformerBlockGradientFlow validates Transformer block gradients.
 func TestTransformerBlockGradientFlow(t *testing.T) {
-	layer := NewTransformerBlock(32, 4, 8, 64, true)
+	layer , _ := NewTransformerBlock(32, 4, 8, 64, true)
 
 	// Initialize
 	params := layer.Params()
@@ -465,7 +465,7 @@ func TestTransformerBlockGradientFlow(t *testing.T) {
 
 // TestGradientAccumulation validates that gradients accumulate correctly.
 func TestGradientAccumulation(t *testing.T) {
-	layer := NewDense(3, 2, activations.Linear{})
+	layer , _ := NewDense(3, 2, activations.Linear{})
 
 	// Initialize
 	params := layer.Params()
@@ -520,7 +520,7 @@ func TestGradientAccumulation(t *testing.T) {
 
 // TestClearGradients validates that ClearGradients works correctly.
 func TestClearGradients(t *testing.T) {
-	layer := NewDense(3, 2, activations.Linear{})
+	layer , _ := NewDense(3, 2, activations.Linear{})
 
 	// Initialize
 	params := layer.Params()
@@ -575,7 +575,7 @@ func TestGradientShapes(t *testing.T) {
 		expectedGradSize int // For recurrent layers, grad size may differ from input size
 	}{
 		{"Dense", NewDense(4, 3, activations.ReLU{}), 4, 4},
-		{"Conv2D", func() Layer { l := NewConv2D(1, 2, 3, 1, 0, activations.ReLU{}); l.Build(1); return l }(), 9, 9},
+		{"Conv2D", func() Layer { l , _ := NewConv2D(1, 2, 3, 1, 0, activations.ReLU{}); l.Build(1); return l }(), 9, 9},
 		// LSTM/GRU process one timestep at a time: input size = inSize, output size = outSize
 		// Backward returns gradient w.r.t input (inSize), not the full sequence
 		{"LSTM", NewLSTM(3, 2), 3, 3},
@@ -692,7 +692,7 @@ func numericalGradient(l Layer, x []float32, lossGrad []float32, epsilon float32
 
 // TestDenseNumericalGradient validates Dense gradients using finite differences.
 func TestDenseNumericalGradient(t *testing.T) {
-	l := NewDense(4, 3, activations.Tanh{})
+	l , _ := NewDense(4, 3, activations.Tanh{})
 
 	// Initialize with small weights for numerical stability
 	params := l.Params()
@@ -743,7 +743,7 @@ func TestDenseNumericalGradient(t *testing.T) {
 
 // TestConv2DNumericalGradient validates Conv2D gradients using finite differences.
 func TestConv2DNumericalGradient(t *testing.T) {
-	l := NewConv2D(1, 1, 3, 1, 1, activations.Linear{})
+	l , _ := NewConv2D(1, 1, 3, 1, 1, activations.Linear{})
 	l.Build(1)
 
 	// Initialize with small weights
@@ -798,7 +798,7 @@ func TestConv2DNumericalGradient(t *testing.T) {
 
 // TestLSTMNumericalGradient validates LSTM gradients using finite differences.
 func TestLSTMNumericalGradient(t *testing.T) {
-	l := NewLSTM(3, 2)
+	l , _ := NewLSTM(3, 2)
 
 	// Initialize with small weights
 	params := l.Params()
@@ -850,7 +850,7 @@ func TestLSTMNumericalGradient(t *testing.T) {
 
 // TestGRUNumericalGradient validates GRU gradients using finite differences.
 func TestGRUNumericalGradient(t *testing.T) {
-	l := NewGRU(3, 2)
+	l , _ := NewGRU(3, 2)
 
 	// Initialize with small weights
 	params := l.Params()
@@ -902,7 +902,7 @@ func TestGRUNumericalGradient(t *testing.T) {
 
 // TestLayerNormNumericalGradient validates LayerNorm gradients using finite differences.
 func TestLayerNormNumericalGradient(t *testing.T) {
-	l := NewLayerNorm(4, 1e-5, true)
+	l , _ := NewLayerNorm(4, 1e-5, true)
 
 	// Initialize with small weights
 	params := l.Params()

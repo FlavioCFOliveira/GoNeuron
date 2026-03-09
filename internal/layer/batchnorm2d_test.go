@@ -7,7 +7,7 @@ import (
 
 func TestBatchNorm2DForward(t *testing.T) {
 	// Test batch normalization with 2 features
-	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
 	// Input: 2 spatial positions x 2 features = 4 values
 	// Feature 0: [1, 5], Feature 1: [2, 6]
@@ -31,7 +31,7 @@ func TestBatchNorm2DForward(t *testing.T) {
 
 func TestBatchNorm2DWithAffine(t *testing.T) {
 	// Test with affine transformation
-	bn := NewBatchNorm2D(2, 1e-5, 0.1, true)
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.1, true)
 
 	// Set gamma = [2, 2], beta = [1, 1]
 	// After normalization, output = 2 * normalized + 1
@@ -62,7 +62,7 @@ func TestBatchNorm2DWithAffine(t *testing.T) {
 
 func TestBatchNorm2DWithoutAffine(t *testing.T) {
 	// Test without affine transformation
-	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
 	input := []float32{1, 5, 2, 6}
 	output, _ := bn.Forward(input)
@@ -84,7 +84,7 @@ func TestBatchNorm2DWithoutAffine(t *testing.T) {
 }
 
 func TestBatchNorm2DBackward(t *testing.T) {
-	bn := NewBatchNorm2D(2, 1e-5, 0.1, false)
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.1, false)
 
 	input := []float32{1, 5, 2, 6}
 	_, err := bn.Forward(input)
@@ -115,7 +115,7 @@ func TestBatchNorm2DBackward(t *testing.T) {
 }
 
 func TestBatchNorm2DParams(t *testing.T) {
-	bn := NewBatchNorm2D(2, 1e-5, 0.1, true)
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.1, true)
 
 	// Test Params and SetParams
 	params := bn.Params()
@@ -140,7 +140,7 @@ func TestBatchNorm2DParams(t *testing.T) {
 }
 
 func TestBatchNorm2DInOutSize(t *testing.T) {
-	bn := NewBatchNorm2D(10, 1e-5, 0.1, false)
+	bn , _ := NewBatchNorm2D(10, 1e-5, 0.1, false)
 
 	if bn.InSize() != 10 {
 		t.Errorf("InSize = %d, expected 10", bn.InSize())
@@ -151,7 +151,7 @@ func TestBatchNorm2DInOutSize(t *testing.T) {
 }
 
 func TestBatchNorm2DEps(t *testing.T) {
-	bn := NewBatchNorm2D(2, float32(1e-6), 0.1, false)
+	bn , _ := NewBatchNorm2D(2, float32(1e-6), 0.1, false)
 
 	if bn.GetEps() != 1e-6 {
 		t.Errorf("Eps = %f, expected 1e-6", bn.GetEps())
@@ -159,7 +159,7 @@ func TestBatchNorm2DEps(t *testing.T) {
 }
 
 func TestBatchNorm2DMomentum(t *testing.T) {
-	bn := NewBatchNorm2D(2, 1e-5, 0.5, false)
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.5, false)
 
 	if bn.GetMomentum() != 0.5 {
 		t.Errorf("Momentum = %f, expected 0.5", bn.GetMomentum())
@@ -168,7 +168,7 @@ func TestBatchNorm2DMomentum(t *testing.T) {
 
 func TestBatchNorm2DRunningStats(t *testing.T) {
 	// Test that running statistics are updated during training
-	bn := NewBatchNorm2D(2, 1e-5, 0.5, false) // Use higher momentum for more noticeable changes
+	bn , _ := NewBatchNorm2D(2, 1e-5, 0.5, false) // Use higher momentum for more noticeable changes
 
 	// First forward pass with input centered around 3
 	input1 := []float32{1, 5, 2, 6} // mean = 3.5
@@ -205,7 +205,7 @@ func TestBatchNorm2DRunningStats(t *testing.T) {
 }
 
 func TestBatchNorm2DNumFeatures(t *testing.T) {
-	bn := NewBatchNorm2D(3, 1e-5, 0.1, false)
+	bn , _ := NewBatchNorm2D(3, 1e-5, 0.1, false)
 
 	// Input: 2 batches x 3 features = 6 values
 	input := []float32{1, 2, 3, 4, 5, 6}
@@ -218,7 +218,7 @@ func TestBatchNorm2DNumFeatures(t *testing.T) {
 }
 
 func BenchmarkBatchNorm2DForward(b *testing.B) {
-	bn := NewBatchNorm2D(64, 1e-5, 0.1, true)
+	bn , _ := NewBatchNorm2D(64, 1e-5, 0.1, true)
 
 	// 32x32 feature maps, 10 batches
 	input := make([]float32, 32*32*64*10)
@@ -233,7 +233,7 @@ func BenchmarkBatchNorm2DForward(b *testing.B) {
 }
 
 func BenchmarkBatchNorm2DBackward(b *testing.B) {
-	bn := NewBatchNorm2D(64, 1e-5, 0.1, true)
+	bn , _ := NewBatchNorm2D(64, 1e-5, 0.1, true)
 
 	input := make([]float32, 32*32*64*10)
 	for i := range input {

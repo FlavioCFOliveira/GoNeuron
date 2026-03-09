@@ -7,7 +7,7 @@ import (
 
 func TestMaxPool2DForward(t *testing.T) {
 	// Test 2x2 max pooling with stride 2, no padding (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	// Input: 4x4 = 16 values
 	// 1  2  3  4
@@ -36,7 +36,7 @@ func TestMaxPool2DForward(t *testing.T) {
 
 func TestMaxPool2DForwardStride(t *testing.T) {
 	// Test with stride different from kernel size (single channel)
-	pool := NewMaxPool2D(1, 2, 1, 0)
+	pool , _ := NewMaxPool2D(1, 2, 1, 0)
 
 	// Input: 3x3 = 9 values
 	// 1 2 3
@@ -66,7 +66,7 @@ func TestMaxPool2DForwardStride(t *testing.T) {
 
 func TestMaxPool2DForwardPadding(t *testing.T) {
 	// Test with padding (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 1)
+	pool , _ := NewMaxPool2D(1, 2, 2, 1)
 
 	// Input: 3x3 = 9 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9}
@@ -83,7 +83,7 @@ func TestMaxPool2DForwardPadding(t *testing.T) {
 
 func TestMaxPool2DBackward(t *testing.T) {
 	// Test backward pass (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	// Input: 4x4 = 16 values
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
@@ -109,7 +109,7 @@ func TestMaxPool2DBackward(t *testing.T) {
 
 func TestMaxPool2DParams(t *testing.T) {
 	// Test params (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	params := pool.Params()
 	if len(params) != 0 {
@@ -132,7 +132,7 @@ func TestMaxPool2DParams(t *testing.T) {
 
 func TestMaxPool2DInOutSize(t *testing.T) {
 	// Test in/out sizes (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	// 4x4 input -> 2x2 output
 	input := make([]float32, 16)
@@ -151,7 +151,7 @@ func TestMaxPool2DInOutSize(t *testing.T) {
 
 func TestMaxPool2DArgmax(t *testing.T) {
 	// Test argmax indices (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	input := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	pool.Forward(input)
@@ -174,7 +174,7 @@ func TestMaxPool2DArgmax(t *testing.T) {
 
 func TestMaxPool2DLargeInput(t *testing.T) {
 	// Test with large input (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	// 64x64 input
 	input := make([]float32, 4096)
@@ -189,7 +189,7 @@ func TestMaxPool2DLargeInput(t *testing.T) {
 
 func TestMaxPool2DBackwardLarge(t *testing.T) {
 	// Test backward with large input (single channel)
-	pool := NewMaxPool2D(1, 2, 2, 0)
+	pool , _ := NewMaxPool2D(1, 2, 2, 0)
 
 	input := make([]float32, 4096)
 	for i := range input {
