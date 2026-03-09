@@ -339,3 +339,6 @@ func (g *GlobalAttention) NamedParams() []NamedParam {
 func (g *GlobalAttention) AccumulateBackward(grad []float32) ([]float32, error) {
 	return g.Backward(grad)
 }
+
+// Close implements the Layer interface.
+func (g *GlobalAttention) Close() {}

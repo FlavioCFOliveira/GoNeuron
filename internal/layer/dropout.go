@@ -439,3 +439,6 @@ func (d *Dropout) GetP() float32 {
 func (d *Dropout) SetP(p float32) {
 	d.p = p
 }
+
+// Close implements the Layer interface.
+func (d *Dropout) Close() {}

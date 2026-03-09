@@ -98,6 +98,9 @@ func (d *MetalDevice) Close() {
 }
 
 // MetalBuffer represents a buffer on the GPU.
+// The buffer must be explicitly freed when no longer needed by calling Close() or Free().
+// As a safety net, a finalizer is set to automatically free the buffer on GC,
+// but explicit cleanup is recommended for predictable GPU memory management.
 type MetalBuffer struct {
 	ptr    unsafe.Pointer
 	device *MetalDevice
@@ -110,11 +113,15 @@ func (d *MetalDevice) CreateBuffer(data []float32) *MetalBuffer {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return &MetalBuffer{
+	buf := &MetalBuffer{
 		ptr:    C.createMetalBuffer(d.ptr, (*C.float)(unsafe.Pointer(&data[0])), C.int(len(data))),
 		device: d,
 		length: len(data),
 	}
+	// Set finalizer as safety net for automatic cleanup
+	// Note: Explicit Close() is still recommended for predictable GPU memory management
+	runtime.SetFinalizer(buf, (*MetalBuffer).Close)
+	return buf
 }
 
 func (d *MetalDevice) CreateEmptyBuffer(length int) *MetalBuffer {
@@ -233,6 +240,19 @@ func (b *MetalBuffer) ReadInt(data []int32) {
 	}
 }
 
+// Close implements io.Closer interface for explicit resource cleanup.
+// It is recommended to defer buffer.Close() after creation for predictable GPU memory management.
+// Close is idempotent and safe to call multiple times.
+func (b *MetalBuffer) Close() error {
+	if b != nil {
+		b.Free()
+	}
+	return nil
+}
+
+// Free releases the Metal buffer immediately.
+// This is an alternative to Close() for non-error-returning contexts.
+// Note: After calling Free/Close, the buffer should not be used.
 func (b *MetalBuffer) Free() {
 	if b.ptr != nil {
 		if b.device != nil {
@@ -241,6 +261,8 @@ func (b *MetalBuffer) Free() {
 		}
 		C.freeMetalBuffer(b.ptr)
 		b.ptr = nil
+		// Remove finalizer since we've explicitly cleaned up
+		runtime.SetFinalizer(b, nil)
 	}
 }
 

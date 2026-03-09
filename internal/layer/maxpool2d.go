@@ -516,6 +516,9 @@ func (m *MaxPool2D) Reset() {
 func (m *MaxPool2D) ClearGradients() {
 }
 
+// Close implements the Layer interface.
+func (m *MaxPool2D) Close() {}
+
 // Clone creates a deep copy of the max pooling layer.
 func (m *MaxPool2D) Clone() Layer {
 	newM, _ := NewMaxPool2D(m.inChannels, m.kernelSize, m.stride, m.padding)

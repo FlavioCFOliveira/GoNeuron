@@ -141,6 +141,35 @@ func (l *LayerNorm) SetDevice(device Device) {
 	}
 }
 
+// Close releases all GPU buffers and resources held by the layer.
+// This method is idempotent and safe to call multiple times.
+// SEC-009: Implementar cleanup explícito de buffers Metal para prevenir memory leaks.
+func (l *LayerNorm) Close() {
+	// Liberar buffers GPU em ordem inversa de criação
+	if l.bufGradIn != nil {
+		l.bufGradIn.Close()
+		l.bufGradIn = nil
+	}
+	if l.bufOut != nil {
+		l.bufOut.Close()
+		l.bufOut = nil
+	}
+	if l.bufIn != nil {
+		l.bufIn.Close()
+		l.bufIn = nil
+	}
+	if l.bufBeta != nil {
+		l.bufBeta.Close()
+		l.bufBeta = nil
+	}
+	if l.bufGamma != nil {
+		l.bufGamma.Close()
+		l.bufGamma = nil
+	}
+	// Reset device state
+	l.device = &CPUDevice{}
+}
+
 func (l *LayerNorm) syncGPU() {
 	if md, ok := l.device.(*MetalDevice); ok && md.IsAvailable() && l.elementwiseAffine {
 		if l.bufGamma == nil {

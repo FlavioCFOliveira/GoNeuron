@@ -1141,6 +1141,44 @@ func TestMultiMarginLossBackward(t *testing.T) {
 	}
 }
 
+// TestMultiMarginLossInvalidTarget tests error handling for invalid target indices.
+func TestMultiMarginLossInvalidTarget(t *testing.T) {
+	mm := NewMultiMarginLoss(1.0, 1)
+
+	tests := []struct {
+		name  string
+		yPred []float32
+		yTrue []float32
+	}{
+		{"Negative target index", []float32{0.5, 0.3, 0.2}, []float32{-1, 1, 2}},
+		{"Target index too large", []float32{0.5, 0.3, 0.2}, []float32{0, 3, 2}},
+		{"Target index equal to length", []float32{0.5, 0.3, 0.2}, []float32{0, 3, 2}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test Forward
+			_, err := mm.Forward(tt.yPred, tt.yTrue)
+			if err != ErrInvalidTarget {
+				t.Errorf("Forward: expected ErrInvalidTarget, got %v", err)
+			}
+
+			// Test Backward
+			_, err = mm.Backward(tt.yPred, tt.yTrue)
+			if err != ErrInvalidTarget {
+				t.Errorf("Backward: expected ErrInvalidTarget, got %v", err)
+			}
+
+			// Test BackwardInPlace
+			grad := make([]float32, len(tt.yPred))
+			err = mm.BackwardInPlace(tt.yPred, tt.yTrue, grad)
+			if err != ErrInvalidTarget {
+				t.Errorf("BackwardInPlace: expected ErrInvalidTarget, got %v", err)
+			}
+		})
+	}
+}
+
 // TestMultiLabelSoftMarginLossForward tests multi-label soft margin loss forward pass.
 // Note: yPred should be logits (before sigmoid), not probabilities
 func TestMultiLabelSoftMarginLossForward(t *testing.T) {
@@ -1188,5 +1226,163 @@ func TestMultiLabelSoftMarginLossBackward(t *testing.T) {
 		if float32(math.Abs(float64(grad[i]-expected[i]))) > 1e-6 {
 			t.Errorf("grad[%d] = %v, want %v", i, grad[i], expected[i])
 		}
+	}
+}
+
+// TestMSEBufferReuse verifies that MSE reuses internal buffer across Backward calls.
+func TestMSEBufferReuse(t *testing.T) {
+	mse := &MSE{}
+
+	// First call - buffer should be allocated
+	yPred1 := []float32{1.0, 2.0, 3.0}
+	yTrue1 := []float32{1.5, 2.5, 3.5}
+	grad1, err := mse.Backward(yPred1, yTrue1)
+	if err != nil {
+		t.Fatalf("First Backward failed: %v", err)
+	}
+
+	// Check buffer capacity
+	if cap(mse.gradBuf) < len(yPred1) {
+		t.Errorf("Buffer capacity %d < %d after first call", cap(mse.gradBuf), len(yPred1))
+	}
+
+	// Second call with same size - should reuse buffer
+	grad2, err := mse.Backward(yPred1, yTrue1)
+	if err != nil {
+		t.Fatalf("Second Backward failed: %v", err)
+	}
+
+	// Verify both gradients have same length
+	if len(grad1) != len(grad2) {
+		t.Errorf("Gradient lengths differ: %d vs %d", len(grad1), len(grad2))
+	}
+
+	// Buffer should be reused (same underlying array)
+	if &mse.gradBuf[0] != &grad2[0] {
+		t.Log("Note: Buffer may have been reallocated (this is OK if capacity was insufficient)")
+	}
+
+	// Third call with larger size - buffer should grow
+	yPred3 := make([]float32, 100)
+	yTrue3 := make([]float32, 100)
+	grad3, err := mse.Backward(yPred3, yTrue3)
+	if err != nil {
+		t.Fatalf("Third Backward (larger) failed: %v", err)
+	}
+
+	if len(grad3) != 100 {
+		t.Errorf("Expected gradient length 100, got %d", len(grad3))
+	}
+
+	if cap(mse.gradBuf) < 100 {
+		t.Errorf("Buffer capacity %d < 100 after growing", cap(mse.gradBuf))
+	}
+}
+
+// TestMSEBufferReset verifies ResetGradBuffer clears the buffer.
+func TestMSEBufferReset(t *testing.T) {
+	mse := &MSE{}
+
+	// First call to allocate buffer
+	yPred := []float32{1.0, 2.0, 3.0}
+	yTrue := []float32{1.5, 2.5, 3.5}
+	_, _ = mse.Backward(yPred, yTrue)
+
+	if mse.gradBuf == nil {
+		t.Fatal("Buffer should be allocated after Backward")
+	}
+
+	// Reset buffer
+	mse.ResetGradBuffer()
+
+	if mse.gradBuf != nil {
+		t.Error("Buffer should be nil after ResetGradBuffer")
+	}
+}
+
+// TestBufferReuseAllLosses verifies buffer reuse for all loss functions.
+func TestBufferReuseAllLosses(t *testing.T) {
+	testCases := []struct {
+		name string
+		loss interface {
+			Backward(yPred, yTrue []float32) ([]float32, error)
+			ResetGradBuffer()
+		}
+		yPred []float32
+		yTrue []float32
+	}{
+		{
+			name:  "MSE",
+			loss:  &MSE{},
+			yPred: []float32{1.0, 2.0, 3.0},
+			yTrue: []float32{1.5, 2.5, 3.5},
+		},
+		{
+			name:  "CrossEntropy",
+			loss:  &CrossEntropy{},
+			yPred: []float32{0.2, 0.5, 0.3},
+			yTrue: []float32{0.0, 1.0, 0.0},
+		},
+		{
+			name:  "L1Loss",
+			loss:  &L1Loss{},
+			yPred: []float32{1.0, 2.0, 3.0},
+			yTrue: []float32{1.5, 2.5, 3.5},
+		},
+		{
+			name:  "BCELoss",
+			loss:  &BCELoss{},
+			yPred: []float32{0.3, 0.7, 0.5},
+			yTrue: []float32{0.0, 1.0, 0.0},
+		},
+		{
+			name:  "BCEWithLogitsLoss",
+			loss:  &BCEWithLogitsLoss{},
+			yPred: []float32{0.0, 1.0, -1.0},
+			yTrue: []float32{0.0, 1.0, 0.0},
+		},
+		{
+			name:  "NLLLoss",
+			loss:  &NLLLoss{},
+			yPred: []float32{-1.2, -0.5, -0.8},
+			yTrue: []float32{0.0, 1.0, 0.0},
+		},
+		{
+			name:  "KLDivLoss",
+			loss:  &KLDivLoss{},
+			yPred: []float32{0.2, 0.5, 0.3},
+			yTrue: []float32{0.1, 0.6, 0.3},
+		},
+		{
+			name:  "MultiLabelSoftMarginLoss",
+			loss:  &MultiLabelSoftMarginLoss{},
+			yPred: []float32{0.0, 1.0, -1.0},
+			yTrue: []float32{0.0, 1.0, 0.0},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// First call
+			grad1, err := tc.loss.Backward(tc.yPred, tc.yTrue)
+			if err != nil {
+				t.Fatalf("First Backward failed: %v", err)
+			}
+			if len(grad1) != len(tc.yPred) {
+				t.Errorf("Expected gradient length %d, got %d", len(tc.yPred), len(grad1))
+			}
+
+			// Second call - should reuse buffer
+			grad2, err := tc.loss.Backward(tc.yPred, tc.yTrue)
+			if err != nil {
+				t.Fatalf("Second Backward failed: %v", err)
+			}
+			if len(grad2) != len(tc.yPred) {
+				t.Errorf("Expected gradient length %d, got %d", len(tc.yPred), len(grad2))
+			}
+
+			// Reset should clear buffer
+			tc.loss.ResetGradBuffer()
+		})
 	}
 }

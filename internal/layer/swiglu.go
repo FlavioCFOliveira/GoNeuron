@@ -319,6 +319,10 @@ func (s *SwiGLU) ClearGradients() {
 	}
 }
 
+// Close implements the Layer interface.
+func (s *SwiGLU) Close() {}
+
+
 func (s *SwiGLU) Clone() Layer {
 	newS, _ := NewSwiGLU(s.inSize, s.outSize)
 	copy(newS.params, s.params)

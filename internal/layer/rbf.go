@@ -373,6 +373,9 @@ func (r *RBF) NamedParams() []NamedParam {
 	}
 }
 
+// Close implements the Layer interface.
+func (r *RBF) Close() {}
+
 // Clone creates a deep copy.
 func (r *RBF) Clone() Layer {
 	newR, _ := NewRBF(r.inSize, r.numCenters, r.outSize, r.gamma)

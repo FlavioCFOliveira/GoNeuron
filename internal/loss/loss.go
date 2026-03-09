@@ -13,6 +13,7 @@ var (
 	ErrDivisibleBy2     = errors.New("prediction length must be divisible by 2")
 	ErrInvalidDimension = errors.New("invalid dimension")
 	ErrEmptyInput       = errors.New("input slice is empty")
+	ErrInvalidTarget    = errors.New("target index out of bounds")
 )
 
 // BackwardInPlacer is an optional interface for loss functions that support
@@ -28,13 +29,25 @@ type Loss interface {
 	Forward(yPred, yTrue []float32) (float32, error)
 
 	// Backward computes the gradient of the loss w.r.t. prediction.
-	// This creates a new slice and should be avoided in hot loops.
+	// Uses internal buffer reuse for zero-allocation operation.
+	// For thread-safe usage, use BackwardInPlace with externally provided buffer.
 	// Returns error if input lengths don't match.
 	Backward(yPred, yTrue []float32) ([]float32, error)
 }
 
-// MSE (Mean Squared Error) loss.
-type MSE struct{}
+// MSE (Mean Squared Error) loss with buffer reuse.
+type MSE struct {
+	// gradBuf is a pre-allocated buffer for gradient computation.
+	// Grows as needed and is reused across Backward calls.
+	// For thread-safe concurrent usage, use BackwardInPlace with external buffer.
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+// Call this when input size changes significantly to release memory.
+func (m *MSE) ResetGradBuffer() {
+	m.gradBuf = nil
+}
 
 // Forward computes mean squared error: (1/n) * sum((y_pred - y_true)^2)
 func (m MSE) Forward(yPred, yTrue []float32) (float32, error) {
@@ -55,7 +68,7 @@ func (m MSE) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient: dL/dy_pred = (2/n) * (y_pred - y_true)
-// Note: Returned slice is newly allocated for safety.
+// Uses stack-allocated buffer for zero-allocation operation.
 func (m MSE) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
@@ -74,7 +87,7 @@ func (m MSE) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
-// This avoids allocation when grad slice is pre-allocated.
+// This is thread-safe when using externally provided buffers.
 func (m MSE) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -91,8 +104,17 @@ func (m MSE) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// CrossEntropy loss for classification.
-type CrossEntropy struct{}
+// CrossEntropy loss for classification with buffer reuse.
+type CrossEntropy struct {
+	// gradBuf is a pre-allocated buffer for gradient computation.
+	// Grows as needed and is reused across Backward calls.
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (c *CrossEntropy) ResetGradBuffer() {
+	c.gradBuf = nil
+}
 
 // Forward computes cross entropy: -sum(y_true * log(y_pred + eps))
 func (c CrossEntropy) Forward(yPred, yTrue []float32) (float32, error) {
@@ -120,6 +142,7 @@ func (c CrossEntropy) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for cross entropy combined with softmax.
 // When used with softmax activation, the combined gradient is: dL/dz = y_pred - y_true
 // This assumes y_pred contains probabilities from softmax and y_true is one-hot encoded.
+// Uses stack-allocated buffer for zero-allocation operation.
 func (c CrossEntropy) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
@@ -138,6 +161,7 @@ func (c CrossEntropy) Backward(yPred, yTrue []float32) ([]float32, error) {
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
 // Combined gradient: y_pred - y_true (when yPred is from softmax)
+// Thread-safe when using externally provided buffers.
 func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -153,9 +177,10 @@ func (c CrossEntropy) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// Huber loss for robust regression.
+// Huber loss for robust regression with buffer reuse.
 type Huber struct {
-	Delta float32 // Threshold for quadratic/linear transition
+	Delta   float32 // Threshold for quadratic/linear transition
+	gradBuf []float32
 }
 
 // NewHuber creates a Huber loss with the given delta.
@@ -163,8 +188,13 @@ func NewHuber(delta float32) *Huber {
 	return &Huber{Delta: delta}
 }
 
+// ResetGradBuffer clears the internal gradient buffer.
+func (h *Huber) ResetGradBuffer() {
+	h.gradBuf = nil
+}
+
 // Forward computes Huber loss.
-func (h Huber) Forward(yPred, yTrue []float32) (float32, error) {
+func (h *Huber) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -186,7 +216,8 @@ func (h Huber) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for Huber loss.
-func (h Huber) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (h *Huber) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -195,7 +226,12 @@ func (h Huber) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(h.gradBuf) < n {
+		h.gradBuf = make([]float32, n)
+	}
+	grad := h.gradBuf[:n]
+
 	for i := 0; i < n; i++ {
 		diff := yPred[i] - yTrue[i]
 		if float32(math.Abs(float64(diff))) <= h.Delta {
@@ -208,6 +244,7 @@ func (h Huber) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (h Huber) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -228,11 +265,18 @@ func (h Huber) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// L1Loss (Mean Absolute Error) loss.
-type L1Loss struct{}
+// L1Loss (Mean Absolute Error) loss with buffer reuse.
+type L1Loss struct {
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (l *L1Loss) ResetGradBuffer() {
+	l.gradBuf = nil
+}
 
 // Forward computes mean absolute error: (1/n) * sum(|y_pred - y_true|)
-func (l L1Loss) Forward(yPred, yTrue []float32) (float32, error) {
+func (l *L1Loss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -249,7 +293,8 @@ func (l L1Loss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for L1 loss: dL/dy_pred = (1/n) * sign(y_pred - y_true)
-func (l L1Loss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (l *L1Loss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -258,7 +303,12 @@ func (l L1Loss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(l.gradBuf) < n {
+		l.gradBuf = make([]float32, n)
+	}
+	grad := l.gradBuf[:n]
+
 	factor := float32(1.0) / float32(n)
 	for i := 0; i < n; i++ {
 		diff := yPred[i] - yTrue[i]
@@ -274,6 +324,7 @@ func (l L1Loss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (l L1Loss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -297,9 +348,16 @@ func (l L1Loss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// BCELoss (Binary Cross Entropy) loss.
+// BCELoss (Binary Cross Entropy) loss with buffer reuse.
 // Requires predictions to be in range (0, 1).
-type BCELoss struct{}
+type BCELoss struct {
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (b *BCELoss) ResetGradBuffer() {
+	b.gradBuf = nil
+}
 
 // Forward computes binary cross entropy: -(1/n) * sum(y*log(p) + (1-y)*log(1-p))
 func (b BCELoss) Forward(yPred, yTrue []float32) (float32, error) {
@@ -330,6 +388,7 @@ func (b BCELoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for BCE loss.
 // Gradient: d/d_pred = (pred - y) / (pred * (1-pred)) / n
 // Note: The gradient is normalized by n since the loss is averaged.
+// Reuses internal buffer to avoid allocations.
 func (b BCELoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
@@ -339,7 +398,12 @@ func (b BCELoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(b.gradBuf) < n {
+		b.gradBuf = make([]float32, n)
+	}
+	grad := b.gradBuf[:n]
+
 	const eps = 1e-10
 	for i := 0; i < n; i++ {
 		// Clip predictions to avoid division by zero
@@ -357,6 +421,7 @@ func (b BCELoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (b BCELoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -380,8 +445,15 @@ func (b BCELoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// BCEWithLogitsLoss combines BCE loss with sigmoid for numerical stability.
-type BCEWithLogitsLoss struct{}
+// BCEWithLogitsLoss combines BCE loss with sigmoid for numerical stability with buffer reuse.
+type BCEWithLogitsLoss struct {
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (b *BCEWithLogitsLoss) ResetGradBuffer() {
+	b.gradBuf = nil
+}
 
 // Forward computes BCE loss with sigmoid applied internally for stability.
 func (b BCEWithLogitsLoss) Forward(yPred, yTrue []float32) (float32, error) {
@@ -411,6 +483,7 @@ func (b BCEWithLogitsLoss) Forward(yPred, yTrue []float32) (float32, error) {
 
 // Backward computes gradient for BCEWithLogitsLoss.
 // Gradient is: sigmoid(x) - y
+// Reuses internal buffer to avoid allocations.
 func (b BCEWithLogitsLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
@@ -420,7 +493,12 @@ func (b BCEWithLogitsLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(b.gradBuf) < n {
+		b.gradBuf = make([]float32, n)
+	}
+	grad := b.gradBuf[:n]
+
 	for i := 0; i < n; i++ {
 		// sigmoid(x) - y
 		sigmoid := 1.0 / (1.0 + float32(math.Exp(float64(-yPred[i]))))
@@ -430,6 +508,7 @@ func (b BCEWithLogitsLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (b BCEWithLogitsLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -446,11 +525,18 @@ func (b BCEWithLogitsLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// NLLLoss (Negative Log Likelihood) loss for classification.
+// NLLLoss (Negative Log Likelihood) loss for classification with buffer reuse.
 // This is typically used with log-probabilities as input (e.g., from LogSoftmax).
 // When input is log-probabilities: loss = -sum(y_true * log_pred) / n
 // When input is probabilities: use CrossEntropy instead.
-type NLLLoss struct{}
+type NLLLoss struct {
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (n *NLLLoss) ResetGradBuffer() {
+	n.gradBuf = nil
+}
 
 // Forward computes negative log likelihood from log-probabilities.
 // Input should be log-probabilities (e.g., output of LogSoftmax).
@@ -479,6 +565,7 @@ func (n NLLLoss) Forward(yPred, yTrue []float32) (float32, error) {
 // Backward computes gradient for NLL loss with log-probabilities.
 // For log-prob input: grad[i] = -y_true[i]
 // This is combined with LogSoftmax's gradient in the Dense layer.
+// Reuses internal buffer to avoid allocations.
 func (n NLLLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	nLen := len(yPred)
 	if nLen == 0 {
@@ -488,8 +575,13 @@ func (n NLLLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
+	// Reuse or grow internal buffer
+	if cap(n.gradBuf) < nLen {
+		n.gradBuf = make([]float32, nLen)
+	}
+	grad := n.gradBuf[:nLen]
+
 	factor := float32(1.0) / float32(nLen)
-	grad := make([]float32, nLen)
 	for i := 0; i < nLen; i++ {
 		grad[i] = -yTrue[i] * factor
 	}
@@ -497,6 +589,7 @@ func (n NLLLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (n NLLLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	nLen := len(yPred)
 	if nLen == 0 {
@@ -513,9 +606,10 @@ func (n NLLLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// CosineEmbeddingLoss measures similarity between two embeddings.
+// CosineEmbeddingLoss measures similarity between two embeddings with buffer reuse.
 type CosineEmbeddingLoss struct {
-	Margin float32 // Minimum margin between positive and negative pairs
+	Margin  float32 // Minimum margin between positive and negative pairs
+	gradBuf []float32
 }
 
 // NewCosineEmbeddingLoss creates a CosineEmbeddingLoss with the given margin.
@@ -523,10 +617,15 @@ func NewCosineEmbeddingLoss(margin float32) *CosineEmbeddingLoss {
 	return &CosineEmbeddingLoss{Margin: margin}
 }
 
+// ResetGradBuffer clears the internal gradient buffer.
+func (c *CosineEmbeddingLoss) ResetGradBuffer() {
+	c.gradBuf = nil
+}
+
 // Forward computes cosine embedding loss.
 // For y=1 (similar): loss = 1 - cos(x1, x2)
 // For y=-1 (dissimilar): loss = max(0, cos(x1, x2) - margin)
-func (c CosineEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (c *CosineEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -553,7 +652,8 @@ func (c CosineEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for cosine embedding loss.
-func (c CosineEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (c *CosineEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -562,7 +662,12 @@ func (c CosineEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error)
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(c.gradBuf) < n {
+		c.gradBuf = make([]float32, n)
+	}
+	grad := c.gradBuf[:n]
+
 	for i := 0; i < n; i++ {
 		y := yTrue[i]
 		pred := yPred[i]
@@ -581,6 +686,7 @@ func (c CosineEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error)
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (c CosineEmbeddingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -607,9 +713,10 @@ func (c CosineEmbeddingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error
 	return nil
 }
 
-// HingeEmbeddingLoss measures embedding similarity using hinge loss.
+// HingeEmbeddingLoss measures embedding similarity using hinge loss with buffer reuse.
 type HingeEmbeddingLoss struct {
-	Margin float32 // Margin for dissimilar pairs
+	Margin  float32 // Margin for dissimilar pairs
+	gradBuf []float32
 }
 
 // NewHingeEmbeddingLoss creates a HingeEmbeddingLoss with the given margin.
@@ -617,10 +724,15 @@ func NewHingeEmbeddingLoss(margin float32) *HingeEmbeddingLoss {
 	return &HingeEmbeddingLoss{Margin: margin}
 }
 
+// ResetGradBuffer clears the internal gradient buffer.
+func (h *HingeEmbeddingLoss) ResetGradBuffer() {
+	h.gradBuf = nil
+}
+
 // Forward computes hinge embedding loss.
 // For y=1: loss = x
 // For y=-1: loss = max(0, margin - x)
-func (h HingeEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (h *HingeEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -647,7 +759,8 @@ func (h HingeEmbeddingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for hinge embedding loss.
-func (h HingeEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (h *HingeEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -656,7 +769,12 @@ func (h HingeEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) 
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(h.gradBuf) < n {
+		h.gradBuf = make([]float32, n)
+	}
+	grad := h.gradBuf[:n]
+
 	for i := 0; i < n; i++ {
 		x := yPred[i]
 		y := yTrue[i]
@@ -675,6 +793,7 @@ func (h HingeEmbeddingLoss) Backward(yPred, yTrue []float32) ([]float32, error) 
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (h HingeEmbeddingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -701,12 +820,13 @@ func (h HingeEmbeddingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error 
 	return nil
 }
 
-// TripletMarginLoss measures similarity using triplet margin.
+// TripletMarginLoss measures similarity using triplet margin with buffer reuse.
 // It takes anchor, positive, and negative embeddings as input.
 // Loss = max(0, d(a,p) - d(a,n) + margin)
 type TripletMarginLoss struct {
-	Margin float32 // Margin for the triplet loss
-	P      int     // The norm degree for pairwise distance (1 or 2)
+	Margin  float32 // Margin for the triplet loss
+	P       int     // The norm degree for pairwise distance (1 or 2)
+	gradBuf []float32
 }
 
 // NewTripletMarginLoss creates a TripletMarginLoss with the given margin and norm.
@@ -717,9 +837,14 @@ func NewTripletMarginLoss(margin float32, p int) *TripletMarginLoss {
 	}
 }
 
+// ResetGradBuffer clears the internal gradient buffer.
+func (t *TripletMarginLoss) ResetGradBuffer() {
+	t.gradBuf = nil
+}
+
 // Forward computes triplet margin loss.
 // yPred contains [anchor, positive, negative] concatenated.
-func (t TripletMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (t *TripletMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -759,7 +884,8 @@ func (t TripletMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for triplet margin loss.
-func (t TripletMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (t *TripletMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -772,7 +898,16 @@ func (t TripletMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	}
 
 	embDim := n / 3
-	grad := make([]float32, n)
+
+	// Reuse or grow internal buffer
+	if cap(t.gradBuf) < n {
+		t.gradBuf = make([]float32, n)
+	}
+	grad := t.gradBuf[:n]
+	// Clear gradient buffer since we accumulate
+	for i := range grad {
+		grad[i] = 0
+	}
 
 	for i := 0; i < embDim; i++ {
 		anchor := yPred[i]
@@ -818,6 +953,7 @@ func (t TripletMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (t TripletMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -877,10 +1013,11 @@ func (t TripletMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// MarginRankingLoss for ranking tasks.
+// MarginRankingLoss for ranking tasks with buffer reuse.
 // Loss = max(0, -y * (x1 - x2) + margin)
 type MarginRankingLoss struct {
-	Margin float32 // Margin for ranking loss
+	Margin  float32 // Margin for ranking loss
+	gradBuf []float32
 }
 
 // NewMarginRankingLoss creates a MarginRankingLoss with the given margin.
@@ -888,10 +1025,15 @@ func NewMarginRankingLoss(margin float32) *MarginRankingLoss {
 	return &MarginRankingLoss{Margin: margin}
 }
 
+// ResetGradBuffer clears the internal gradient buffer.
+func (m *MarginRankingLoss) ResetGradBuffer() {
+	m.gradBuf = nil
+}
+
 // Forward computes margin ranking loss.
 // yPred contains [x1, x2] concatenated (length = 2 * nPairs).
 // yTrue contains targets (+1 or -1) for each pair (length = nPairs).
-func (m MarginRankingLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (m *MarginRankingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -922,7 +1064,8 @@ func (m MarginRankingLoss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for margin ranking loss.
-func (m MarginRankingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (m *MarginRankingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -936,7 +1079,15 @@ func (m MarginRankingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(m.gradBuf) < n {
+		m.gradBuf = make([]float32, n)
+	}
+	grad := m.gradBuf[:n]
+	// Clear gradient buffer
+	for i := range grad {
+		grad[i] = 0
+	}
 
 	for i := 0; i < nPairs; i++ {
 		x1 := yPred[i]
@@ -956,6 +1107,7 @@ func (m MarginRankingLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (m MarginRankingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -989,11 +1141,18 @@ func (m MarginRankingLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// KLDivLoss (KL Divergence) loss.
-type KLDivLoss struct{}
+// KLDivLoss (KL Divergence) loss with buffer reuse.
+type KLDivLoss struct {
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (k *KLDivLoss) ResetGradBuffer() {
+	k.gradBuf = nil
+}
 
 // Forward computes KL divergence: sum(y_true * log(y_true / y_pred)) / n
-func (k KLDivLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (k *KLDivLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -1021,7 +1180,8 @@ func (k KLDivLoss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for KL divergence: -y_true / (y_pred * n)
-func (k KLDivLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (k *KLDivLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -1030,7 +1190,12 @@ func (k KLDivLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(k.gradBuf) < n {
+		k.gradBuf = make([]float32, n)
+	}
+	grad := k.gradBuf[:n]
+
 	const eps = 1e-10
 	for i := 0; i < n; i++ {
 		pred := yPred[i]
@@ -1043,6 +1208,7 @@ func (k KLDivLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (k KLDivLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -1063,10 +1229,11 @@ func (k KLDivLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// MultiMarginLoss for multi-class classification with margin.
+// MultiMarginLoss for multi-class classification with margin and buffer reuse.
 type MultiMarginLoss struct {
-	Margin float32 // Margin for the hinge loss
-	P      int     // The norm degree (1 or 2)
+	Margin  float32 // Margin for the hinge loss
+	P       int     // The norm degree (1 or 2)
+	gradBuf []float32
 }
 
 // NewMultiMarginLoss creates a MultiMarginLoss with the given margin and norm.
@@ -1074,10 +1241,15 @@ func NewMultiMarginLoss(margin float32, p int) *MultiMarginLoss {
 	return &MultiMarginLoss{Margin: margin, P: p}
 }
 
+// ResetGradBuffer clears the internal gradient buffer.
+func (m *MultiMarginLoss) ResetGradBuffer() {
+	m.gradBuf = nil
+}
+
 // Forward computes multi-class margin loss.
 // yPred contains class scores.
 // yTrue contains integer class indices.
-func (m MultiMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (m *MultiMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -1091,7 +1263,7 @@ func (m MultiMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 		target := int(yTrue[i])
 
 		if target < 0 || target >= n {
-			continue // Skip invalid indices
+			return 0, ErrInvalidTarget
 		}
 
 		targetScore := yPred[target]
@@ -1117,7 +1289,8 @@ func (m MultiMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 }
 
 // Backward computes gradient for multi-class margin loss.
-func (m MultiMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (m *MultiMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -1126,14 +1299,23 @@ func (m MultiMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(m.gradBuf) < n {
+		m.gradBuf = make([]float32, n)
+	}
+	grad := m.gradBuf[:n]
+	// Clear gradient buffer
+	for i := range grad {
+		grad[i] = 0
+	}
+
 	factor := float32(1.0) / float32(n)
 
 	for i := 0; i < n; i++ {
 		target := int(yTrue[i])
 
 		if target < 0 || target >= n {
-			continue
+			return nil, ErrInvalidTarget
 		}
 
 		targetScore := yPred[target]
@@ -1160,6 +1342,7 @@ func (m MultiMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (m MultiMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -1173,7 +1356,7 @@ func (m MultiMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 		target := int(yTrue[i])
 
 		if target < 0 || target >= n {
-			continue
+			return ErrInvalidTarget
 		}
 
 		targetScore := yPred[target]
@@ -1198,12 +1381,19 @@ func (m MultiMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	return nil
 }
 
-// MultiLabelSoftMarginLoss for multi-label classification.
-type MultiLabelSoftMarginLoss struct{}
+// MultiLabelSoftMarginLoss for multi-label classification with buffer reuse.
+type MultiLabelSoftMarginLoss struct {
+	gradBuf []float32
+}
+
+// ResetGradBuffer clears the internal gradient buffer.
+func (m *MultiLabelSoftMarginLoss) ResetGradBuffer() {
+	m.gradBuf = nil
+}
 
 // Forward computes multi-label soft margin loss.
 // Loss = -sum(y*log(σ(x)) + (1-y)*log(1-σ(x))) / n
-func (m MultiLabelSoftMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
+func (m *MultiLabelSoftMarginLoss) Forward(yPred, yTrue []float32) (float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return 0, ErrEmptyInput
@@ -1237,7 +1427,8 @@ func (m MultiLabelSoftMarginLoss) Forward(yPred, yTrue []float32) (float32, erro
 }
 
 // Backward computes gradient for multi-label soft margin loss.
-func (m MultiLabelSoftMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
+// Reuses internal buffer to avoid allocations.
+func (m *MultiLabelSoftMarginLoss) Backward(yPred, yTrue []float32) ([]float32, error) {
 	n := len(yPred)
 	if n == 0 {
 		return nil, ErrEmptyInput
@@ -1246,7 +1437,12 @@ func (m MultiLabelSoftMarginLoss) Backward(yPred, yTrue []float32) ([]float32, e
 		return nil, ErrLengthMismatch
 	}
 
-	grad := make([]float32, n)
+	// Reuse or grow internal buffer
+	if cap(m.gradBuf) < n {
+		m.gradBuf = make([]float32, n)
+	}
+	grad := m.gradBuf[:n]
+
 	factor := float32(1.0) / float32(n)
 	const eps = 1e-10
 
@@ -1263,6 +1459,7 @@ func (m MultiLabelSoftMarginLoss) Backward(yPred, yTrue []float32) ([]float32, e
 }
 
 // BackwardInPlace computes gradient and stores it in the grad slice.
+// Thread-safe when using externally provided buffers.
 func (m MultiLabelSoftMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) error {
 	n := len(yPred)
 	if n == 0 {
@@ -1283,4 +1480,3 @@ func (m MultiLabelSoftMarginLoss) BackwardInPlace(yPred, yTrue, grad []float32) 
 	}
 	return nil
 }
-

@@ -19,6 +19,7 @@ var (
 	ErrInvalidInput       = errors.New("invalid input")
 	ErrIndexOutOfBounds   = errors.New("index out of bounds")
 	ErrInvalidShape       = errors.New("invalid shape")
+	ErrInvalidState       = errors.New("invalid state")
 )
 
 // maxBufferSize defines the maximum allowed buffer size to prevent memory exhaustion
@@ -123,6 +124,11 @@ type Layer interface {
 	// for this layer to save its intermediate states during forward pass.
 	// Returns 0 if the layer doesn't need to save state to arena.
 	ArenaSize() int
+
+	// Close releases any resources held by the layer, including GPU buffers.
+	// This method should be called when the layer is no longer needed to prevent memory leaks.
+	// Close is idempotent and safe to call multiple times.
+	Close()
 }
 
 // DeferredLayer is a layer that can defer its initialization until the input size is known.
@@ -139,6 +145,14 @@ type ArenaLayer interface {
 	ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error)
 }
 
+// BatchArenaLayer is an optional interface for layers that support batched
+// zero-allocation activation saving via arena.
+// Layers implementing this can be used with optimized batch prediction.
+type BatchArenaLayer interface {
+	ArenaLayer
+	ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error)
+}
+
 // NamedParam represents a named parameter with its shape and data.
 type NamedParam struct {
 	Name  string
@@ -151,6 +165,46 @@ type NamedParamProvider interface {
 	NamedParams() []NamedParam
 }
 
+// Activation type constants for CPU-side caching.
+// Using ints instead of type assertions for faster switching in hot paths.
+const (
+	ActTypeNone = iota
+	ActTypeReLU
+	ActTypeSigmoid
+	ActTypeTanh
+	ActTypeLeakyReLU
+	ActTypeGELU
+	ActTypeSoftmax
+	ActTypeLogSoftmax
+)
+
+// cacheActivationType converts an Activation interface to a cached int type.
+// This avoids expensive type assertions in hot paths (forward/backward loops).
+func cacheActivationType(act activations.Activation) int {
+	if act == nil {
+		return ActTypeNone
+	}
+	switch act.(type) {
+	case activations.ReLU, *activations.ReLU:
+		return ActTypeReLU
+	case activations.Sigmoid, *activations.Sigmoid:
+		return ActTypeSigmoid
+	case activations.Tanh, *activations.Tanh:
+		return ActTypeTanh
+	case *activations.LeakyReLU:
+		return ActTypeLeakyReLU
+	case *activations.GELU:
+		return ActTypeGELU
+	case *activations.Softmax:
+		return ActTypeSoftmax
+	case *activations.LogSoftmax:
+		return ActTypeLogSoftmax
+	default:
+		return ActTypeNone
+	}
+}
+
+// getActivationType returns the Metal activation type for GPU kernels.
 func getActivationType(act activations.Activation) int {
 	switch act.(type) {
 	case activations.Sigmoid, *activations.Sigmoid:
@@ -159,7 +213,7 @@ func getActivationType(act activations.Activation) int {
 		return MetalActivationTanh
 	case activations.ReLU, *activations.ReLU:
 		return MetalActivationReLU
-	case activations.GELU, *activations.GELU:
+	case *activations.GELU:
 		return MetalActivationGELU
 	default:
 		return MetalActivationNone
@@ -168,24 +222,26 @@ func getActivationType(act activations.Activation) int {
 
 // Dense is a fully connected layer optimized for performance.
 type Dense struct {
-	params    []float32 // Contiguous weights + biases
-	weights   []float32 // View of params
-	biases    []float32 // View of params
-	act       activations.Activation
-	outSize   int
-	inSize    int
-	device    Device
+	params   []float32 // Contiguous weights + biases
+	weights  []float32 // View of params
+	biases   []float32 // View of params
+	act      activations.Activation
+	actType  int // Cached activation type to avoid type assertions in hot paths
+	outSize  int
+	inSize   int
+	device   Device
+	useMetal bool // Cached type assertion result to avoid repeated interface checks
 
 	// Reusable buffers
-	inputBuf      []float32
-	outputBuf     []float32
-	preActBuf     []float32
-	grads         []float32 // Contiguous gradW + gradB
-	gradWBuf      []float32 // View of grads
-	gradBBuf      []float32 // View of grads
-	gradInBuf     []float32
-	dzBuf         []float32
-	softmaxBuf    []float32 // Pre-allocated for LogSoftmax backward
+	inputBuf   []float32
+	outputBuf  []float32
+	preActBuf  []float32
+	grads      []float32 // Contiguous gradW + gradB
+	gradWBuf   []float32 // View of grads
+	gradBBuf   []float32 // View of grads
+	gradInBuf  []float32
+	dzBuf      []float32
+	softmaxBuf []float32 // Pre-allocated for LogSoftmax backward
 
 	training bool
 
@@ -225,6 +281,7 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 
 	d := &Dense{
 		act:                act,
+		actType:            cacheActivationType(act),
 		outSize:            out,
 		inSize:             in,
 		device:             device,
@@ -272,15 +329,17 @@ func (d *Dense) Build(in int) {
 	d.dzBuf = make([]float32, out)
 	d.softmaxBuf = make([]float32, out)
 
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-		d.bufWeights = metal.CreateBuffer(d.weights)
-		d.bufBiases = metal.CreateBuffer(d.biases)
-		d.bufIn = metal.CreateEmptyBuffer(in)
-		d.bufOut = metal.CreateEmptyBuffer(out)
-		d.bufGradW = metal.CreateEmptyBuffer(out * in)
-		d.bufGradB = metal.CreateEmptyBuffer(out)
-		d.bufGradIn = metal.CreateEmptyBuffer(in)
-		d.bufDZ = metal.CreateEmptyBuffer(out)
+	if d.useMetal {
+		if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+			d.bufWeights = metal.CreateBuffer(d.weights)
+			d.bufBiases = metal.CreateBuffer(d.biases)
+			d.bufIn = metal.CreateEmptyBuffer(in)
+			d.bufOut = metal.CreateEmptyBuffer(out)
+			d.bufGradW = metal.CreateEmptyBuffer(out * in)
+			d.bufGradB = metal.CreateEmptyBuffer(out)
+			d.bufGradIn = metal.CreateEmptyBuffer(in)
+			d.bufDZ = metal.CreateEmptyBuffer(out)
+		}
 	}
 }
 
@@ -327,19 +386,22 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 	output := d.outputBuf
 
 	metalUsed := false
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
-		d.bufIn.Update(x)
-		actType := MetalActivationNone
-		if !d.training {
-			actType = getActivationType(d.act)
+	if d.useMetal {
+		if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
+			d.bufIn.Update(x)
+			actType := MetalActivationNone
+			if !d.training {
+				actType = getActivationType(d.act)
+			}
+			metal.MatMulFusedPersistent(d.bufWeights, d.bufIn, d.bufBiases, d.bufOut, outSize, 1, inSize, actType)
+			d.bufOut.Read(preAct)
+			if actType != MetalActivationNone {
+				copy(output, preAct)
+			}
+			metalUsed = true
 		}
-		metal.MatMulFusedPersistent(d.bufWeights, d.bufIn, d.bufBiases, d.bufOut, outSize, 1, inSize, actType)
-		d.bufOut.Read(preAct)
-		if actType != MetalActivationNone {
-			copy(output, preAct)
-		}
-		metalUsed = true
-	} else {
+	}
+	if !metalUsed {
 		// Use optimized CPU MatMul implementation
 		matMulOptimized(input, weights, biases, preAct, 1, inSize, outSize)
 	}
@@ -368,10 +430,17 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 	}
 
 	if !metalUsed || d.training {
-		if batchAct, ok := d.act.(activations.BatchActivation); ok {
+		// Use cached actType for faster dispatch (avoids type assertions in hot path)
+		switch d.actType {
+		case ActTypeSoftmax, ActTypeLogSoftmax:
+			// BatchActivation interface for Softmax variants
 			copy(output, preAct)
-			batchAct.ActivateBatch(output)
-		} else {
+			d.act.(activations.BatchActivation).ActivateBatch(output)
+		case ActTypeNone:
+			// No activation - just copy pre-activation values
+			copy(output, preAct)
+		default:
+			// Scalar activation using cached type
 			for o := 0; o < outSize; o++ {
 				output[o] = d.act.Activate(preAct[o])
 			}
@@ -430,63 +499,67 @@ func (d *Dense) Backward(grad []float32) ([]float32, error) {
 	gradB := d.gradBBuf
 	gradIn := d.gradInBuf
 
-	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
+	// Use cached actType for faster dispatch (avoids type assertions in hot path)
+	switch d.actType {
+	case ActTypeSoftmax:
 		output := d.savedOutput[:outSize]
-		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
-			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-				d.bufOut.Update(grad)
-				d.bufDZ.Update(output)
-				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
-				d.bufDZ.Read(dz)
-				for k := 0; k < outSize; k++ {
-					gradB[k] += dz[k]
-				}
-			} else {
-				for k := 0; k < outSize; k++ {
-					sum := float32(0.0)
-					outK := output[k]
-					for i := 0; i < outSize; i++ {
-						delta := float32(0.0)
-						if i == k {
-							delta = 1.0
-						}
-						sum += grad[i] * output[i] * (delta - outK)
-					}
-					dz[k] = sum
-					gradB[k] += sum
-				}
+		if d.useMetal {
+			metal := d.device.(*MetalDevice)
+			d.bufOut.Update(grad)
+			d.bufDZ.Update(output)
+			metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+			d.bufDZ.Read(dz)
+			for k := 0; k < outSize; k++ {
+				gradB[k] += dz[k]
 			}
-		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
-			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-				// For LogSoftmax, we need softmax(preAct)
-				softmax := d.softmaxBuf[:outSize]
-				for i := range softmax {
-					softmax[i] = float32(math.Exp(float64(output[i])))
-				}
-				d.bufOut.Update(grad)
-				d.bufDZ.Update(softmax)
-				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
-				d.bufDZ.Read(dz)
-				for k := 0; k < outSize; k++ {
-					gradB[k] += dz[k]
-				}
-			} else {
-				for k := 0; k < outSize; k++ {
-					sum := float32(0.0)
-					softmaxK := float32(math.Exp(float64(output[k])))
-					for i := 0; i < outSize; i++ {
-						delta := float32(0.0)
-						if i == k {
-							delta = 1.0
-						}
-						sum += grad[i] * (delta - softmaxK)
+		} else {
+			for k := 0; k < outSize; k++ {
+				sum := float32(0.0)
+				outK := output[k]
+				for i := 0; i < outSize; i++ {
+					delta := float32(0.0)
+					if i == k {
+						delta = 1.0
 					}
-					dz[k] = sum
-					gradB[k] += sum
+					sum += grad[i] * output[i] * (delta - outK)
 				}
+				dz[k] = sum
+				gradB[k] += sum
 			}
 		}
-	} else {
+	case ActTypeLogSoftmax:
+		output := d.savedOutput[:outSize]
+		if d.useMetal {
+			metal := d.device.(*MetalDevice)
+			// For LogSoftmax, we need softmax(preAct)
+			softmax := d.softmaxBuf[:outSize]
+			for i := range softmax {
+				softmax[i] = float32(math.Exp(float64(output[i])))
+			}
+			d.bufOut.Update(grad)
+			d.bufDZ.Update(softmax)
+			metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+			d.bufDZ.Read(dz)
+			for k := 0; k < outSize; k++ {
+				gradB[k] += dz[k]
+			}
+		} else {
+			for k := 0; k < outSize; k++ {
+				sum := float32(0.0)
+				softmaxK := float32(math.Exp(float64(output[k])))
+				for i := 0; i < outSize; i++ {
+					delta := float32(0.0)
+					if i == k {
+						delta = 1.0
+					}
+					sum += grad[i] * (delta - softmaxK)
+				}
+				dz[k] = sum
+				gradB[k] += sum
+			}
+		}
+	default:
+		// Scalar activations (ReLU, Sigmoid, Tanh, etc.)
 		for o := 0; o < outSize; o++ {
 			deriv := d.act.Derivative(d.preActBuf[o])
 			dz[o] = grad[o] * deriv
@@ -494,7 +567,8 @@ func (d *Dense) Backward(grad []float32) ([]float32, error) {
 		}
 	}
 
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+	if d.useMetal {
+		metal := d.device.(*MetalDevice)
 		d.bufOut.Update(dz) // dz has same size as grad (outSize)
 		d.bufIn.Update(input)
 		d.bufGradW.Update(gradW)
@@ -664,7 +738,8 @@ func (d *Dense) updateViews() {
 }
 
 func (d *Dense) syncGPU() {
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() && d.bufWeights != nil {
+	if d.useMetal && d.bufWeights != nil {
+		_ = d.device.(*MetalDevice) // type assertion for safety, bufWeights.Update handles actual device
 		d.bufWeights.Update(d.weights)
 		d.bufBiases.Update(d.biases)
 	}
@@ -695,39 +770,85 @@ func (d *Dense) updateGradViews() {
 
 func (d *Dense) SetDevice(device Device) {
 	d.device = device
-	if md, ok := device.(*MetalDevice); ok && md.IsAvailable() && d.inSize > 0 {
-		if d.bufWeights == nil {
-			d.bufWeights = md.CreateBuffer(d.weights)
-		}
-		if d.bufBiases == nil {
-			d.bufBiases = md.CreateBuffer(d.biases)
-		}
-		if d.bufIn == nil {
-			d.bufIn = md.CreateEmptyBuffer(d.inSize)
-		}
-		if d.bufOut == nil {
-			d.bufOut = md.CreateEmptyBuffer(d.outSize)
-		}
-		if d.bufGradW == nil {
-			d.bufGradW = md.CreateEmptyBuffer(d.outSize * d.inSize)
-		}
-		if d.bufGradB == nil {
-			d.bufGradB = md.CreateEmptyBuffer(d.outSize)
-		}
-		if d.bufGradIn == nil {
-			d.bufGradIn = md.CreateEmptyBuffer(d.inSize)
-		}
-		if d.bufDZ == nil {
-			d.bufDZ = md.CreateEmptyBuffer(d.outSize)
+	d.useMetal = false
+	if md, ok := device.(*MetalDevice); ok && md.IsAvailable() {
+		d.useMetal = true
+		if d.inSize > 0 {
+			if d.bufWeights == nil {
+				d.bufWeights = md.CreateBuffer(d.weights)
+			}
+			if d.bufBiases == nil {
+				d.bufBiases = md.CreateBuffer(d.biases)
+			}
+			if d.bufIn == nil {
+				d.bufIn = md.CreateEmptyBuffer(d.inSize)
+			}
+			if d.bufOut == nil {
+				d.bufOut = md.CreateEmptyBuffer(d.outSize)
+			}
+			if d.bufGradW == nil {
+				d.bufGradW = md.CreateEmptyBuffer(d.outSize * d.inSize)
+			}
+			if d.bufGradB == nil {
+				d.bufGradB = md.CreateEmptyBuffer(d.outSize)
+			}
+			if d.bufGradIn == nil {
+				d.bufGradIn = md.CreateEmptyBuffer(d.inSize)
+			}
+			if d.bufDZ == nil {
+				d.bufDZ = md.CreateEmptyBuffer(d.outSize)
+			}
 		}
 	}
+}
+
+// Close releases all GPU buffers and resources held by the layer.
+// This method is idempotent and safe to call multiple times.
+// SEC-009: Implementar cleanup explícito de buffers Metal para prevenir memory leaks.
+func (d *Dense) Close() {
+	// Liberar buffers GPU em ordem inversa de criação
+	if d.bufDZ != nil {
+		d.bufDZ.Close()
+		d.bufDZ = nil
+	}
+	if d.bufGradIn != nil {
+		d.bufGradIn.Close()
+		d.bufGradIn = nil
+	}
+	if d.bufGradB != nil {
+		d.bufGradB.Close()
+		d.bufGradB = nil
+	}
+	if d.bufGradW != nil {
+		d.bufGradW.Close()
+		d.bufGradW = nil
+	}
+	if d.bufOut != nil {
+		d.bufOut.Close()
+		d.bufOut = nil
+	}
+	if d.bufIn != nil {
+		d.bufIn.Close()
+		d.bufIn = nil
+	}
+	if d.bufBiases != nil {
+		d.bufBiases.Close()
+		d.bufBiases = nil
+	}
+	if d.bufWeights != nil {
+		d.bufWeights.Close()
+		d.bufWeights = nil
+	}
+	// Reset device state
+	d.useMetal = false
+	d.device = &CPUDevice{}
 }
 
 func (d *Dense) SetTraining(training bool) {
 	d.training = training
 }
 
-func (d *Dense) InSize() int { return d.inSize }
+func (d *Dense) InSize() int  { return d.inSize }
 func (d *Dense) OutSize() int { return d.outSize }
 
 // ArenaSize returns the number of float32 values needed in the arena.
@@ -805,6 +926,7 @@ func (d *Dense) Clone() Layer {
 	}
 	copy(newD.params, d.params)
 	newD.device = d.device
+	newD.actType = d.actType // Copy cached activation type
 	return newD
 }
 
@@ -819,6 +941,7 @@ func (d *Dense) LightweightClone(params []float32, grads []float32) Layer {
 		weights:            nil,
 		biases:             nil,
 		act:                d.act,
+		actType:            d.actType, // Copy cached activation type
 		outSize:            d.outSize,
 		inSize:             d.inSize,
 		device:             d.device,
@@ -844,7 +967,8 @@ func (d *Dense) LightweightClone(params []float32, grads []float32) Layer {
 		newD.gradBBuf = grads[weightSize:]
 	}
 
-	if md, ok := d.device.(*MetalDevice); ok && md.IsAvailable() && d.inSize > 0 {
+	if d.useMetal && d.inSize > 0 {
+		md := d.device.(*MetalDevice)
 		newD.bufWeights = md.CreateBuffer(newD.weights)
 		newD.bufBiases = md.CreateBuffer(newD.biases)
 		newD.bufIn = md.CreateEmptyBuffer(d.inSize)
@@ -907,68 +1031,91 @@ func (d *Dense) AccumulateBackward(grad []float32) ([]float32, error) {
 	s := numSaved - 1
 	inOff := d.savedInputOffsets[s]
 	paOff := d.savedPreActOffsets[s]
+
+	// SEC-012: Validar offsets antes de construir slices para evitar panic ou acesso inválido
+	if d.arenaPtr == nil {
+		return nil, fmt.Errorf("%w: arena pointer is nil", ErrInvalidState)
+	}
+	arenaLen := len(*d.arenaPtr)
+	if inOff < 0 || inOff > arenaLen-inSize {
+		return nil, fmt.Errorf("%w: input offset %d out of bounds (arena size: %d, inSize: %d)",
+			ErrInvalidState, inOff, arenaLen, inSize)
+	}
+	if paOff < 0 || paOff > arenaLen-outSize {
+		return nil, fmt.Errorf("%w: pre-activation offset %d out of bounds (arena size: %d, outSize: %d)",
+			ErrInvalidState, paOff, arenaLen, outSize)
+	}
+
 	savedInput := (*d.arenaPtr)[inOff : inOff+inSize]
 	savedPreAct := (*d.arenaPtr)[paOff : paOff+outSize]
 
-	if _, isBatchAct := d.act.(activations.BatchActivation); isBatchAct {
+	// Use cached actType for faster dispatch (avoids type assertions in hot path)
+	switch d.actType {
+	case ActTypeSoftmax:
 		output := d.outputBuf[:outSize]
 		copy(output, savedPreAct)
 		d.act.(activations.BatchActivation).ActivateBatch(output)
 
-		if _, isSoftmax := d.act.(activations.Softmax); isSoftmax {
-			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-				d.bufOut.Update(grad)
-				d.bufDZ.Update(output) // Using bufDZ as temp for 'output'
-				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
-				d.bufDZ.Read(dz)
-			} else {
-				for k := 0; k < outSize; k++ {
-					sum := float32(0.0)
-					outK := output[k]
-					for i := 0; i < outSize; i++ {
-						delta := float32(0.0)
-						if i == k {
-							delta = 1.0
-						}
-						sum += grad[i] * output[i] * (delta - outK)
+		if d.useMetal {
+			metal := d.device.(*MetalDevice)
+			d.bufOut.Update(grad)
+			d.bufDZ.Update(output) // Using bufDZ as temp for 'output'
+			metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+			d.bufDZ.Read(dz)
+		} else {
+			for k := 0; k < outSize; k++ {
+				sum := float32(0.0)
+				outK := output[k]
+				for i := 0; i < outSize; i++ {
+					delta := float32(0.0)
+					if i == k {
+						delta = 1.0
 					}
-					dz[k] = sum
+					sum += grad[i] * output[i] * (delta - outK)
 				}
-			}
-		} else if _, isLogSoftmax := d.act.(activations.LogSoftmax); isLogSoftmax {
-			if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
-				// For LogSoftmax, we need softmax(preAct)
-				softmax := d.softmaxBuf[:outSize]
-				for i := range softmax {
-					softmax[i] = float32(math.Exp(float64(output[i])))
-				}
-				d.bufOut.Update(grad)
-				d.bufDZ.Update(softmax)
-				metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
-				d.bufDZ.Read(dz)
-			} else {
-				for k := 0; k < outSize; k++ {
-					sum := float32(0.0)
-					softmaxK := float32(math.Exp(float64(output[k])))
-					for i := 0; i < outSize; i++ {
-						delta := float32(0.0)
-						if i == k {
-							delta = 1.0
-						}
-						sum += grad[i] * (delta - softmaxK)
-					}
-					dz[k] = sum
-				}
+				dz[k] = sum
 			}
 		}
-	} else {
+	case ActTypeLogSoftmax:
+		output := d.outputBuf[:outSize]
+		copy(output, savedPreAct)
+		d.act.(activations.BatchActivation).ActivateBatch(output)
+
+		if d.useMetal {
+			metal := d.device.(*MetalDevice)
+			// For LogSoftmax, we need softmax(preAct)
+			softmax := d.softmaxBuf[:outSize]
+			for i := range softmax {
+				softmax[i] = float32(math.Exp(float64(output[i])))
+			}
+			d.bufOut.Update(grad)
+			d.bufDZ.Update(softmax)
+			metal.SoftmaxBackwardPersistent(d.bufOut, d.bufDZ, d.bufDZ, 1, outSize)
+			d.bufDZ.Read(dz)
+		} else {
+			for k := 0; k < outSize; k++ {
+				sum := float32(0.0)
+				softmaxK := float32(math.Exp(float64(output[k])))
+				for i := 0; i < outSize; i++ {
+					delta := float32(0.0)
+					if i == k {
+						delta = 1.0
+					}
+					sum += grad[i] * (delta - softmaxK)
+				}
+				dz[k] = sum
+			}
+		}
+	default:
+		// Scalar activations (ReLU, Sigmoid, Tanh, etc.)
 		for o := 0; o < outSize; o++ {
 			deriv := d.act.Derivative(savedPreAct[o])
 			dz[o] = grad[o] * deriv
 		}
 	}
 
-	if metal, ok := d.device.(*MetalDevice); ok && metal.IsAvailable() {
+	if d.useMetal {
+		metal := d.device.(*MetalDevice)
 		d.bufOut.Update(dz) // dz has same size as grad (outSize)
 		d.bufIn.Update(savedInput)
 		d.bufGradW.Update(gradW)

@@ -172,6 +172,8 @@ func (p *PositionalEncoding) NamedParams() []NamedParam {
 
 func (p *PositionalEncoding) Reset()                    {}
 func (p *PositionalEncoding) ClearGradients()           { for i := range p.gradBuf { p.gradBuf[i] = 0 } }
+func (p *PositionalEncoding) Close()                    {}
+
 func (p *PositionalEncoding) Clone() Layer {
 	newP, _ := NewPositionalEncoding(p.seqLen, p.dim)
 	copy(newP.weights, p.weights)
@@ -331,6 +333,24 @@ func (m *MultiHeadAttention) Build(inSize int) error {
 	dim := m.dim
 	seqLen := m.seqLen
 
+	// Validate dimensions
+	if dim <= 0 || seqLen <= 0 {
+		return fmt.Errorf("MultiHeadAttention: invalid dimensions dim=%d, seqLen=%d", dim, seqLen)
+	}
+
+	// Check for overflow in buffer size calculations
+	// seqLenDim = seqLen * dim
+	seqLenDim, err := CheckOverflow(seqLen, dim)
+	if err != nil {
+		return fmt.Errorf("MultiHeadAttention: seqLen*dim overflow: %w", err)
+	}
+
+	// seqLenSquared = seqLen * seqLen (for scores buffer)
+	seqLenSquared, err := CheckOverflow(seqLen, seqLen)
+	if err != nil {
+		return fmt.Errorf("MultiHeadAttention: seqLen*seqLen overflow: %w", err)
+	}
+
 	m.wQ, _ = NewDense(dim, dim, activations.Linear{})
 	m.wK, _ = NewDense(dim, dim, activations.Linear{})
 	m.wV, _ = NewDense(dim, dim, activations.Linear{})
@@ -338,7 +358,12 @@ func (m *MultiHeadAttention) Build(inSize int) error {
 
 	// Calculate total parameters
 	paramSize := len(m.wQ.Params())
-	totalSize := paramSize * 4
+	// Check overflow for paramSize * 4
+	totalSize, err := CheckOverflow(paramSize, 4)
+	if err != nil {
+		return fmt.Errorf("MultiHeadAttention: total params overflow: %w", err)
+	}
+
 	m.params = make([]float32, totalSize)
 	m.grads = make([]float32, totalSize)
 
@@ -353,18 +378,18 @@ func (m *MultiHeadAttention) Build(inSize int) error {
 	m.wV.SetGradients(m.grads[2*paramSize : 3*paramSize])
 	m.wOut.SetGradients(m.grads[3*paramSize : 4*paramSize])
 
-	m.outputBuf = make([]float32, seqLen*dim)
-	m.gradInBuf = make([]float32, seqLen*dim)
-	m.qBuf = make([]float32, seqLen*dim)
-	m.kBuf = make([]float32, seqLen*dim)
-	m.vBuf = make([]float32, seqLen*dim)
-	m.scoresBuf = make([]float32, seqLen*seqLen)
-	m.finalOutBuf = make([]float32, seqLen*dim)
+	m.outputBuf = make([]float32, seqLenDim)
+	m.gradInBuf = make([]float32, seqLenDim)
+	m.qBuf = make([]float32, seqLenDim)
+	m.kBuf = make([]float32, seqLenDim)
+	m.vBuf = make([]float32, seqLenDim)
+	m.scoresBuf = make([]float32, seqLenSquared)
+	m.finalOutBuf = make([]float32, seqLenDim)
 
-	m.gradFinalOutBuf = make([]float32, seqLen*dim)
-	m.gradQBuf = make([]float32, seqLen*dim)
-	m.gradKBuf = make([]float32, seqLen*dim)
-	m.gradVBuf = make([]float32, seqLen*dim)
+	m.gradFinalOutBuf = make([]float32, seqLenDim)
+	m.gradQBuf = make([]float32, seqLenDim)
+	m.gradKBuf = make([]float32, seqLenDim)
+	m.gradVBuf = make([]float32, seqLenDim)
 	return nil
 }
 
@@ -787,6 +812,10 @@ func (m *MultiHeadAttention) ClearGradients() {
 	m.wV.ClearGradients()
 	m.wOut.ClearGradients()
 }
+
+// Close implements the Layer interface.
+func (m *MultiHeadAttention) Close() {}
+
 func (m *MultiHeadAttention) Clone() Layer {
 	return NewMultiHeadAttention(m.dim, m.numHeads, m.seqLen, m.Causal)
 }
@@ -927,7 +956,14 @@ func NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim int, causal bool, actT
 	}
 
 	if dim != -1 {
-		t.Build(seqLen * dim)
+		// Check overflow before calling Build
+		buildSize, err := CheckOverflow(seqLen, dim)
+		if err != nil {
+			return nil, fmt.Errorf("TransformerBlock: seqLen*dim overflow: %w", err)
+		}
+		if err := t.Build(buildSize); err != nil {
+			return nil, fmt.Errorf("TransformerBlock: failed to build: %w", err)
+		}
 	}
 
 	return t, nil
@@ -944,18 +980,37 @@ func (t *TransformerBlock) Build(inSize int) error {
 	dim := t.dim
 	seqLen := t.seqLen
 
+	// Validate dimensions
+	if dim <= 0 || seqLen <= 0 {
+		return fmt.Errorf("TransformerBlock: invalid dimensions dim=%d, seqLen=%d", dim, seqLen)
+	}
+
+	// Check for overflow in buffer size calculations
+	seqLenDim, err := CheckOverflow(seqLen, dim)
+	if err != nil {
+		return fmt.Errorf("TransformerBlock: seqLen*dim overflow: %w", err)
+	}
+
 	// Build sub-layers if they are deferred
 	if len(t.mha.Params()) == 0 {
-		t.mha.Build(inSize)
+		if err := t.mha.Build(inSize); err != nil {
+			return fmt.Errorf("TransformerBlock: failed to build MHA: %w", err)
+		}
 	}
 	if b, ok := t.norm1.(DeferredLayer); ok && len(b.Params()) == 0 {
-		b.Build(dim)
+		if err := b.Build(dim); err != nil {
+			return fmt.Errorf("TransformerBlock: failed to build norm1: %w", err)
+		}
 	}
 	if b, ok := t.norm2.(DeferredLayer); ok && len(b.Params()) == 0 {
-		b.Build(dim)
+		if err := b.Build(dim); err != nil {
+			return fmt.Errorf("TransformerBlock: failed to build norm2: %w", err)
+		}
 	}
 	if b, ok := t.ff1.(DeferredLayer); ok && len(b.Params()) == 0 {
-		b.Build(dim)
+		if err := b.Build(dim); err != nil {
+			return fmt.Errorf("TransformerBlock: failed to build ff1: %w", err)
+		}
 	}
 	if len(t.ff2.Params()) == 0 {
 		if t.ff2.outSize <= 0 {
@@ -971,7 +1026,12 @@ func (t *TransformerBlock) Build(inSize int) error {
 	sizeFF1 := len(t.ff1.Params())
 	sizeFF2 := len(t.ff2.Params())
 
-	totalParams := sizeMHA + sizeNorm1 + sizeNorm2 + sizeFF1 + sizeFF2
+	// Check overflow for total params sum
+	totalParams, err := CheckOverflowSum(sizeMHA, sizeNorm1, sizeNorm2, sizeFF1, sizeFF2)
+	if err != nil {
+		return fmt.Errorf("TransformerBlock: total params overflow: %w", err)
+	}
+
 	t.params = make([]float32, totalParams)
 	t.grads = make([]float32, totalParams)
 
@@ -995,16 +1055,16 @@ func (t *TransformerBlock) Build(inSize int) error {
 	t.ff2.SetParams(t.params[offset : offset+sizeFF2])
 	t.ff2.SetGradients(t.grads[offset : offset+sizeFF2])
 
-	t.outputBuf = make([]float32, seqLen*dim)
-	t.res1Buf = make([]float32, seqLen*dim)
-	t.norm1OutBuf = make([]float32, seqLen*dim)
-	t.ffOutBuf = make([]float32, seqLen*dim)
-	t.res2Buf = make([]float32, seqLen*dim)
-	t.gradRes2Buf = make([]float32, seqLen*dim)
-	t.gradNorm1OutFFBuf = make([]float32, seqLen*dim)
-	t.combinedGradBuf = make([]float32, seqLen*dim)
-	t.gradRes1Buf = make([]float32, seqLen*dim)
-	t.gradInBuf = make([]float32, seqLen*dim)
+	t.outputBuf = make([]float32, seqLenDim)
+	t.res1Buf = make([]float32, seqLenDim)
+	t.norm1OutBuf = make([]float32, seqLenDim)
+	t.ffOutBuf = make([]float32, seqLenDim)
+	t.res2Buf = make([]float32, seqLenDim)
+	t.gradRes2Buf = make([]float32, seqLenDim)
+	t.gradNorm1OutFFBuf = make([]float32, seqLenDim)
+	t.combinedGradBuf = make([]float32, seqLenDim)
+	t.gradRes1Buf = make([]float32, seqLenDim)
+	t.gradInBuf = make([]float32, seqLenDim)
 	return nil
 }
 
@@ -1379,6 +1439,10 @@ func (t *TransformerBlock) ClearGradients() {
 	t.ff1.ClearGradients()
 	t.ff2.ClearGradients()
 }
+
+// Close implements the Layer interface.
+func (t *TransformerBlock) Close() {}
+
 func (t *TransformerBlock) Clone() Layer {
 	newT, _ := NewTransformerBlockExt(t.dim, t.mha.numHeads, t.seqLen, t.ffDim, t.mha.Causal, t.actType, t.normType, t.useRoPE)
 	return newT
@@ -1563,6 +1627,9 @@ func (g *GlobalAveragePooling1D) OutSize() int              { return g.dim }
 func (g *GlobalAveragePooling1D) Reset()                   {}
 func (g *GlobalAveragePooling1D) ClearGradients()          {}
 
+// Close implements the Layer interface.
+func (g *GlobalAveragePooling1D) Close() {}
+
 // ArenaSize returns the number of float32 values needed in the activation arena.
 // GlobalAveragePooling1D doesn't save state to arena (stateless pooling).
 func (g *GlobalAveragePooling1D) ArenaSize() int { return 0 }
@@ -1694,6 +1761,10 @@ func (c *CLSPooling) ArenaSize() int { return 0 }
 
 func (c *CLSPooling) Reset()                   {}
 func (c *CLSPooling) ClearGradients()          {}
+
+// Close implements the Layer interface.
+func (c *CLSPooling) Close() {}
+
 func (c *CLSPooling) Clone() Layer {
 	newC, _ := NewCLSPooling(c.seqLen, c.dim)
 	return newC

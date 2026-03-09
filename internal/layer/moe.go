@@ -386,6 +386,9 @@ func (m *MoE) ClearGradients() {
 	}
 }
 
+// Close implements the Layer interface.
+func (m *MoE) Close() {}
+
 func (m *MoE) Clone() Layer {
 	newM, _ := NewMoE(m.inSize, m.outSize, m.numExperts, m.k)
 	copy(newM.params, m.params)

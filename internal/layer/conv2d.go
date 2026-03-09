@@ -171,6 +171,46 @@ func (c *Conv2D) SetDevice(device Device) {
 	}
 }
 
+// Close releases all GPU buffers and resources held by the layer.
+// This method is idempotent and safe to call multiple times.
+// SEC-009: Implementar cleanup explícito de buffers Metal para prevenir memory leaks.
+func (c *Conv2D) Close() {
+	// Liberar buffers GPU em ordem inversa de criação
+	if c.bufGradIn != nil {
+		c.bufGradIn.Close()
+		c.bufGradIn = nil
+	}
+	if c.bufGradOut != nil {
+		c.bufGradOut.Close()
+		c.bufGradOut = nil
+	}
+	if c.bufOutput != nil {
+		c.bufOutput.Close()
+		c.bufOutput = nil
+	}
+	if c.bufInput != nil {
+		c.bufInput.Close()
+		c.bufInput = nil
+	}
+	if c.bufGradB != nil {
+		c.bufGradB.Close()
+		c.bufGradB = nil
+	}
+	if c.bufGradW != nil {
+		c.bufGradW.Close()
+		c.bufGradW = nil
+	}
+	// Liberar estado Conv2D do Metal
+	if c.metalState != nil {
+		if md, ok := c.device.(*MetalDevice); ok && md != nil {
+			md.FreeConv2DState(c.metalState)
+		}
+		c.metalState = nil
+	}
+	// Reset device state
+	c.device = &CPUDevice{}
+}
+
 // computeOutputSize calculates the output spatial dimensions
 func (c *Conv2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 	// Output size: (input + 2*padding - kernel) / stride + 1
@@ -310,6 +350,328 @@ func (c *Conv2D) conv2D3x3Optimized(input []float32, inputHeight, inputWidth, ou
 							c.preActBuf[pos] += w21 * input[rowOffset+inCol]
 							if inCol < inputWidth-1 {
 								c.preActBuf[pos] += w22 * input[rowOffset+inCol+1]
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// conv2D5x5Optimized implements an optimized 5x5 convolution with stride=1, padding=2
+// Common in early CNN layers and some modern architectures
+func (c *Conv2D) conv2D5x5Optimized(input []float32, inputHeight, inputWidth, outH, outW int) {
+	outSize := outH * outW
+	inChannels := c.inChannels
+	outChannels := c.outChannels
+
+	// Kernel weights are stored as: [outChannels][inChannels][5][5]
+	// Pre-fetch weights into local arrays for better cache locality
+
+	for oc := 0; oc < outChannels; oc++ {
+		ocWeightBase := oc * inChannels * 25 // 25 = 5*5
+		ocOutBase := oc * outSize
+
+		// Clear output buffer for this channel
+		for i := 0; i < outSize; i++ {
+			c.preActBuf[ocOutBase+i] = 0
+		}
+
+		// Process input channels
+		for ic := 0; ic < inChannels; ic++ {
+			// Pre-fetch the 5x5 kernel weights for this input/output channel pair
+			wBase := ocWeightBase + ic*25
+			var w [25]float32
+			for i := 0; i < 25; i++ {
+				w[i] = c.weights[wBase+i]
+			}
+
+			icOffset := ic * inputHeight * inputWidth
+
+			// Process output positions with loop unrolling
+			// Skip boundary checks by processing only valid interior region
+			// Handle boundaries separately
+
+			// Process interior region (no boundary checks needed for kernel positions)
+			for oh := 2; oh < outH-2; oh++ {
+				outRowOffset := ocOutBase + oh*outW
+				inRow := oh
+
+				// Pre-compute row offsets for the 5 rows
+				rowOffset0 := icOffset + (inRow-2)*inputWidth
+				rowOffset1 := icOffset + (inRow-1)*inputWidth
+				rowOffset2 := icOffset + inRow*inputWidth
+				rowOffset3 := icOffset + (inRow+1)*inputWidth
+				rowOffset4 := icOffset + (inRow+2)*inputWidth
+
+				// Process in chunks of 2 for better instruction pipelining
+				ow := 2
+				for ; ow <= outW-3; ow += 2 {
+					pos0 := outRowOffset + ow
+					pos1 := pos0 + 1
+					inCol0 := ow
+					inCol1 := ow + 1
+
+					// Row -2 contributions
+					c.preActBuf[pos0] += w[0]*input[rowOffset0+inCol0-2] + w[1]*input[rowOffset0+inCol0-1] + w[2]*input[rowOffset0+inCol0] + w[3]*input[rowOffset0+inCol0+1] + w[4]*input[rowOffset0+inCol0+2]
+					c.preActBuf[pos1] += w[0]*input[rowOffset0+inCol1-2] + w[1]*input[rowOffset0+inCol1-1] + w[2]*input[rowOffset0+inCol1] + w[3]*input[rowOffset0+inCol1+1] + w[4]*input[rowOffset0+inCol1+2]
+
+					// Row -1 contributions
+					c.preActBuf[pos0] += w[5]*input[rowOffset1+inCol0-2] + w[6]*input[rowOffset1+inCol0-1] + w[7]*input[rowOffset1+inCol0] + w[8]*input[rowOffset1+inCol0+1] + w[9]*input[rowOffset1+inCol0+2]
+					c.preActBuf[pos1] += w[5]*input[rowOffset1+inCol1-2] + w[6]*input[rowOffset1+inCol1-1] + w[7]*input[rowOffset1+inCol1] + w[8]*input[rowOffset1+inCol1+1] + w[9]*input[rowOffset1+inCol1+2]
+
+					// Row 0 contributions
+					c.preActBuf[pos0] += w[10]*input[rowOffset2+inCol0-2] + w[11]*input[rowOffset2+inCol0-1] + w[12]*input[rowOffset2+inCol0] + w[13]*input[rowOffset2+inCol0+1] + w[14]*input[rowOffset2+inCol0+2]
+					c.preActBuf[pos1] += w[10]*input[rowOffset2+inCol1-2] + w[11]*input[rowOffset2+inCol1-1] + w[12]*input[rowOffset2+inCol1] + w[13]*input[rowOffset2+inCol1+1] + w[14]*input[rowOffset2+inCol1+2]
+
+					// Row +1 contributions
+					c.preActBuf[pos0] += w[15]*input[rowOffset3+inCol0-2] + w[16]*input[rowOffset3+inCol0-1] + w[17]*input[rowOffset3+inCol0] + w[18]*input[rowOffset3+inCol0+1] + w[19]*input[rowOffset3+inCol0+2]
+					c.preActBuf[pos1] += w[15]*input[rowOffset3+inCol1-2] + w[16]*input[rowOffset3+inCol1-1] + w[17]*input[rowOffset3+inCol1] + w[18]*input[rowOffset3+inCol1+1] + w[19]*input[rowOffset3+inCol1+2]
+
+					// Row +2 contributions
+					c.preActBuf[pos0] += w[20]*input[rowOffset4+inCol0-2] + w[21]*input[rowOffset4+inCol0-1] + w[22]*input[rowOffset4+inCol0] + w[23]*input[rowOffset4+inCol0+1] + w[24]*input[rowOffset4+inCol0+2]
+					c.preActBuf[pos1] += w[20]*input[rowOffset4+inCol1-2] + w[21]*input[rowOffset4+inCol1-1] + w[22]*input[rowOffset4+inCol1] + w[23]*input[rowOffset4+inCol1+1] + w[24]*input[rowOffset4+inCol1+2]
+				}
+
+				// Handle remaining elements
+				for ; ow < outW-2; ow++ {
+					pos := outRowOffset + ow
+					inCol := ow
+
+					// Accumulate all 25 kernel positions
+					c.preActBuf[pos] += w[0]*input[rowOffset0+inCol-2] + w[1]*input[rowOffset0+inCol-1] + w[2]*input[rowOffset0+inCol] + w[3]*input[rowOffset0+inCol+1] + w[4]*input[rowOffset0+inCol+2]
+					c.preActBuf[pos] += w[5]*input[rowOffset1+inCol-2] + w[6]*input[rowOffset1+inCol-1] + w[7]*input[rowOffset1+inCol] + w[8]*input[rowOffset1+inCol+1] + w[9]*input[rowOffset1+inCol+2]
+					c.preActBuf[pos] += w[10]*input[rowOffset2+inCol-2] + w[11]*input[rowOffset2+inCol-1] + w[12]*input[rowOffset2+inCol] + w[13]*input[rowOffset2+inCol+1] + w[14]*input[rowOffset2+inCol+2]
+					c.preActBuf[pos] += w[15]*input[rowOffset3+inCol-2] + w[16]*input[rowOffset3+inCol-1] + w[17]*input[rowOffset3+inCol] + w[18]*input[rowOffset3+inCol+1] + w[19]*input[rowOffset3+inCol+2]
+					c.preActBuf[pos] += w[20]*input[rowOffset4+inCol-2] + w[21]*input[rowOffset4+inCol-1] + w[22]*input[rowOffset4+inCol] + w[23]*input[rowOffset4+inCol+1] + w[24]*input[rowOffset4+inCol+2]
+				}
+			}
+
+			// Handle boundary regions with bounds checking
+			// Only process first 2 rows, last 2 rows, first 2 columns, and last 2 columns
+			// Top and bottom rows
+			for oh := 0; oh < 2 || oh >= outH-2; oh++ {
+				if oh >= outH {
+					break
+				}
+				outRowOffset := ocOutBase + oh*outW
+				for ow := 0; ow < outW; ow++ {
+					pos := outRowOffset + ow
+
+					for kh := 0; kh < 5; kh++ {
+						inH := oh + kh - 2
+						if inH >= 0 && inH < inputHeight {
+							rowOffset := icOffset + inH*inputWidth
+							for kw := 0; kw < 5; kw++ {
+								inW := ow + kw - 2
+								if inW >= 0 && inW < inputWidth {
+									wIdx := kh*5 + kw
+									c.preActBuf[pos] += w[wIdx] * input[rowOffset+inW]
+								}
+							}
+						}
+					}
+				}
+				if oh >= 1 && oh < outH-2 {
+					// After processing oh=0 and oh=1, skip to outH-2
+					oh = outH - 3
+				}
+			}
+			// Left and right columns (excluding corners already processed)
+			for oh := 2; oh < outH-2; oh++ {
+				outRowOffset := ocOutBase + oh*outW
+				// Process first 2 columns
+				for ow := 0; ow < 2; ow++ {
+					pos := outRowOffset + ow
+					for kh := 0; kh < 5; kh++ {
+						inH := oh + kh - 2
+						if inH >= 0 && inH < inputHeight {
+							rowOffset := icOffset + inH*inputWidth
+							for kw := 0; kw < 5; kw++ {
+								inW := ow + kw - 2
+								if inW >= 0 && inW < inputWidth {
+									wIdx := kh*5 + kw
+									c.preActBuf[pos] += w[wIdx] * input[rowOffset+inW]
+								}
+							}
+						}
+					}
+				}
+				// Process last 2 columns
+				for ow := outW - 2; ow < outW; ow++ {
+					pos := outRowOffset + ow
+					for kh := 0; kh < 5; kh++ {
+						inH := oh + kh - 2
+						if inH >= 0 && inH < inputHeight {
+							rowOffset := icOffset + inH*inputWidth
+							for kw := 0; kw < 5; kw++ {
+								inW := ow + kw - 2
+								if inW >= 0 && inW < inputWidth {
+									wIdx := kh*5 + kw
+									c.preActBuf[pos] += w[wIdx] * input[rowOffset+inW]
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// conv2D7x7Optimized implements an optimized 7x7 convolution with stride=1, padding=3
+// Common in early layers of ResNet, AlexNet, and other deep architectures
+func (c *Conv2D) conv2D7x7Optimized(input []float32, inputHeight, inputWidth, outH, outW int) {
+	outSize := outH * outW
+	inChannels := c.inChannels
+	outChannels := c.outChannels
+
+	// Kernel weights are stored as: [outChannels][inChannels][7][7]
+	// Pre-fetch weights into local arrays for better cache locality
+
+	for oc := 0; oc < outChannels; oc++ {
+		ocWeightBase := oc * inChannels * 49 // 49 = 7*7
+		ocOutBase := oc * outSize
+
+		// Clear output buffer for this channel
+		for i := 0; i < outSize; i++ {
+			c.preActBuf[ocOutBase+i] = 0
+		}
+
+		// Process input channels
+		for ic := 0; ic < inChannels; ic++ {
+			// Pre-fetch the 7x7 kernel weights for this input/output channel pair
+			wBase := ocWeightBase + ic*49
+			var w [49]float32
+			for i := 0; i < 49; i++ {
+				w[i] = c.weights[wBase+i]
+			}
+
+			icOffset := ic * inputHeight * inputWidth
+
+			// Process output positions with loop unrolling
+			// Skip boundary checks by processing only valid interior region
+
+			// Process interior region (no boundary checks needed for kernel positions)
+			for oh := 3; oh < outH-3; oh++ {
+				outRowOffset := ocOutBase + oh*outW
+				inRow := oh
+
+				// Pre-compute row offsets for the 7 rows
+				var rowOffset [7]int
+				for i := 0; i < 7; i++ {
+					rowOffset[i] = icOffset + (inRow-3+i)*inputWidth
+				}
+
+				// Process in chunks of 2 for better instruction pipelining
+				ow := 3
+				for ; ow <= outW-4; ow += 2 {
+					pos0 := outRowOffset + ow
+					pos1 := pos0 + 1
+					inCol0 := ow
+					inCol1 := ow + 1
+
+					// Unroll all 7 rows
+					for row := 0; row < 7; row++ {
+						wIdx := row * 7
+						c.preActBuf[pos0] += w[wIdx+0]*input[rowOffset[row]+inCol0-3] +
+							w[wIdx+1]*input[rowOffset[row]+inCol0-2] +
+							w[wIdx+2]*input[rowOffset[row]+inCol0-1] +
+							w[wIdx+3]*input[rowOffset[row]+inCol0] +
+							w[wIdx+4]*input[rowOffset[row]+inCol0+1] +
+							w[wIdx+5]*input[rowOffset[row]+inCol0+2] +
+							w[wIdx+6]*input[rowOffset[row]+inCol0+3]
+						c.preActBuf[pos1] += w[wIdx+0]*input[rowOffset[row]+inCol1-3] +
+							w[wIdx+1]*input[rowOffset[row]+inCol1-2] +
+							w[wIdx+2]*input[rowOffset[row]+inCol1-1] +
+							w[wIdx+3]*input[rowOffset[row]+inCol1] +
+							w[wIdx+4]*input[rowOffset[row]+inCol1+1] +
+							w[wIdx+5]*input[rowOffset[row]+inCol1+2] +
+							w[wIdx+6]*input[rowOffset[row]+inCol1+3]
+					}
+				}
+
+				// Handle remaining elements
+				for ; ow < outW-3; ow++ {
+					pos := outRowOffset + ow
+					inCol := ow
+
+					for row := 0; row < 7; row++ {
+						wIdx := row * 7
+						c.preActBuf[pos] += w[wIdx+0]*input[rowOffset[row]+inCol-3] +
+							w[wIdx+1]*input[rowOffset[row]+inCol-2] +
+							w[wIdx+2]*input[rowOffset[row]+inCol-1] +
+							w[wIdx+3]*input[rowOffset[row]+inCol] +
+							w[wIdx+4]*input[rowOffset[row]+inCol+1] +
+							w[wIdx+5]*input[rowOffset[row]+inCol+2] +
+							w[wIdx+6]*input[rowOffset[row]+inCol+3]
+					}
+				}
+			}
+
+			// Handle boundary regions with bounds checking
+			// Only process first 3 rows, last 3 rows, first 3 columns, and last 3 columns
+			// Top and bottom rows
+			for oh := 0; oh < 3 || oh >= outH-3; oh++ {
+				if oh >= outH {
+					break
+				}
+				outRowOffset := ocOutBase + oh*outW
+				for ow := 0; ow < outW; ow++ {
+					pos := outRowOffset + ow
+					for kh := 0; kh < 7; kh++ {
+						inH := oh + kh - 3
+						if inH >= 0 && inH < inputHeight {
+							rowOffset := icOffset + inH*inputWidth
+							for kw := 0; kw < 7; kw++ {
+								inW := ow + kw - 3
+								if inW >= 0 && inW < inputWidth {
+									wIdx := kh*7 + kw
+									c.preActBuf[pos] += w[wIdx] * input[rowOffset+inW]
+								}
+							}
+						}
+					}
+				}
+				if oh >= 2 && oh < outH-3 {
+					// After processing oh=0,1,2, skip to outH-3
+					oh = outH - 4
+				}
+			}
+			// Left and right columns (excluding corners already processed)
+			for oh := 3; oh < outH-3; oh++ {
+				outRowOffset := ocOutBase + oh*outW
+				// Process first 3 columns
+				for ow := 0; ow < 3; ow++ {
+					pos := outRowOffset + ow
+					for kh := 0; kh < 7; kh++ {
+						inH := oh + kh - 3
+						if inH >= 0 && inH < inputHeight {
+							rowOffset := icOffset + inH*inputWidth
+							for kw := 0; kw < 7; kw++ {
+								inW := ow + kw - 3
+								if inW >= 0 && inW < inputWidth {
+									wIdx := kh*7 + kw
+									c.preActBuf[pos] += w[wIdx] * input[rowOffset+inW]
+								}
+							}
+						}
+					}
+				}
+				// Process last 3 columns
+				for ow := outW - 3; ow < outW; ow++ {
+					pos := outRowOffset + ow
+					for kh := 0; kh < 7; kh++ {
+						inH := oh + kh - 3
+						if inH >= 0 && inH < inputHeight {
+							rowOffset := icOffset + inH*inputWidth
+							for kw := 0; kw < 7; kw++ {
+								inW := ow + kw - 3
+								if inW >= 0 && inW < inputWidth {
+									wIdx := kh*7 + kw
+									c.preActBuf[pos] += w[wIdx] * input[rowOffset+inW]
+								}
 							}
 						}
 					}
@@ -498,11 +860,17 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 	ocWeightStride := inChannels * icWeightStride
 
 	// OPTIMIZED CONVOLUTION: Loop reordering for better cache locality
-	// Process output spatial positions with kernel unrolling for 3x3 case
+	// Process output spatial positions with kernel unrolling for common kernel sizes
 
 	if kernelSize == 3 && stride == 1 && padding == 1 {
-		// Optimized 3x3 kernel with padding=1, stride=1
+		// Optimized 3x3 kernel with padding=1, stride=1 (most common)
 		c.conv2D3x3Optimized(input, inputHeight, inputWidth, outH, outW)
+	} else if kernelSize == 5 && stride == 1 && padding == 2 {
+		// Optimized 5x5 kernel with padding=2, stride=1
+		c.conv2D5x5Optimized(input, inputHeight, inputWidth, outH, outW)
+	} else if kernelSize == 7 && stride == 1 && padding == 3 {
+		// Optimized 7x7 kernel with padding=3, stride=1
+		c.conv2D7x7Optimized(input, inputHeight, inputWidth, outH, outW)
 	} else {
 		// Generic fallback implementation
 		for oc := 0; oc < outChannels; oc++ {
@@ -553,14 +921,19 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		}
 	}
 
-	// Apply bias and activation after convolution is complete
-	if kernelSize == 3 && stride == 1 && padding == 1 {
+	// Apply bias and activation after convolution is complete for optimized kernels
+	// The optimized implementations (3x3, 5x5, 7x7) do not include bias/activation in the main loop
+	isOptimizedKernel := (kernelSize == 3 && stride == 1 && padding == 1) ||
+		(kernelSize == 5 && stride == 1 && padding == 2) ||
+		(kernelSize == 7 && stride == 1 && padding == 3)
+
+	if isOptimizedKernel {
 		for oc := 0; oc < outChannels; oc++ {
 			ocOutBase := oc * outSize
 			biasVal := c.biases[oc]
 			for oh := 0; oh < outH; oh++ {
 				ohOffset := ocOutBase + oh*outW
-				// Unrolled loop
+				// Unrolled loop for better performance
 				ow := 0
 				for ; ow <= outW-4; ow += 4 {
 					pos := ohOffset + ow
@@ -631,6 +1004,17 @@ func (c *Conv2D) Backward(grad []float32) ([]float32, error) {
 	ts := numSaved - 1
 	offset := c.savedInputOffsets[ts]
 	inSize := c.inChannels * c.inputHeight * c.inputWidth
+
+	// SEC-012: Validar offsets antes de construir slices
+	if c.arenaPtr == nil {
+		return nil, fmt.Errorf("%w: arena pointer is nil", ErrInvalidState)
+	}
+	arenaLen := len(*c.arenaPtr)
+	if offset < 0 || offset > arenaLen-inSize {
+		return nil, fmt.Errorf("%w: input offset %d out of bounds (arena size: %d, inSize: %d)",
+			ErrInvalidState, offset, arenaLen, inSize)
+	}
+
 	savedInput := (*c.arenaPtr)[offset : offset+inSize]
 
 	// Output dimensions
@@ -1038,3 +1422,4 @@ func (c *Conv2D) GetOutputDimensions() (int, int) {
 	}
 	return c.computeOutputSize(c.inputHeight, c.inputWidth)
 }
+

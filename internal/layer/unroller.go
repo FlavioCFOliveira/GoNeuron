@@ -265,6 +265,9 @@ func (s *SequenceUnroller) SetGradients(g []float32)     { s.base.SetGradients(g
 func (s *SequenceUnroller) SetDevice(device Device)      { s.base.SetDevice(device) }
 func (s *SequenceUnroller) Reset()                       { s.base.Reset() }
 func (s *SequenceUnroller) ClearGradients()              { s.base.ClearGradients() }
+
+// Close implements the Layer interface.
+func (s *SequenceUnroller) Close() {}
 func (s *SequenceUnroller) Clone() Layer {
 	newS, _ := NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq)
 	return newS

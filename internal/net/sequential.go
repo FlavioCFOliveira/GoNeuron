@@ -121,13 +121,46 @@ func (s *Sequential) Predict(x []float32) []float32 {
 	return pred
 }
 
+// BatchArenaLayer is an interface for layers that support batched forward with arena.
+type BatchArenaLayer interface {
+	layer.Layer
+	ForwardBatchWithArena(x []float32, batchSize int, arena *[]float32, offset *int) ([]float32, error)
+}
+
 // PredictBatch performs forward pass on a batch of samples.
+// It verifies that all layers support batching via ForwardBatchWithArena before using optimized batching.
+// Falls back to individual forward passes if any layer does not support batching.
 func (s *Sequential) PredictBatch(x [][]float32) ([][]float32, error) {
 	s.SetTraining(false)
 	if len(x) > 0 {
 		s.checkDeferredBuild(x[0])
 	}
-	return s.ForwardBatch(x)
+
+	// PERF-004: Verify all layers support batching before using optimized path
+	allSupportBatch := true
+	for _, l := range s.layers {
+		if _, ok := l.(BatchArenaLayer); !ok {
+			allSupportBatch = false
+			break
+		}
+	}
+
+	// If all layers support batching, use optimized ForwardBatch
+	if allSupportBatch {
+		return s.ForwardBatch(x)
+	}
+
+	// Fallback: individual forward passes for layers that don't support batching
+	results := make([][]float32, len(x))
+	for i, sample := range x {
+		pred, err := s.Forward(sample)
+		if err != nil {
+			return nil, fmt.Errorf("predict batch failed at sample %d: %w", i, err)
+		}
+		results[i] = make([]float32, len(pred))
+		copy(results[i], pred)
+	}
+	return results, nil
 }
 
 // SetTraining sets the training mode for the model.

@@ -160,6 +160,9 @@ func (f *Flatten) ClearGradients() {
 	// No parameters to clear
 }
 
+// Close implements the Layer interface.
+func (f *Flatten) Close() {}
+
 // Clone creates a deep copy of the flatten layer.
 func (f *Flatten) Clone() Layer {
 	newF, _ := NewFlatten()

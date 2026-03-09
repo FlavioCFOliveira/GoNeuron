@@ -45,6 +45,9 @@ type BatchNorm2D struct {
 	arena             []float32
 	arenaMu           sync.Mutex // Protege operações de arena contra race conditions
 
+	// PERF-008: Pre-alocado para evitar alocação em loop quente
+	istdBuf []float32
+
 	inputHeight     int
 	inputWidth      int
 	numelPerChannel int
@@ -129,6 +132,8 @@ func (b *BatchNorm2D) Build(numFeatures int) {
 	b.savedMean = make([]float32, numFeatures)
 	b.savedVar = make([]float32, numFeatures)
 	b.savedStd = make([]float32, numFeatures)
+	// PERF-008: Pre-alocar buffer para 1/std para evitar alocação em hot path
+	b.istdBuf = make([]float32, numFeatures)
 
 	// Metal initialization if device is GPU
 	if md, ok := b.device.(*MetalDevice); ok && md.IsAvailable() {
@@ -192,6 +197,59 @@ func (b *BatchNorm2D) SetDevice(device Device) {
 			b.bufGradIn = md.CreateEmptyBuffer(b.numFeatures)
 		}
 	}
+}
+
+// Close releases all GPU buffers and resources held by the layer.
+// This method is idempotent and safe to call multiple times.
+// SEC-009: Implementar cleanup explícito de buffers Metal para prevenir memory leaks.
+func (b *BatchNorm2D) Close() {
+	// Liberar buffers GPU em ordem inversa de criação
+	if b.bufGradIn != nil {
+		b.bufGradIn.Close()
+		b.bufGradIn = nil
+	}
+	if b.bufGradBeta != nil {
+		b.bufGradBeta.Close()
+		b.bufGradBeta = nil
+	}
+	if b.bufGradGamma != nil {
+		b.bufGradGamma.Close()
+		b.bufGradGamma = nil
+	}
+	if b.bufSavedStd != nil {
+		b.bufSavedStd.Close()
+		b.bufSavedStd = nil
+	}
+	if b.bufSavedMean != nil {
+		b.bufSavedMean.Close()
+		b.bufSavedMean = nil
+	}
+	if b.bufBeta != nil {
+		b.bufBeta.Close()
+		b.bufBeta = nil
+	}
+	if b.bufGamma != nil {
+		b.bufGamma.Close()
+		b.bufGamma = nil
+	}
+	if b.bufRunningVar != nil {
+		b.bufRunningVar.Close()
+		b.bufRunningVar = nil
+	}
+	if b.bufRunningMean != nil {
+		b.bufRunningMean.Close()
+		b.bufRunningMean = nil
+	}
+	if b.bufOut != nil {
+		b.bufOut.Close()
+		b.bufOut = nil
+	}
+	if b.bufIn != nil {
+		b.bufIn.Close()
+		b.bufIn = nil
+	}
+	// Reset device state
+	b.device = &CPUDevice{}
 }
 
 func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]float32, error) {
@@ -337,8 +395,12 @@ func (b *BatchNorm2D) ForwardWithArena(x []float32, arena *[]float32, offset *in
 }
 
 		// CPU normalization - OPTIMIZED VERSION
-		// Pre-compute reciprocal of std for division optimization
-		istdBuf := make([]float32, b.numFeatures)
+		// PERF-008: Reutiliza buffer pre-alocado em vez de fazer make()
+		// NOTA: Thread-safe porque LightweightClone() cria istdBuf separado para cada worker
+		if len(b.istdBuf) < b.numFeatures {
+			b.istdBuf = make([]float32, b.numFeatures)
+		}
+		istdBuf := b.istdBuf[:b.numFeatures]
 		for f := 0; f < b.numFeatures; f++ {
 			istdBuf[f] = 1.0 / b.savedStd[f]
 		}
@@ -748,6 +810,7 @@ func (b *BatchNorm2D) LightweightClone(params, grads []float32) Layer {
 		grads: grads, gradGammaBuf: gradGamma, gradBetaBuf: gradBeta,
 		outputBuf: make([]float32, 0), gradInBuf: make([]float32, 0),
 		savedMean: make([]float32, numFeatures), savedVar: make([]float32, numFeatures), savedStd: make([]float32, numFeatures),
+		istdBuf: make([]float32, numFeatures), // PERF-008: Pre-aloca buffer
 		savedInputOffsets: make([]int, 0, 128), savedMeanOffsets: make([]int, 0, 128), savedStdOffsets: make([]int, 0, 128),
 		device: b.device, numelPerChannel: b.numelPerChannel,
 	}

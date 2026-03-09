@@ -624,3 +624,6 @@ func (a *AvgPool2D) GetInChannels() int {
 func (a *AvgPool2D) AccumulateBackward(grad []float32) ([]float32, error) {
 	return a.Backward(grad)
 }
+
+// Close implements the Layer interface.
+func (a *AvgPool2D) Close() {}

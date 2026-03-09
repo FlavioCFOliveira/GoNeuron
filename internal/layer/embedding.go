@@ -324,3 +324,6 @@ func (e *Embedding) SetWeight(idx int, values []float32) {
 func (e *Embedding) AccumulateBackward(grad []float32) ([]float32, error) {
 	return e.Backward(grad)
 }
+
+// Close implements the Layer interface.
+func (e *Embedding) Close() {}

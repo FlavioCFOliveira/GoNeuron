@@ -650,6 +650,9 @@ func (g *GRU) Clone() Layer {
 	return newG
 }
 
+// Close implements the Layer interface.
+func (g *GRU) Close() {}
+
 func (g *GRU) LightweightClone(params []float32, grads []float32) Layer {
 	weightInSize := g.outSize * 3 * g.inSize
 	weightRecSize := g.outSize * g.outSize * 2

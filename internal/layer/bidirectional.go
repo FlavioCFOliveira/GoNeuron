@@ -409,3 +409,6 @@ func (b *Bidirectional) ProcessSequence(seq [][]float32) [][]float32 {
 
 	return results
 }
+
+// Close implements the Layer interface.
+func (b *Bidirectional) Close() {}
