@@ -34,13 +34,13 @@ type Embedding struct {
 // NewEmbedding creates a new embedding layer.
 // num_embeddings: size of the dictionary of embeddings
 // embedding_dim: size of each embedding vector
-// Returns nil if parameters are invalid.
-func NewEmbedding(num_embeddings, embedding_dim int) *Embedding {
+// Returns an error if parameters are invalid.
+func NewEmbedding(num_embeddings, embedding_dim int) (*Embedding, error) {
 	if num_embeddings <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid num_embeddings %d: must be > 0", num_embeddings)
 	}
 	if embedding_dim <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid embedding_dim %d: must be > 0", embedding_dim)
 	}
 	// Xavier/Glorot initialization
 	scale := float32(math.Sqrt(3.0 / float64(embedding_dim)))
@@ -59,7 +59,7 @@ func NewEmbedding(num_embeddings, embedding_dim int) *Embedding {
 		gradWeights:    make([]float32, num_embeddings*embedding_dim),
 		savedIndices:   make([]int, 0),
 		device:         &CPUDevice{},
-	}
+	}, nil
 }
 
 // SetDevice sets the computation device.
@@ -263,7 +263,7 @@ func (e *Embedding) ClearGradients() {
 
 // Clone creates a deep copy of the embedding layer.
 func (e *Embedding) Clone() Layer {
-	newE := NewEmbedding(e.num_embeddings, e.embedding_dim)
+	newE, _ := NewEmbedding(e.num_embeddings, e.embedding_dim)
 	copy(newE.weights, e.weights)
 	newE.padding_idx = e.padding_idx
 	newE.max_norm = e.max_norm

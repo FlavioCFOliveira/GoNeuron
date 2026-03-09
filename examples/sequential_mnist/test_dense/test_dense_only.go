@@ -158,10 +158,9 @@ func main() {
 		len(xTrain), len(xTest), rows, cols)
 
 	// Test with just Dense layers (no LSTM)
-	layers := []layer.Layer{
-		layer.NewDense(rows*cols, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.LogSoftmax{}),
-	}
+	d1, _ := layer.NewDense(rows*cols, 128, activations.Tanh{})
+	d2, _ := layer.NewDense(128, 10, activations.LogSoftmax{})
+	layers := []layer.Layer{d1, d2}
 	optimizer := &opt.SGD{LearningRate: 0.1}
 	network := net.New(layers, loss.NLLLoss{}, optimizer)
 	fmt.Println("\nStarting Dense-only training...")

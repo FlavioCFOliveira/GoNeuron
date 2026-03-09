@@ -17,16 +17,19 @@ type SequenceUnroller struct {
 }
 
 // NewSequenceUnroller creates a new sequence unroller layer.
-// Returns nil if base layer is nil or timeSteps is invalid.
-func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnroller {
+// Returns an error if base layer is nil or timeSteps is invalid.
+func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) (*SequenceUnroller, error) {
 	if base == nil {
-		return nil
+		return nil, fmt.Errorf("base layer cannot be nil")
 	}
 	if timeSteps <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid timeSteps %d: must be > 0", timeSteps)
 	}
-	if base.InSize() <= 0 || base.OutSize() <= 0 {
-		return nil
+	if base.InSize() <= 0 {
+		return nil, fmt.Errorf("invalid base layer input size %d: must be > 0", base.InSize())
+	}
+	if base.OutSize() <= 0 {
+		return nil, fmt.Errorf("invalid base layer output size %d: must be > 0", base.OutSize())
 	}
 
 	outSize := base.OutSize()
@@ -42,7 +45,7 @@ func NewSequenceUnroller(base Layer, timeSteps int, returnSeq bool) *SequenceUnr
 		outputBuf:   make([]float32, outSize),
 		gradInBuf:   make([]float32, timeSteps*base.InSize()),
 		storedInput: make([][]float32, timeSteps),
-	}
+	}, nil
 }
 
 // SetTraining sets the training mode for the base layer.
@@ -263,7 +266,8 @@ func (s *SequenceUnroller) SetDevice(device Device)      { s.base.SetDevice(devi
 func (s *SequenceUnroller) Reset()                       { s.base.Reset() }
 func (s *SequenceUnroller) ClearGradients()              { s.base.ClearGradients() }
 func (s *SequenceUnroller) Clone() Layer {
-	return NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq)
+	newS, _ := NewSequenceUnroller(s.base.Clone(), s.timeSteps, s.returnSeq)
+	return newS
 }
 
 func (s *SequenceUnroller) LightweightClone(params []float32, grads []float32) Layer {

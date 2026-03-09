@@ -6,7 +6,7 @@ import (
 )
 
 func TestFlattenForward(t *testing.T) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	// Test flattening a 2D input [2, 3] -> [6]
 	input := []float32{1, 2, 3, 4, 5, 6}
@@ -24,7 +24,7 @@ func TestFlattenForward(t *testing.T) {
 }
 
 func TestFlattenBackward(t *testing.T) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	input := []float32{1, 2, 3, 4, 5, 6}
 	flatten.Forward(input)
@@ -40,7 +40,7 @@ func TestFlattenBackward(t *testing.T) {
 }
 
 func TestFlattenInOutSize(t *testing.T) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	input := []float32{1, 2, 3, 4, 5, 6}
 	flatten.Forward(input)
@@ -52,7 +52,7 @@ func TestFlattenInOutSize(t *testing.T) {
 }
 
 func TestFlattenParams(t *testing.T) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	params := flatten.Params()
 	if len(params) != 0 {
@@ -74,7 +74,7 @@ func TestFlattenParams(t *testing.T) {
 }
 
 func TestFlattenLargeInput(t *testing.T) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	// Create a larger input: 4x32x32 = 4096
 	input := make([]float32, 4096)
@@ -101,7 +101,7 @@ func TestFlattenLargeInput(t *testing.T) {
 }
 
 func BenchmarkFlattenForward(b *testing.B) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	// 3x224x224 = 150528 (typical image)
 	input := make([]float32, 150528)
@@ -116,7 +116,7 @@ func BenchmarkFlattenForward(b *testing.B) {
 }
 
 func BenchmarkFlattenBackward(b *testing.B) {
-	flatten := NewFlatten()
+	flatten, _ := NewFlatten()
 
 	input := make([]float32, 150528)
 	for i := range input {

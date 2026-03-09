@@ -25,7 +25,16 @@ type PositionalEncoding struct {
 	device Device
 }
 
-func NewPositionalEncoding(seqLen, dim int) *PositionalEncoding {
+// NewPositionalEncoding creates a new positional encoding layer.
+// Returns an error if parameters are invalid.
+func NewPositionalEncoding(seqLen, dim int) (*PositionalEncoding, error) {
+	if seqLen <= 0 && seqLen != -1 {
+		return nil, fmt.Errorf("invalid seqLen %d: must be > 0 or -1", seqLen)
+	}
+	if dim <= 0 && dim != -1 {
+		return nil, fmt.Errorf("invalid dim %d: must be > 0 or -1", dim)
+	}
+
 	p := &PositionalEncoding{
 		seqLen: seqLen,
 		dim:    dim,
@@ -36,7 +45,7 @@ func NewPositionalEncoding(seqLen, dim int) *PositionalEncoding {
 		p.Build(seqLen * dim)
 	}
 
-	return p
+	return p, nil
 }
 
 func (p *PositionalEncoding) Build(inSize int) {
@@ -163,7 +172,7 @@ func (p *PositionalEncoding) NamedParams() []NamedParam {
 func (p *PositionalEncoding) Reset()                    {}
 func (p *PositionalEncoding) ClearGradients()           { for i := range p.gradBuf { p.gradBuf[i] = 0 } }
 func (p *PositionalEncoding) Clone() Layer {
-	newP := NewPositionalEncoding(p.seqLen, p.dim)
+	newP, _ := NewPositionalEncoding(p.seqLen, p.dim)
 	copy(newP.weights, p.weights)
 	return newP
 }
@@ -322,10 +331,10 @@ func (m *MultiHeadAttention) Build(inSize int) {
 	dim := m.dim
 	seqLen := m.seqLen
 
-	m.wQ = NewDense(dim, dim, activations.Linear{})
-	m.wK = NewDense(dim, dim, activations.Linear{})
-	m.wV = NewDense(dim, dim, activations.Linear{})
-	m.wOut = NewDense(dim, dim, activations.Linear{})
+	m.wQ, _ = NewDense(dim, dim, activations.Linear{})
+	m.wK, _ = NewDense(dim, dim, activations.Linear{})
+	m.wV, _ = NewDense(dim, dim, activations.Linear{})
+	m.wOut, _ = NewDense(dim, dim, activations.Linear{})
 
 	// Calculate total parameters
 	paramSize := len(m.wQ.Params())
@@ -852,9 +861,8 @@ type TransformerBlock struct {
 	training bool
 }
 
-func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) *TransformerBlock {
-	t, _ := NewTransformerBlockE(dim, numHeads, seqLen, ffDim, causal)
-	return t
+func NewTransformerBlock(dim, numHeads, seqLen, ffDim int, causal bool) (*TransformerBlock, error) {
+	return NewTransformerBlockE(dim, numHeads, seqLen, ffDim, causal)
 }
 
 // NewTransformerBlockE creates a TransformerBlock with error handling.
@@ -862,9 +870,8 @@ func NewTransformerBlockE(dim, numHeads, seqLen, ffDim int, causal bool) (*Trans
 	return NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim, causal, ActReLU, NormLN, false)
 }
 
-func NewTransformerBlockExt(dim, numHeads, seqLen, ffDim int, causal bool, actType ActivationType, normType NormType, useRoPE bool) *TransformerBlock {
-	t, _ := NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim, causal, actType, normType, useRoPE)
-	return t
+func NewTransformerBlockExt(dim, numHeads, seqLen, ffDim int, causal bool, actType ActivationType, normType NormType, useRoPE bool) (*TransformerBlock, error) {
+	return NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim, causal, actType, normType, useRoPE)
 }
 
 // NewTransformerBlockExtE creates an extended TransformerBlock with error handling.
@@ -887,22 +894,22 @@ func NewTransformerBlockExtE(dim, numHeads, seqLen, ffDim int, causal bool, actT
 
 	var norm1, norm2 Layer
 	if normType == NormRMS {
-		norm1 = NewRMSNorm(dim, 1e-5)
-		norm2 = NewRMSNorm(dim, 1e-5)
+		norm1, _ = NewRMSNorm(dim, 1e-5)
+		norm2, _ = NewRMSNorm(dim, 1e-5)
 	} else {
-		norm1 = NewLayerNorm(dim, 1e-5, true)
-		norm2 = NewLayerNorm(dim, 1e-5, true)
+		norm1, _ = NewLayerNorm(dim, 1e-5, true)
+		norm2, _ = NewLayerNorm(dim, 1e-5, true)
 	}
 
 	var ff1 Layer
 	if actType == ActSwiGLU {
-		ff1 = NewSwiGLU(dim, ffDim)
+		ff1, _ = NewSwiGLU(dim, ffDim)
 	} else if actType == ActGELU {
-		ff1 = NewDense(dim, ffDim, activations.GELU{})
+		ff1, _ = NewDense(dim, ffDim, activations.GELU{})
 	} else {
-		ff1 = NewDense(dim, ffDim, activations.ReLU{})
+		ff1, _ = NewDense(dim, ffDim, activations.ReLU{})
 	}
-	ff2 := NewDense(ffDim, dim, activations.Linear{})
+	ff2, _ := NewDense(ffDim, dim, activations.Linear{})
 
 	t := &TransformerBlock{
 		mha:      mha,
@@ -1371,7 +1378,8 @@ func (t *TransformerBlock) ClearGradients() {
 	t.ff2.ClearGradients()
 }
 func (t *TransformerBlock) Clone() Layer {
-	return NewTransformerBlockExt(t.dim, t.mha.numHeads, t.seqLen, t.ffDim, t.mha.Causal, t.actType, t.normType, t.useRoPE)
+	newT, _ := NewTransformerBlockExt(t.dim, t.mha.numHeads, t.seqLen, t.ffDim, t.mha.Causal, t.actType, t.normType, t.useRoPE)
+	return newT
 }
 
 func (t *TransformerBlock) LightweightClone(params []float32, grads []float32) Layer {
@@ -1445,13 +1453,21 @@ type GlobalAveragePooling1D struct {
 	training bool
 }
 
-func NewGlobalAveragePooling1D(seqLen, dim int) *GlobalAveragePooling1D {
+// NewGlobalAveragePooling1D creates a new global average pooling layer.
+// Returns an error if parameters are invalid.
+func NewGlobalAveragePooling1D(seqLen, dim int) (*GlobalAveragePooling1D, error) {
+	if seqLen <= 0 {
+		return nil, fmt.Errorf("invalid seqLen %d: must be > 0", seqLen)
+	}
+	if dim <= 0 {
+		return nil, fmt.Errorf("invalid dim %d: must be > 0", dim)
+	}
 	return &GlobalAveragePooling1D{
 		seqLen:    seqLen,
 		dim:       dim,
 		outputBuf: make([]float32, dim),
 		gradInBuf: make([]float32, seqLen*dim),
-	}
+	}, nil
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -1550,11 +1566,11 @@ func (g *GlobalAveragePooling1D) ClearGradients()          {}
 func (g *GlobalAveragePooling1D) ArenaSize() int { return 0 }
 
 func (g *GlobalAveragePooling1D) Clone() Layer {
-	return NewGlobalAveragePooling1D(g.seqLen, g.dim)
+	newG, _ := NewGlobalAveragePooling1D(g.seqLen, g.dim); return newG
 }
 
 func (g *GlobalAveragePooling1D) LightweightClone(params []float32, grads []float32) Layer {
-	return NewGlobalAveragePooling1D(g.seqLen, g.dim)
+	newG, _ := NewGlobalAveragePooling1D(g.seqLen, g.dim); return newG
 }
 func (g *GlobalAveragePooling1D) AccumulateBackward(grad []float32) ([]float32, error) { return g.Backward(grad) }
 
@@ -1569,13 +1585,21 @@ type CLSPooling struct {
 	training bool
 }
 
-func NewCLSPooling(seqLen, dim int) *CLSPooling {
+// NewCLSPooling creates a new CLS pooling layer.
+// Returns an error if parameters are invalid.
+func NewCLSPooling(seqLen, dim int) (*CLSPooling, error) {
+	if seqLen <= 0 {
+		return nil, fmt.Errorf("invalid seqLen %d: must be > 0", seqLen)
+	}
+	if dim <= 0 {
+		return nil, fmt.Errorf("invalid dim %d: must be > 0", dim)
+	}
 	return &CLSPooling{
 		seqLen:    seqLen,
 		dim:       dim,
 		outputBuf: make([]float32, dim),
 		gradInBuf: make([]float32, seqLen*dim),
-	}
+	}, nil
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -1669,10 +1693,12 @@ func (c *CLSPooling) ArenaSize() int { return 0 }
 func (c *CLSPooling) Reset()                   {}
 func (c *CLSPooling) ClearGradients()          {}
 func (c *CLSPooling) Clone() Layer {
-	return NewCLSPooling(c.seqLen, c.dim)
+	newC, _ := NewCLSPooling(c.seqLen, c.dim)
+	return newC
 }
 
 func (c *CLSPooling) LightweightClone(params []float32, grads []float32) Layer {
-	return NewCLSPooling(c.seqLen, c.dim)
+	newC, _ := NewCLSPooling(c.seqLen, c.dim)
+	return newC
 }
 func (c *CLSPooling) AccumulateBackward(grad []float32) ([]float32, error) { return c.Backward(grad) }

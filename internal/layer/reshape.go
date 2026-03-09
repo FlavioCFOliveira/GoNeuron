@@ -25,7 +25,8 @@ type Flatten struct {
 // NewFlatten creates a new flatten layer.
 // startDim is the first dimension to flatten (default 1, skips batch dimension).
 // endDim is the last dimension to flatten (default -1, all remaining).
-func NewFlatten() *Flatten {
+// Returns an error if parameters are invalid.
+func NewFlatten() (*Flatten, error) {
 	return &Flatten{
 		startDim:   1,
 		endDim:     -1,
@@ -33,7 +34,7 @@ func NewFlatten() *Flatten {
 		inputShape: make([]int, 0),
 		outSize:    0,
 		device:     &CPUDevice{},
-	}
+	}, nil
 }
 
 // SetDevice sets the computation device.
@@ -161,7 +162,7 @@ func (f *Flatten) ClearGradients() {
 
 // Clone creates a deep copy of the flatten layer.
 func (f *Flatten) Clone() Layer {
-	newF := NewFlatten()
+	newF, _ := NewFlatten()
 	newF.startDim = f.startDim
 	newF.endDim = f.endDim
 	newF.outSize = f.outSize

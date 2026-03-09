@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 	"sync"
 
@@ -98,12 +99,21 @@ type LSTM struct {
 }
 
 // NewLSTM creates a new LSTM layer with pre-allocated buffers.
-func NewLSTM(inSize, outSize int) *LSTM {
+// Returns an error if parameters are invalid.
+func NewLSTM(inSize, outSize int) (*LSTM, error) {
 	return NewLSTMWithDevice(inSize, outSize, &CPUDevice{})
 }
 
 // NewLSTMWithDevice creates a new LSTM layer with a specific device.
-func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
+// Returns an error if parameters are invalid.
+func NewLSTMWithDevice(inSize, outSize int, device Device) (*LSTM, error) {
+	if inSize <= 0 && inSize != -1 {
+		return nil, fmt.Errorf("invalid inSize %d: must be > 0 or -1", inSize)
+	}
+	if outSize <= 0 {
+		return nil, fmt.Errorf("invalid outSize %d: must be > 0", outSize)
+	}
+
 	l := &LSTM{
 		inSize:  inSize,
 		outSize: outSize,
@@ -124,7 +134,7 @@ func NewLSTMWithDevice(inSize, outSize int, device Device) *LSTM {
 		l.Build(inSize)
 	}
 
-	return l
+	return l, nil
 }
 
 // Build initializes the layer with the given input size.
@@ -814,7 +824,7 @@ func (l *LSTM) ClearGradients() {
 
 // Clone creates a deep copy of the LSTM layer.
 func (l *LSTM) Clone() Layer {
-	newL := NewLSTM(l.inSize, l.outSize)
+	newL, _ := NewLSTM(l.inSize, l.outSize)
 	copy(newL.inputWeights, l.inputWeights)
 	copy(newL.recurrentWeights, l.recurrentWeights)
 	copy(newL.biases, l.biases)

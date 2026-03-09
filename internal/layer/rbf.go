@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -42,19 +43,19 @@ type RBF struct {
 }
 
 // NewRBF creates a new RBF layer.
-// Returns nil if parameters are invalid (inSize, numCenters, outSize <= 0 or gamma <= 0).
-func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
+// Returns an error if parameters are invalid.
+func NewRBF(inSize, numCenters, outSize int, gamma float32) (*RBF, error) {
 	if inSize <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid inSize %d: must be > 0", inSize)
 	}
 	if numCenters <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid numCenters %d: must be > 0", numCenters)
 	}
 	if outSize <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid outSize %d: must be > 0", outSize)
 	}
 	if gamma <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid gamma %f: must be > 0", gamma)
 	}
 	weightSize := outSize * numCenters
 	biasSize := outSize
@@ -104,7 +105,7 @@ func NewRBF(inSize, numCenters, outSize int, gamma float32) *RBF {
 		gradInBuf:  make([]float32, inSize),
 		dzBuf:      make([]float32, outSize),
 		device:     &CPUDevice{},
-	}
+	}, nil
 }
 
 // SetDevice sets the computation device.
@@ -374,7 +375,7 @@ func (r *RBF) NamedParams() []NamedParam {
 
 // Clone creates a deep copy.
 func (r *RBF) Clone() Layer {
-	newR := NewRBF(r.inSize, r.numCenters, r.outSize, r.gamma)
+	newR, _ := NewRBF(r.inSize, r.numCenters, r.outSize, r.gamma)
 	copy(newR.weights, r.weights)
 	copy(newR.biases, r.biases)
 	copy(newR.centers, r.centers)

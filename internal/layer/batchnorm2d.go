@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 	"sync"
 )
@@ -64,7 +65,18 @@ type BatchNorm2D struct {
 }
 
 // NewBatchNorm2D creates a new 2D batch normalization layer.
-func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool) *BatchNorm2D {
+// Returns an error if parameters are invalid.
+func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool) (*BatchNorm2D, error) {
+	if numFeatures <= 0 && numFeatures != -1 {
+		return nil, fmt.Errorf("invalid numFeatures %d: must be > 0 or -1", numFeatures)
+	}
+	if eps < 0 {
+		return nil, fmt.Errorf("invalid eps %f: must be >= 0", eps)
+	}
+	if momentum < 0 || momentum > 1 {
+		return nil, fmt.Errorf("invalid momentum %f: must be in [0, 1]", momentum)
+	}
+
 	l := &BatchNorm2D{
 		numFeatures:       numFeatures,
 		eps:               eps,
@@ -81,7 +93,7 @@ func NewBatchNorm2D(numFeatures int, eps float32, momentum float32, affine bool)
 		l.Build(numFeatures)
 	}
 
-	return l
+	return l, nil
 }
 
 // Build initializes the layer with the given input size (channels).
@@ -701,7 +713,10 @@ func (b *BatchNorm2D) ClearGradients() {
 }
 
 func (b *BatchNorm2D) Clone() Layer {
-	newB := NewBatchNorm2D(b.numFeatures, b.eps, b.momentum, b.affine)
+	newB, err := NewBatchNorm2D(b.numFeatures, b.eps, b.momentum, b.affine)
+	if err != nil {
+		return nil
+	}
 	newB.training = b.training
 	if b.affine {
 		copy(newB.params, b.params)

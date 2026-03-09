@@ -169,19 +169,20 @@ type Dense struct {
 }
 
 // NewDense creates a new dense layer with pre-allocated buffers.
-func NewDense(in, out int, act activations.Activation) *Dense {
+// Returns an error if parameters are invalid.
+func NewDense(in, out int, act activations.Activation) (*Dense, error) {
 	return NewDenseWithDevice(in, out, act, &CPUDevice{})
 }
 
 // NewDenseWithDevice creates a new dense layer with a specific device.
-// Returns nil if parameters are invalid (in <= 0 and not -1, or out <= 0 and not -1).
-func NewDenseWithDevice(in, out int, act activations.Activation, device Device) *Dense {
+// Returns an error if parameters are invalid (in <= 0 and not -1, or out <= 0 and not -1).
+func NewDenseWithDevice(in, out int, act activations.Activation, device Device) (*Dense, error) {
 	// Validate inputs (allow -1 for lazy initialization)
 	if in < -1 || in == 0 {
-		return nil
+		return nil, fmt.Errorf("invalid input size %d: must be > 0 or -1", in)
 	}
 	if out < -1 || out == 0 {
-		return nil
+		return nil, fmt.Errorf("invalid output size %d: must be > 0 or -1", out)
 	}
 
 	d := &Dense{
@@ -197,7 +198,7 @@ func NewDenseWithDevice(in, out int, act activations.Activation, device Device) 
 		d.Build(in)
 	}
 
-	return d
+	return d, nil
 }
 
 // Build initializes the layer with the given input size.
@@ -747,7 +748,10 @@ func (d *Dense) ClearGradients() {
 }
 
 func (d *Dense) Clone() Layer {
-	newD := NewDense(d.inSize, d.outSize, d.act)
+	newD, err := NewDense(d.inSize, d.outSize, d.act)
+	if err != nil {
+		return nil
+	}
 	copy(newD.params, d.params)
 	newD.device = d.device
 	return newD

@@ -202,19 +202,21 @@ func main() {
 		denseUnits  = 32
 	)
 
+	lstm, _ := layer.NewLSTM(inputSize, lstmUnits)
+	unroller, _ := layer.NewSequenceUnroller(lstm, sequenceLen, false)
+	d1, _ := layer.NewDense(lstmUnits, denseUnits, activations.Tanh{})
+	d2, _ := layer.NewDense(denseUnits, forecastStep*numFeatures, activations.Linear{})
 	layers := []layer.Layer{
 		// Input: [lookback * numFeatures] -> treated as sequence
 		// SequenceUnroller with LSTM processes each time step
-		layer.NewSequenceUnroller(
-			layer.NewLSTM(inputSize, lstmUnits),
-			sequenceLen, false),
+		unroller,
 		// Output: [lstmUnits]
 
 		// Hidden dense layer
-		layer.NewDense(lstmUnits, denseUnits, activations.Tanh{}),
+		d1,
 
 		// Output layer predicting forecastStep * numFeatures values
-		layer.NewDense(denseUnits, forecastStep*numFeatures, activations.Linear{}),
+		d2,
 	}
 
 	// 6. Initialize Network

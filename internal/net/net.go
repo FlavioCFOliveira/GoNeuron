@@ -1492,30 +1492,66 @@ func (c *LayerConfig) CreateLayer() (layer.Layer, error) {
 	switch c.Type {
 	case "Dense":
 		act := c.createActivation()
-		l = layer.NewDense(c.InSize, c.OutSize, act)
+		l, err = layer.NewDense(c.InSize, c.OutSize, act)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Dense layer: %w", err)
+		}
 	case "Conv2D":
 		act := c.createActivation()
-		l = layer.NewConv2D(c.InChannels, c.OutChannels, c.KernelSize, c.Stride, c.Padding, act)
+		l, err = layer.NewConv2D(c.InChannels, c.OutChannels, c.KernelSize, c.Stride, c.Padding, act)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Conv2D layer: %w", err)
+		}
 	case "LSTM":
-		l = layer.NewLSTM(c.InSize, c.OutSize)
+		l, err = layer.NewLSTM(c.InSize, c.OutSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create LSTM layer: %w", err)
+		}
 	case "GRU":
-		l = layer.NewGRU(c.InSize, c.OutSize)
+		l, err = layer.NewGRU(c.InSize, c.OutSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create GRU layer: %w", err)
+		}
 	case "Dropout":
-		l = layer.NewDropout(c.Prob, c.InSize)
+		l, err = layer.NewDropout(c.Prob, c.InSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Dropout layer: %w", err)
+		}
 	case "LayerNorm":
-		l = layer.NewLayerNorm(c.NormalizedShape, c.Eps, c.Affine)
+		l, err = layer.NewLayerNorm(c.NormalizedShape, c.Eps, c.Affine)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create LayerNorm layer: %w", err)
+		}
 	case "BatchNorm2D":
-		l = layer.NewBatchNorm2D(c.InChannels, c.Eps, 0.1, c.Affine)
+		l, err = layer.NewBatchNorm2D(c.InChannels, c.Eps, 0.1, c.Affine)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create BatchNorm2D layer: %w", err)
+		}
 	case "MaxPool2D":
-		l = layer.NewMaxPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
+		l, err = layer.NewMaxPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create MaxPool2D layer: %w", err)
+		}
 	case "AvgPool2D":
-		l = layer.NewAvgPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
+		l, err = layer.NewAvgPool2D(c.InChannels, c.KernelSize, c.Stride, c.Padding)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create AvgPool2D layer: %w", err)
+		}
 	case "Embedding":
-		l = layer.NewEmbedding(c.InSize, c.OutSize)
+		l, err = layer.NewEmbedding(c.InSize, c.OutSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Embedding layer: %w", err)
+		}
 	case "Flatten":
-		l = layer.NewFlatten()
+		l, err = layer.NewFlatten()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Flatten layer: %w", err)
+		}
 	case "RBF":
-		l = layer.NewRBF(c.InSize, c.NumCenters, c.OutSize, c.Gamma)
+		l, err = layer.NewRBF(c.InSize, c.NumCenters, c.OutSize, c.Gamma)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create RBF layer: %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported layer type: %s", c.Type)
 	}
@@ -1524,7 +1560,7 @@ func (c *LayerConfig) CreateLayer() (layer.Layer, error) {
 		l.SetParams(c.Params)
 	}
 
-	return l, err
+	return l, nil
 }
 
 func (c *LayerConfig) createActivation() activations.Activation {

@@ -101,10 +101,10 @@ func main() {
 	xTrain, xTest := x[:splitIdx], x[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
-	layers := []layer.Layer{
-		layer.NewSequenceUnroller(layer.NewGRU(1, gruUnits), lookback, false),
-		layer.NewDense(gruUnits, 1, activations.Linear{}),
-	}
+	gru, _ := layer.NewGRU(1, gruUnits)
+	unroller, _ := layer.NewSequenceUnroller(gru, lookback, false)
+	dense, _ := layer.NewDense(gruUnits, 1, activations.Linear{})
+	layers := []layer.Layer{unroller, dense}
 
 	optimizer := opt.NewAdam(0.001)
 	network := net.New(layers, loss.MSE{}, optimizer)

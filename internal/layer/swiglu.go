@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -40,7 +41,15 @@ type SwiGLU struct {
 }
 
 // NewSwiGLU creates a new SwiGLU layer.
-func NewSwiGLU(in, out int) *SwiGLU {
+// Returns an error if parameters are invalid.
+func NewSwiGLU(in, out int) (*SwiGLU, error) {
+	if in <= 0 && in != -1 {
+		return nil, fmt.Errorf("invalid inSize %d: must be > 0 or -1", in)
+	}
+	if out <= 0 && out != -1 {
+		return nil, fmt.Errorf("invalid outSize %d: must be > 0 or -1", out)
+	}
+
 	s := &SwiGLU{
 		inSize:            in,
 		outSize:           out,
@@ -54,7 +63,7 @@ func NewSwiGLU(in, out int) *SwiGLU {
 		s.Build(in)
 	}
 
-	return s
+	return s, nil
 }
 
 // Build initializes the layer.
@@ -303,7 +312,7 @@ func (s *SwiGLU) ClearGradients() {
 }
 
 func (s *SwiGLU) Clone() Layer {
-	newS := NewSwiGLU(s.inSize, s.outSize)
+	newS, _ := NewSwiGLU(s.inSize, s.outSize)
 	copy(newS.params, s.params)
 	newS.device = s.device
 	return newS

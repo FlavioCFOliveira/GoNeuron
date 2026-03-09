@@ -87,11 +87,11 @@ func main() {
 	xTrain, xTest := x[:splitIdx], x[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
-	layers := []layer.Layer{
-		layer.NewSequenceUnroller(layer.NewLSTM(1, lstmUnits), lookback, true), // Returns [lookback * lstmUnits]
-		layer.NewGlobalAttention(lstmUnits),
-		layer.NewDense(lstmUnits, 1, activations.Linear{}),
-	}
+	lstm, _ := layer.NewLSTM(1, lstmUnits)
+	unroller, _ := layer.NewSequenceUnroller(lstm, lookback, true)
+	attention, _ := layer.NewGlobalAttention(lstmUnits)
+	dense, _ := layer.NewDense(lstmUnits, 1, activations.Linear{})
+	layers := []layer.Layer{unroller, attention, dense}
 
 	optimizer := opt.NewAdam(0.001)
 	network := net.New(layers, loss.MSE{}, optimizer)

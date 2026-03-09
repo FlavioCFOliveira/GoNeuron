@@ -155,15 +155,17 @@ func main() {
 	// 3. BiLSTM (64 -> 32) x lookback steps -> Summary (64)
 	// 4. Dense (64 -> 1)
 
-	bilstm1 := layer.NewBidirectional(layer.NewLSTM(5, lstmUnits))
-	unroller1 := layer.NewSequenceUnroller(bilstm1, lookback, true)
+	lstm1, _ := layer.NewLSTM(5, lstmUnits)
+	bilstm1, _ := layer.NewBidirectional(lstm1)
+	unroller1, _ := layer.NewSequenceUnroller(bilstm1, lookback, true)
 
-	dropout := layer.NewDropout(0.2, lookback*lstmUnits*2)
+	dropout, _ := layer.NewDropout(0.2, lookback*lstmUnits*2)
 
-	bilstm2 := layer.NewBidirectional(layer.NewLSTM(lstmUnits*2, lstmUnits))
-	unroller2 := layer.NewSequenceUnroller(bilstm2, lookback, false)
+	lstm2, _ := layer.NewLSTM(lstmUnits*2, lstmUnits)
+	bilstm2, _ := layer.NewBidirectional(lstm2)
+	unroller2, _ := layer.NewSequenceUnroller(bilstm2, lookback, false)
 
-	dense := layer.NewDense(lstmUnits*2, 1, activations.Linear{})
+	dense, _ := layer.NewDense(lstmUnits*2, 1, activations.Linear{})
 
 	layers := []layer.Layer{
 		unroller1,

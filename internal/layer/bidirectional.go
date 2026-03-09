@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -23,13 +24,16 @@ type Bidirectional struct {
 
 // NewBidirectional creates a new bidirectional wrapper for the given layer.
 // It clones the provided layer to create the backward direction layer.
-// Returns nil if the layer is nil or has invalid dimensions.
-func NewBidirectional(l Layer) *Bidirectional {
+// Returns an error if the layer is nil or has invalid dimensions.
+func NewBidirectional(l Layer) (*Bidirectional, error) {
 	if l == nil {
-		return nil
+		return nil, fmt.Errorf("layer cannot be nil")
 	}
-	if l.InSize() <= 0 || l.OutSize() <= 0 {
-		return nil
+	if l.InSize() <= 0 {
+		return nil, fmt.Errorf("invalid layer input size %d: must be > 0", l.InSize())
+	}
+	if l.OutSize() <= 0 {
+		return nil, fmt.Errorf("invalid layer output size %d: must be > 0", l.OutSize())
 	}
 
 	forward := l
@@ -45,7 +49,7 @@ func NewBidirectional(l Layer) *Bidirectional {
 		forwardHistory:  make([][]float32, 0),
 		backwardHistory: make([][]float32, 0),
 		timeStep:        0,
-	}
+	}, nil
 }
 
 // SetTraining sets the training mode for both forward and backward layers.
@@ -267,7 +271,8 @@ func (b *Bidirectional) ClearGradients() {
 
 // Clone creates a deep copy.
 func (b *Bidirectional) Clone() Layer {
-	return NewBidirectional(b.forward.Clone())
+	newB, _ := NewBidirectional(b.forward.Clone())
+	return newB
 }
 
 func (b *Bidirectional) LightweightClone(params []float32, grads []float32) Layer {

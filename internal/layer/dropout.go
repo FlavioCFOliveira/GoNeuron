@@ -1,7 +1,10 @@
 // Package layer provides neural network layer implementations.
 package layer
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 // Dropout implements dropout regularization.
 // During training, randomly sets inputs to 0 with probability p.
@@ -40,13 +43,13 @@ type Dropout struct {
 // NewDropout creates a new dropout layer.
 // p is the probability of dropping a neuron (default 0.5).
 // A higher p means more aggressive dropout.
-// Returns nil if p is invalid (p < 0 or p > 1).
-func NewDropout(p float32, inSize int) *Dropout {
+// Returns an error if parameters are invalid.
+func NewDropout(p float32, inSize int) (*Dropout, error) {
 	if p < 0 || p > 1 {
-		return nil
+		return nil, fmt.Errorf("invalid dropout probability %f: must be in [0, 1]", p)
 	}
 	if inSize <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid input size %d: must be > 0", inSize)
 	}
 	return &Dropout{
 		p:                p,
@@ -61,7 +64,7 @@ func NewDropout(p float32, inSize int) *Dropout {
 		savedMaskOffsets: make([]int, 0, 16),
 		rng:              NewRNG(42),
 		device:           &CPUDevice{},
-	}
+	}, nil
 }
 
 // SetDevice sets the computation device.
@@ -397,7 +400,7 @@ func (d *Dropout) ClearGradients() {
 
 // Clone creates a deep copy of the dropout layer.
 func (d *Dropout) Clone() Layer {
-	newD := NewDropout(d.p, d.inSize)
+	newD, _ := NewDropout(d.p, d.inSize)
 	newD.training = d.training
 	newD.device = d.device
 	return newD

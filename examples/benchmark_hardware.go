@@ -19,11 +19,10 @@ func runBenchmark(device layer.Device, name string, inSize, outSize, batchSize i
 	}
 
 	// Create a reasonably large network to stress the device
-	layers := []layer.Layer{
-		layer.NewDenseWithDevice(inSize, outSize, activations.Tanh{}, device),
-		layer.NewDenseWithDevice(outSize, outSize, activations.Tanh{}, device),
-		layer.NewDenseWithDevice(outSize, 10, activations.Sigmoid{}, device),
-	}
+	d1, _ := layer.NewDenseWithDevice(inSize, outSize, activations.Tanh{}, device)
+	d2, _ := layer.NewDenseWithDevice(outSize, outSize, activations.Tanh{}, device)
+	d3, _ := layer.NewDenseWithDevice(outSize, 10, activations.Sigmoid{}, device)
+	layers := []layer.Layer{d1, d2, d3}
 	network := net.New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.01})
 
 	// Generate random data
@@ -60,12 +59,13 @@ func runLSTMBenchmark(device layer.Device, name string, inSize, outSize, seqLen 
 		return
 	}
 
-	lstm := layer.NewLSTMWithDevice(inSize, outSize, device)
-	unroller := layer.NewSequenceUnroller(lstm, seqLen, false)
+	lstm, _ := layer.NewLSTMWithDevice(inSize, outSize, device)
+	unroller, _ := layer.NewSequenceUnroller(lstm, seqLen, false)
 
+	d4, _ := layer.NewDenseWithDevice(outSize, 10, activations.Sigmoid{}, device)
 	layers := []layer.Layer{
 		unroller,
-		layer.NewDenseWithDevice(outSize, 10, activations.Sigmoid{}, device),
+		d4,
 	}
 	network := net.New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.01})
 

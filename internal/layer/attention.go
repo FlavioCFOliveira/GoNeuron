@@ -2,6 +2,8 @@
 package layer
 
 import (
+	"fmt"
+
 	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 	"math"
 )
@@ -30,7 +32,12 @@ type GlobalAttention struct {
 }
 
 // NewGlobalAttention creates a new global attention layer.
-func NewGlobalAttention(inSize int) *GlobalAttention {
+// Returns an error if parameters are invalid.
+func NewGlobalAttention(inSize int) (*GlobalAttention, error) {
+	if inSize <= 0 {
+		return nil, fmt.Errorf("invalid inSize %d: must be > 0", inSize)
+	}
+
 	rng := NewRNG(uint64(inSize + 42))
 	contextVector := make([]float32, inSize)
 	scale := float32(math.Sqrt(1.0 / float64(inSize)))
@@ -45,7 +52,7 @@ func NewGlobalAttention(inSize int) *GlobalAttention {
 		outputBuf:     make([]float32, inSize),
 		gradContext:   make([]float32, inSize),
 		gradInBuf:     make([]float32, inSize),
-	}
+	}, nil
 }
 
 // SetTraining sets whether the layer is in training mode.
@@ -218,7 +225,19 @@ func (g *GlobalAttention) ClearGradients() {
 
 // Clone creates a deep copy.
 func (g *GlobalAttention) Clone() Layer {
-	newG := NewGlobalAttention(g.inSize)
+	newG, err := NewGlobalAttention(g.inSize)
+	if err != nil {
+		// Return a shallow copy if creation fails (shouldn't happen with valid inSize)
+		return &GlobalAttention{
+			inSize:        g.inSize,
+			contextVector: append([]float32(nil), g.contextVector...),
+			inputHistory:  make([][]float32, 0),
+			outputBuf:     make([]float32, g.inSize),
+			gradContext:   make([]float32, g.inSize),
+			gradInBuf:     make([]float32, g.inSize),
+			training:      g.training,
+		}
+	}
 	copy(newG.contextVector, g.contextVector)
 	return newG
 }

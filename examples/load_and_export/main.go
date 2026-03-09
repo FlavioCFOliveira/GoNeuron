@@ -68,10 +68,9 @@ func main() {
 // criarModeloExemplo gera um ficheiro .gob para servir de base ao tutorial.
 func criarModeloExemplo(path string) {
 	// Uma arquitetura genérica de classificação
-	camadas := []layer.Layer{
-		layer.NewDense(128, 64, activations.ReLU{}),
-		layer.NewDense(64, 10, activations.Softmax{}),
-	}
+	dense1, _ := layer.NewDense(128, 64, activations.ReLU{})
+	dense2, _ := layer.NewDense(64, 10, activations.Softmax{})
+	camadas := []layer.Layer{dense1, dense2}
 	rede := net.New(camadas, loss.CrossEntropy{}, opt.NewAdam(0.001))
 
 	if err := rede.Save(path); err != nil {

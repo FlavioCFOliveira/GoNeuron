@@ -87,14 +87,18 @@ func main() {
 	xTrain, xTest := x[:splitIdx], x[splitIdx:]
 	yTrain, yTest := y[:splitIdx], y[splitIdx:]
 
-	conv := layer.NewConv2D(1, 16, 3, 1, 1, activations.ReLU{})
+	conv, _ := layer.NewConv2D(1, 16, 3, 1, 1, activations.ReLU{})
 	conv.SetInputDimensions(1, lookback)
 
+	flatten, _ := layer.NewFlatten()
+	lstm, _ := layer.NewLSTM(16*lookback, lstmUnits)
+	dense, _ := layer.NewDense(lstmUnits, 1, activations.Linear{})
+	unroller, _ := layer.NewSequenceUnroller(lstm, 1, false)
 	layers := []layer.Layer{
 		conv,
-		layer.NewFlatten(),
-		layer.NewSequenceUnroller(layer.NewLSTM(16*lookback, lstmUnits), 1, false),
-		layer.NewDense(lstmUnits, 1, activations.Linear{}),
+		flatten,
+		unroller,
+		dense,
 	}
 
 	optimizer := opt.NewAdam(0.001)

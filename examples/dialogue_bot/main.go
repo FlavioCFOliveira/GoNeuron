@@ -76,10 +76,10 @@ func main() {
 	learningRate := float32(0.001)
 	epochs := 400
 
-	emb := layer.NewEmbedding(tokenizer.vocabSize, embeddingDim)
-	pos := layer.NewPositionalEncoding(seqLen, embeddingDim)
-	block := layer.NewTransformerBlock(embeddingDim, numHeads, seqLen, ffDim, true)
-	head := layer.NewDense(embeddingDim, tokenizer.vocabSize, activations.Linear{})
+	emb, _ := layer.NewEmbedding(tokenizer.vocabSize, embeddingDim)
+	pos, _ := layer.NewPositionalEncoding(seqLen, embeddingDim)
+	block, _ := layer.NewTransformerBlock(embeddingDim, numHeads, seqLen, ffDim, true)
+	head, _ := layer.NewDense(embeddingDim, tokenizer.vocabSize, activations.Linear{})
 
 	device := layer.GetDefaultDevice()
 	emb.SetDevice(device)

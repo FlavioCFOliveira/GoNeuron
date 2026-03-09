@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 	"sync"
 
@@ -76,7 +77,15 @@ type GRU struct {
 // NewGRU creates a new GRU layer with pre-allocated buffers.
 // inSize: dimension of input vectors
 // outSize: dimension of hidden state/output
-func NewGRU(inSize, outSize int) *GRU {
+// Returns an error if parameters are invalid.
+func NewGRU(inSize, outSize int) (*GRU, error) {
+	if inSize <= 0 && inSize != -1 {
+		return nil, fmt.Errorf("invalid inSize %d: must be > 0 or -1", inSize)
+	}
+	if outSize <= 0 {
+		return nil, fmt.Errorf("invalid outSize %d: must be > 0", outSize)
+	}
+
 	g := &GRU{
 		inSize:  inSize,
 		outSize: outSize,
@@ -95,7 +104,7 @@ func NewGRU(inSize, outSize int) *GRU {
 		g.Build(inSize)
 	}
 
-	return g
+	return g, nil
 }
 
 // Build initializes the layer with the given input size.
@@ -633,7 +642,7 @@ func (g *GRU) ClearGradients() {
 
 // Clone creates a deep copy of the GRU layer.
 func (g *GRU) Clone() Layer {
-	newG := NewGRU(g.inSize, g.outSize)
+	newG, _ := NewGRU(g.inSize, g.outSize)
 	copy(newG.inputWeights, g.inputWeights)
 	copy(newG.recurrentWeights, g.recurrentWeights)
 	copy(newG.biases, g.biases)

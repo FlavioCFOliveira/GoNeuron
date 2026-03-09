@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -40,7 +41,15 @@ type RMSNorm struct {
 }
 
 // NewRMSNorm creates a new RMS normalization layer.
-func NewRMSNorm(normalizedShape int, eps float32) *RMSNorm {
+// Returns an error if parameters are invalid.
+func NewRMSNorm(normalizedShape int, eps float32) (*RMSNorm, error) {
+	if normalizedShape <= 0 && normalizedShape != -1 {
+		return nil, fmt.Errorf("invalid normalizedShape %d: must be > 0 or -1", normalizedShape)
+	}
+	if eps < 0 {
+		return nil, fmt.Errorf("invalid eps %f: must be >= 0", eps)
+	}
+
 	r := &RMSNorm{
 		normalizedShape:   normalizedShape,
 		eps:               eps,
@@ -53,7 +62,7 @@ func NewRMSNorm(normalizedShape int, eps float32) *RMSNorm {
 		r.Build(normalizedShape)
 	}
 
-	return r
+	return r, nil
 }
 
 // Build initializes the layer with the given input size.
@@ -413,7 +422,7 @@ func (r *RMSNorm) ClearGradients() {
 }
 
 func (r *RMSNorm) Clone() Layer {
-	newR := NewRMSNorm(r.normalizedShape, r.eps)
+	newR, _ := NewRMSNorm(r.normalizedShape, r.eps)
 	copy(newR.params, r.params)
 	newR.device = r.device
 	return newR

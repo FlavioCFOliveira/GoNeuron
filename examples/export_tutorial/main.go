@@ -31,10 +31,9 @@ func main() {
 	// --- PASSO 1: DEFINIÇÃO DA ARQUITETURA ---
 	// Criamos uma rede com 2 entradas, uma camada oculta de 8 neurónios e 1 saída.
 	// Usamos Tanh na camada oculta para evitar o problema de "neurónios mortos" do ReLU no XOR.
-	layers := []layer.Layer{
-		layer.NewDense(2, 8, activations.Tanh{}),    // Camada de entrada -> oculta
-		layer.NewDense(8, 1, activations.Sigmoid{}), // Camada oculta -> saída (0 a 1)
-	}
+	dense1, _ := layer.NewDense(2, 8, activations.Tanh{})
+	dense2, _ := layer.NewDense(8, 1, activations.Sigmoid{})
+	layers := []layer.Layer{dense1, dense2}
 
 	// Inicializamos a rede com o otimizador Adam e perda MSE (Mean Squared Error).
 	model := net.New(layers, loss.MSE{}, opt.NewAdam(0.01))

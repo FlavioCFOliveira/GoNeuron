@@ -72,8 +72,25 @@ type Conv2D struct {
 }
 
 // NewConv2D creates a new 2D convolutional layer.
+// Returns an error if parameters are invalid.
 func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
-	activation activations.Activation) *Conv2D {
+	activation activations.Activation) (*Conv2D, error) {
+
+	if inChannels != -1 && inChannels <= 0 {
+		return nil, fmt.Errorf("invalid inChannels %d: must be > 0 or -1", inChannels)
+	}
+	if outChannels <= 0 && outChannels != -1 {
+		return nil, fmt.Errorf("invalid outChannels %d: must be > 0 or -1", outChannels)
+	}
+	if kernelSize <= 0 {
+		return nil, fmt.Errorf("invalid kernelSize %d: must be > 0", kernelSize)
+	}
+	if stride <= 0 {
+		return nil, fmt.Errorf("invalid stride %d: must be > 0", stride)
+	}
+	if padding < 0 {
+		return nil, fmt.Errorf("invalid padding %d: must be >= 0", padding)
+	}
 
 	c := &Conv2D{
 		inChannels:  inChannels,
@@ -90,7 +107,7 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 		c.Build(inChannels)
 	}
 
-	return c
+	return c, nil
 }
 
 // Build initializes the layer with the given input size (channels).
@@ -850,7 +867,10 @@ func (c *Conv2D) ClearGradients() {
 
 // Clone creates a deep copy of the convolutional layer.
 func (c *Conv2D) Clone() Layer {
-	newC := NewConv2D(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.activation)
+	newC, err := NewConv2D(c.inChannels, c.outChannels, c.kernelSize, c.stride, c.padding, c.activation)
+	if err != nil {
+		return nil
+	}
 	copy(newC.params, c.params)
 	newC.setInputHeight = c.setInputHeight
 	newC.setInputWidth = c.setInputWidth

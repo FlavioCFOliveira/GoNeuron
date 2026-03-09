@@ -368,7 +368,7 @@ func TestAvgPool2DGradientFlow(t *testing.T) {
 
 // TestFlattenGradientFlow validates Flatten backward pass.
 func TestFlattenGradientFlow(t *testing.T) {
-	layer := NewFlatten()
+	layer, _ := NewFlatten()
 	layer.Build(12)
 
 	x := []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
@@ -581,7 +581,7 @@ func TestGradientShapes(t *testing.T) {
 		{"LSTM", NewLSTM(3, 2), 3, 3},
 		{"GRU", NewGRU(3, 2), 3, 3},
 		{"Embedding", NewEmbedding(10, 4), 3, 3},
-		{"Flatten", func() Layer { l := NewFlatten(); l.Build(12); return l }(), 12, 12},
+		{"Flatten", func() Layer { l, _ := NewFlatten(); l.Build(12); return l }(), 12, 12},
 		{"Dropout", NewDropout(0.5, 10), 10, 10},
 	}
 

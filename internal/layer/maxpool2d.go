@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -41,16 +42,16 @@ type MaxPool2D struct {
 // kernelSize: size of pooling window (square)
 // stride: stride for pooling (defaults to kernelSize)
 // padding: zero padding size
-// Returns nil if parameters are invalid.
-func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
+// Returns an error if parameters are invalid.
+func NewMaxPool2D(inChannels, kernelSize, stride, padding int) (*MaxPool2D, error) {
 	if kernelSize <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid kernelSize %d: must be > 0", kernelSize)
 	}
 	if stride <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid stride %d: must be > 0", stride)
 	}
 	if padding < 0 {
-		return nil
+		return nil, fmt.Errorf("invalid padding %d: must be >= 0", padding)
 	}
 
 	m := &MaxPool2D{
@@ -69,7 +70,7 @@ func NewMaxPool2D(inChannels, kernelSize, stride, padding int) *MaxPool2D {
 		m.Build(inChannels)
 	}
 
-	return m
+	return m, nil
 }
 
 // Build initializes the layer with the given input size (channels).
@@ -517,7 +518,7 @@ func (m *MaxPool2D) ClearGradients() {
 
 // Clone creates a deep copy of the max pooling layer.
 func (m *MaxPool2D) Clone() Layer {
-	newM := NewMaxPool2D(m.inChannels, m.kernelSize, m.stride, m.padding)
+	newM, _ := NewMaxPool2D(m.inChannels, m.kernelSize, m.stride, m.padding)
 	newM.inputHeight = m.inputHeight
 	newM.inputWidth = m.inputWidth
 	newM.outputHeight = m.outputHeight

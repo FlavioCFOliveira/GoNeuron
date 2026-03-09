@@ -76,7 +76,8 @@ func DenseE(args ...interface{}) (Layer, error) {
 		if !ok2 {
 			return nil, fmt.Errorf("Dense: second argument must be Activation, got %T", args[1])
 		}
-		return layer.NewDense(-1, out, act), nil
+		l, _ := layer.NewDense(-1, out, act)
+		return l, nil
 	}
 	if len(args) == 3 {
 		// Check if 2nd arg is int (in, out, act) or activation (out, act, in)
@@ -89,7 +90,8 @@ func DenseE(args ...interface{}) (Layer, error) {
 			if !ok3 {
 				return nil, fmt.Errorf("Dense: third argument must be Activation, got %T", args[2])
 			}
-			return layer.NewDense(in, out, act), nil
+			l, _ := layer.NewDense(in, out, act)
+			return l, nil
 		} else {
 			out, ok1 := args[0].(int)
 			act, ok2 := args[1].(activations.Activation)
@@ -103,7 +105,8 @@ func DenseE(args ...interface{}) (Layer, error) {
 			if !ok3 {
 				return nil, fmt.Errorf("Dense: third argument must be int (input size), got %T", args[2])
 			}
-			return layer.NewDense(in, out, act), nil
+			l, _ := layer.NewDense(in, out, act)
+			return l, nil
 		}
 	}
 	return nil, fmt.Errorf("Dense expects 2 or 3 arguments: (out, act) or (in, out, act), got %d arguments", len(args))
@@ -139,7 +142,8 @@ func Conv2DE(args ...interface{}) (Layer, error) {
 		if !ok5 {
 			return nil, fmt.Errorf("Conv2D: 5th argument must be Activation, got %T", args[4])
 		}
-		return layer.NewConv2D(-1, outC, k, s, p, act), nil
+		l, _ := layer.NewConv2D(-1, outC, k, s, p, act)
+		return l, nil
 	}
 	if len(args) == 6 {
 		// Check if 6th arg is activation (inC, outC, k, s, p, act) or int (outC, k, s, p, act, inC)
@@ -152,7 +156,8 @@ func Conv2DE(args ...interface{}) (Layer, error) {
 			if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
 				return nil, fmt.Errorf("Conv2D: first 5 arguments must be int (inC, outC, k, s, p)")
 			}
-			return layer.NewConv2D(inC, outC, k, s, p, act), nil
+			l, _ := layer.NewConv2D(inC, outC, k, s, p, act)
+			return l, nil
 		} else {
 			outC, ok1 := args[0].(int)
 			k, ok2 := args[1].(int)
@@ -169,7 +174,8 @@ func Conv2DE(args ...interface{}) (Layer, error) {
 			if !ok6 {
 				return nil, fmt.Errorf("Conv2D: 6th argument must be int (inC), got %T", args[5])
 			}
-			return layer.NewConv2D(inC, outC, k, s, p, act), nil
+			l, _ := layer.NewConv2D(inC, outC, k, s, p, act)
+			return l, nil
 		}
 	}
 	return nil, fmt.Errorf("Conv2D expects 5 or 6 arguments: (outC, k, s, p, act) or (inC, outC, k, s, p, act), got %d arguments", len(args))
@@ -180,7 +186,8 @@ func LSTM(out int, in ...int) Layer {
 	if len(in) > 0 {
 		inSize = in[0]
 	}
-	return layer.NewLSTM(inSize, out)
+	l, _ := layer.NewLSTM(inSize, out)
+	return l
 }
 
 func GRU(out int, in ...int) Layer {
@@ -188,7 +195,8 @@ func GRU(out int, in ...int) Layer {
 	if len(in) > 0 {
 		inSize = in[0]
 	}
-	return layer.NewGRU(inSize, out)
+	l, _ := layer.NewGRU(inSize, out)
+	return l
 }
 
 func Dropout(prob float32, in ...int) Layer {
@@ -196,7 +204,8 @@ func Dropout(prob float32, in ...int) Layer {
 	if len(in) > 0 {
 		inSize = in[0]
 	}
-	return layer.NewDropout(prob, inSize)
+	l, _ := layer.NewDropout(prob, inSize)
+	return l
 }
 
 func BatchNorm2D(inChannels ...int) Layer {
@@ -204,7 +213,8 @@ func BatchNorm2D(inChannels ...int) Layer {
 	if len(inChannels) > 0 {
 		in = inChannels[0]
 	}
-	return layer.NewBatchNorm2D(in, 1e-5, 0.1, true)
+	l, _ := layer.NewBatchNorm2D(in, 1e-5, 0.1, true)
+	return l
 }
 
 func LayerNorm(normalizedShape ...int) Layer {
@@ -212,7 +222,8 @@ func LayerNorm(normalizedShape ...int) Layer {
 	if len(normalizedShape) > 0 {
 		in = normalizedShape[0]
 	}
-	return layer.NewLayerNorm(in, 1e-5, true)
+	l, _ := layer.NewLayerNorm(in, 1e-5, true)
+	return l
 }
 
 func RMSNorm(normalizedShape ...int) Layer {
@@ -220,7 +231,8 @@ func RMSNorm(normalizedShape ...int) Layer {
 	if len(normalizedShape) > 0 {
 		in = normalizedShape[0]
 	}
-	return layer.NewRMSNorm(in, 1e-5)
+	l, _ := layer.NewRMSNorm(in, 1e-5)
+	return l
 }
 
 func SwiGLU(out int, in ...int) Layer {
@@ -228,7 +240,8 @@ func SwiGLU(out int, in ...int) Layer {
 	if len(in) > 0 {
 		inSize = in[0]
 	}
-	return layer.NewSwiGLU(inSize, out)
+	l, _ := layer.NewSwiGLU(inSize, out)
+	return l
 }
 
 func MaxPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
@@ -236,7 +249,8 @@ func MaxPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
 	if len(inChannels) > 0 {
 		in = inChannels[0]
 	}
-	return layer.NewMaxPool2D(in, kernelSize, stride, padding)
+	l, _ := layer.NewMaxPool2D(in, kernelSize, stride, padding)
+	return l
 }
 
 func AvgPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
@@ -244,11 +258,12 @@ func AvgPool2D(kernelSize, stride, padding int, inChannels ...int) Layer {
 	if len(inChannels) > 0 {
 		in = inChannels[0]
 	}
-	return layer.NewAvgPool2D(in, kernelSize, stride, padding)
+	l, _ := layer.NewAvgPool2D(in, kernelSize, stride, padding)
+	return l
 }
 
 func Flatten(inSize ...int) Layer {
-	f := layer.NewFlatten()
+	f, _ := layer.NewFlatten()
 	if len(inSize) > 0 {
 		f.Build(inSize[0])
 	}
@@ -256,15 +271,18 @@ func Flatten(inSize ...int) Layer {
 }
 
 func Embedding(numEmbeddings, embeddingDim int) Layer {
-	return layer.NewEmbedding(numEmbeddings, embeddingDim)
+	l, _ := layer.NewEmbedding(numEmbeddings, embeddingDim)
+	return l
 }
 
 func SequenceUnroller(l Layer, sequenceLength int, returnSequences bool) Layer {
-	return layer.NewSequenceUnroller(l, sequenceLength, returnSequences)
+	newL, _ := layer.NewSequenceUnroller(l, sequenceLength, returnSequences)
+	return newL
 }
 
 func RBF(in, numCenters, out int, gamma float32) Layer {
-	return layer.NewRBF(in, numCenters, out, gamma)
+	l, _ := layer.NewRBF(in, numCenters, out, gamma)
+	return l
 }
 
 // TransformerBlock creates a Transformer block.
@@ -294,7 +312,11 @@ func TransformerBlockE(args ...interface{}) (Layer, error) {
 		if !ok4 {
 			return nil, fmt.Errorf("TransformerBlock: 4th argument must be bool (causal), got %T", args[3])
 		}
-		return layer.NewTransformerBlock(-1, numHeads, seqLen, ffDim, causal), nil
+		l, err := layer.NewTransformerBlockE(-1, numHeads, seqLen, ffDim, causal)
+		if err != nil {
+			return nil, err
+		}
+		return l, nil
 	}
 	if len(args) == 5 {
 		dim, ok1 := args[0].(int)
@@ -308,7 +330,11 @@ func TransformerBlockE(args ...interface{}) (Layer, error) {
 		if !ok5 {
 			return nil, fmt.Errorf("TransformerBlock: 5th argument must be bool (causal), got %T", args[4])
 		}
-		return layer.NewTransformerBlock(dim, numHeads, seqLen, ffDim, causal), nil
+		l, err := layer.NewTransformerBlockE(dim, numHeads, seqLen, ffDim, causal)
+		if err != nil {
+			return nil, err
+		}
+		return l, nil
 	}
 	return nil, fmt.Errorf("TransformerBlock expects 4 or 5 arguments: (numHeads, seqLen, ffDim, causal) or (dim, numHeads, seqLen, ffDim, causal), got %d arguments", len(args))
 }
@@ -318,7 +344,8 @@ func TransformerBlockExt(numHeads, seqLen, ffDim int, causal bool, actType layer
 	if len(dim) > 0 {
 		inDim = dim[0]
 	}
-	return layer.NewTransformerBlockExt(inDim, numHeads, seqLen, ffDim, causal, actType, normType, useRoPE)
+	l, _ := layer.NewTransformerBlockExtE(inDim, numHeads, seqLen, ffDim, causal, actType, normType, useRoPE)
+	return l
 }
 
 // Transformer Constants
@@ -335,7 +362,8 @@ func PositionalEncoding(seqLen int, dim ...int) Layer {
 	if len(dim) > 0 {
 		inDim = dim[0]
 	}
-	return layer.NewPositionalEncoding(seqLen, inDim)
+	l, _ := layer.NewPositionalEncoding(seqLen, inDim)
+	return l
 }
 
 func MultiHeadAttention(numHeads, seqLen int, causal bool, dim ...int) Layer {
@@ -343,23 +371,28 @@ func MultiHeadAttention(numHeads, seqLen int, causal bool, dim ...int) Layer {
 	if len(dim) > 0 {
 		inDim = dim[0]
 	}
-	return layer.NewMultiHeadAttention(inDim, numHeads, seqLen, causal)
+	l, _ := layer.NewMultiHeadAttentionE(inDim, numHeads, seqLen, causal)
+	return l
 }
 
 func GlobalAveragePooling1D(seqLen, dim int) Layer {
-	return layer.NewGlobalAveragePooling1D(seqLen, dim)
+	l, _ := layer.NewGlobalAveragePooling1D(seqLen, dim)
+	return l
 }
 
 func CLSPooling(seqLen, dim int) Layer {
-	return layer.NewCLSPooling(seqLen, dim)
+	l, _ := layer.NewCLSPooling(seqLen, dim)
+	return l
 }
 
 func GlobalAttention(inSize int) Layer {
-	return layer.NewGlobalAttention(inSize)
+	l, _ := layer.NewGlobalAttention(inSize)
+	return l
 }
 
 func Bidirectional(l Layer) Layer {
-	return layer.NewBidirectional(l)
+	newL, _ := layer.NewBidirectional(l)
+	return newL
 }
 
 func MoE(outSize, numExperts, k int, in ...int) Layer {
@@ -367,7 +400,8 @@ func MoE(outSize, numExperts, k int, in ...int) Layer {
 	if len(in) > 0 {
 		inSize = in[0]
 	}
-	return layer.NewMoE(inSize, outSize, numExperts, k)
+	l, _ := layer.NewMoE(inSize, outSize, numExperts, k)
+	return l
 }
 
 // Optimizers

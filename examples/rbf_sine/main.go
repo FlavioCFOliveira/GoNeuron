@@ -21,10 +21,9 @@ func main() {
 	// 2. Create architecture
 	// RBF layer with 1 input, 50 centers, 50 outputs, gamma=1.0
 	// Dense layer with 50 inputs, 1 output, Linear activation
-	layers := []layer.Layer{
-		layer.NewRBF(1, 50, 50, 1.0),
-		layer.NewDense(50, 1, activations.Linear{}),
-	}
+	rbfLayer, _ := layer.NewRBF(1, 50, 50, 1.0)
+	denseLayer, _ := layer.NewDense(50, 1, activations.Linear{})
+	layers := []layer.Layer{rbfLayer, denseLayer}
 
 	optimizer := opt.NewAdam(0.01)
 	network := net.New(layers, loss.MSE{}, optimizer)

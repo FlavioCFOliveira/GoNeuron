@@ -3,6 +3,7 @@ package layer
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 )
@@ -45,16 +46,16 @@ type AvgPool2D struct {
 // kernelSize: size of pooling window (square)
 // stride: stride for pooling (defaults to kernelSize)
 // padding: zero padding size
-// Returns nil if parameters are invalid.
-func NewAvgPool2D(inChannels, kernelSize, stride, padding int) *AvgPool2D {
+// Returns an error if parameters are invalid.
+func NewAvgPool2D(inChannels, kernelSize, stride, padding int) (*AvgPool2D, error) {
 	if kernelSize <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid kernelSize %d: must be > 0", kernelSize)
 	}
 	if stride <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid stride %d: must be > 0", stride)
 	}
 	if padding < 0 {
-		return nil
+		return nil, fmt.Errorf("invalid padding %d: must be >= 0", padding)
 	}
 
 	return &AvgPool2D{
@@ -68,7 +69,7 @@ func NewAvgPool2D(inChannels, kernelSize, stride, padding int) *AvgPool2D {
 		savedInput:        make([]float32, 0),
 		savedInputOffsets: make([]int, 0, 16),
 		device:            &CPUDevice{},
-	}
+	}, nil
 }
 
 // Build initializes the layer.
@@ -569,7 +570,7 @@ func (a *AvgPool2D) ClearGradients() {
 
 // Clone creates a deep copy of the average pooling layer.
 func (a *AvgPool2D) Clone() Layer {
-	newA := NewAvgPool2D(a.inChannels, a.kernelSize, a.stride, a.padding)
+	newA, _ := NewAvgPool2D(a.inChannels, a.kernelSize, a.stride, a.padding)
 	newA.inputHeight = a.inputHeight
 	newA.inputWidth = a.inputWidth
 	newA.outputHeight = a.outputHeight

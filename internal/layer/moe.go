@@ -1,9 +1,11 @@
 package layer
 
 import (
-	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
+	"fmt"
 	"math"
 	"sort"
+
+	"github.com/FlavioCFOliveira/GoNeuron/internal/activations"
 )
 
 type expertWeight struct {
@@ -41,29 +43,38 @@ type MoE struct {
 }
 
 // NewMoE creates a new Mixture of Experts layer.
-// Returns nil if parameters are invalid.
-func NewMoE(inSize, outSize, numExperts, k int) *MoE {
+// Returns an error if parameters are invalid.
+func NewMoE(inSize, outSize, numExperts, k int) (*MoE, error) {
 	if inSize <= 0 && inSize != -1 {
-		return nil
+		return nil, fmt.Errorf("invalid inSize %d: must be > 0 or -1", inSize)
 	}
 	if outSize <= 0 && outSize != -1 {
-		return nil
+		return nil, fmt.Errorf("invalid outSize %d: must be > 0 or -1", outSize)
 	}
 	if numExperts <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid numExperts %d: must be > 0", numExperts)
 	}
 	if k <= 0 || k > numExperts {
-		return nil
+		return nil, fmt.Errorf("invalid k %d: must be > 0 and <= numExperts (%d)", k, numExperts)
 	}
+
+	// Create experts using NewDense (returns (*Dense, error) now)
 	experts := make([]Layer, numExperts)
 	expertOutputs := make([][]float32, numExperts)
 	for i := 0; i < numExperts; i++ {
-		experts[i] = NewDense(inSize, outSize, activations.NewLeakyReLU(0.1))
+		expert, err := NewDense(inSize, outSize, activations.NewLeakyReLU(0.1))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create expert %d: %w", i, err)
+		}
+		experts[i] = expert
 		expertOutputs[i] = make([]float32, outSize)
 	}
 
 	// Gating uses Linear activation so we can add noise before Softmax
-	gating := NewDense(inSize, numExperts, activations.Linear{})
+	gating, err := NewDense(inSize, numExperts, activations.Linear{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gating network: %w", err)
+	}
 
 	m := &MoE{
 		gating:        gating,
@@ -87,7 +98,7 @@ func NewMoE(inSize, outSize, numExperts, k int) *MoE {
 		m.Build(inSize)
 	}
 
-	return m
+	return m, nil
 }
 
 func (m *MoE) Build(inSize int) {
@@ -376,7 +387,7 @@ func (m *MoE) ClearGradients() {
 }
 
 func (m *MoE) Clone() Layer {
-	newM := NewMoE(m.inSize, m.outSize, m.numExperts, m.k)
+	newM, _ := NewMoE(m.inSize, m.outSize, m.numExperts, m.k)
 	copy(newM.params, m.params)
 	return newM
 }

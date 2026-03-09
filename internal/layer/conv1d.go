@@ -13,6 +13,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 	"sync"
 
@@ -60,22 +61,22 @@ type Conv1D struct {
 // stride: stride of the convolution
 // padding: zero-padding added to both sides of input
 // act: activation function
-// Returns nil if parameters are invalid.
-func NewConv1D(inChannels, outChannels, kernelSize, stride, padding int, act activations.Activation) *Conv1D {
+// Returns an error if parameters are invalid.
+func NewConv1D(inChannels, outChannels, kernelSize, stride, padding int, act activations.Activation) (*Conv1D, error) {
 	if inChannels <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid inChannels %d: must be > 0", inChannels)
 	}
 	if outChannels <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid outChannels %d: must be > 0", outChannels)
 	}
 	if kernelSize <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid kernelSize %d: must be > 0", kernelSize)
 	}
 	if stride <= 0 {
-		return nil
+		return nil, fmt.Errorf("invalid stride %d: must be > 0", stride)
 	}
 	if padding < 0 {
-		return nil
+		return nil, fmt.Errorf("invalid padding %d: must be >= 0", padding)
 	}
 
 	c := &Conv1D{
@@ -108,7 +109,7 @@ func NewConv1D(inChannels, outChannels, kernelSize, stride, padding int, act act
 		c.biases[i] = (rng.RandFloat()*2 - 1) * 0.1
 	}
 
-	return c
+	return c, nil
 }
 
 // OutputLength calculates output length for given input length

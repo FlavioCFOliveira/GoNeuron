@@ -2,6 +2,7 @@
 package layer
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -48,7 +49,15 @@ type LayerNorm struct {
 }
 
 // NewLayerNorm creates a new layer normalization layer.
-func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *LayerNorm {
+// Returns an error if parameters are invalid.
+func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) (*LayerNorm, error) {
+	if normalizedShape <= 0 && normalizedShape != -1 {
+		return nil, fmt.Errorf("invalid normalizedShape %d: must be > 0 or -1", normalizedShape)
+	}
+	if eps < 0 {
+		return nil, fmt.Errorf("invalid eps %f: must be >= 0", eps)
+	}
+
 	l := &LayerNorm{
 		normalizedShape:   normalizedShape,
 		eps:               eps,
@@ -63,7 +72,7 @@ func NewLayerNorm(normalizedShape int, eps float32, elementwiseAffine bool) *Lay
 		l.Build(normalizedShape)
 	}
 
-	return l
+	return l, nil
 }
 
 // Build initializes the layer with the given input size.
@@ -521,7 +530,7 @@ func (l *LayerNorm) ClearGradients() {
 
 // Clone creates a deep copy of the layer normalization layer.
 func (l *LayerNorm) Clone() Layer {
-	newL := NewLayerNorm(l.normalizedShape, l.eps, l.elementwiseAffine)
+	newL, _ := NewLayerNorm(l.normalizedShape, l.eps, l.elementwiseAffine)
 	if l.elementwiseAffine {
 		copy(newL.params, l.params)
 	}
