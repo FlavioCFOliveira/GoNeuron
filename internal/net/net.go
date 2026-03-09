@@ -592,10 +592,8 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 	// Clear global gradients
 	n.ClearGradients()
 
-	if cap(n.batchLossBuf) < batchSize {
-		n.batchLossBuf = make([]float32, batchSize)
-	}
-	losses := n.batchLossBuf[:batchSize]
+	// Worker-local loss accumulators to avoid race conditions
+	workerLosses := make([]float32, numWorkers)
 	var wg sync.WaitGroup
 
 	// Distribute work across workers
@@ -613,8 +611,10 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 		workers[w].ClearGradients()
 
 		wg.Add(1)
-		go func(worker *Network, s, e int) {
+		go func(workerIdx, s, e int) {
 			defer wg.Done()
+
+			worker := workers[workerIdx]
 
 			if isGPU {
 				// Lock OS thread for GPU workers to improve stability with CGO/Metal
@@ -622,6 +622,7 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 				defer runtime.UnlockOSThread()
 			}
 
+			var localLoss float32
 			for i := s; i < e; i++ {
 				// Reset internal state for layers that support it
 				for _, l := range worker.layers {
@@ -641,7 +642,7 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 				if err != nil {
 					return
 				}
-				losses[i] = l
+				localLoss += l
 
 				// Compute loss gradient
 				yPredLen := len(yPred)
@@ -662,7 +663,9 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 					return
 				}
 			}
-		}(workers[w], start, end)
+			// Store worker's accumulated loss
+			workerLosses[workerIdx] = localLoss
+		}(w, start, end)
 	}
 
 	wg.Wait()
@@ -684,9 +687,9 @@ func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) flo
 	// Optimization step
 	n.Step()
 
-	// Compute total loss
+	// Compute total loss from worker-local accumulators
 	totalLoss := float32(0.0)
-	for _, l := range losses {
+	for _, l := range workerLosses {
 		totalLoss += l
 	}
 	return totalLoss / float32(batchSize)

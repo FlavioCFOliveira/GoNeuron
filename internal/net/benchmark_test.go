@@ -18,12 +18,30 @@ func fillRandom(slice []float32) {
 	}
 }
 
+// mustDense creates a Dense layer or panics on error
+func mustDense(in, out int, act activations.Activation) layer.Layer {
+	l, err := layer.NewDense(in, out, act)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
+
+// mustDense creates a Dense layer or panics on error (for benchmarks only).
+func mustDense(in, out int, act activations.Activation) layer.Layer {
+	l, err := layer.NewDense(in, out, act)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
+
 // BenchmarkNetworkForward benchmarks a forward pass through a small network.
 func BenchmarkNetworkForward(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -39,9 +57,9 @@ func BenchmarkNetworkForward(b *testing.B) {
 // BenchmarkNetworkBackward benchmarks a backward pass through a small network.
 func BenchmarkNetworkBackward(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -62,9 +80,9 @@ func BenchmarkNetworkBackward(b *testing.B) {
 // BenchmarkNetworkTrain benchmarks training on a single sample.
 func BenchmarkNetworkTrain(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -82,9 +100,9 @@ func BenchmarkNetworkTrain(b *testing.B) {
 // BenchmarkNetworkTrainBatchSequentialSmall benchmarks training on a small batch sequentially.
 func BenchmarkNetworkTrainBatchSequentialSmall(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -107,9 +125,9 @@ func BenchmarkNetworkTrainBatchSequentialSmall(b *testing.B) {
 // BenchmarkNetworkTrainBatchSequential benchmarks training on a batch sequentially.
 func BenchmarkNetworkTrainBatchSequential(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -132,9 +150,9 @@ func BenchmarkNetworkTrainBatchSequential(b *testing.B) {
 // BenchmarkNetworkTrainBatchParallel benchmarks training on a batch in parallel.
 func BenchmarkNetworkTrainBatchParallel(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -157,9 +175,9 @@ func BenchmarkNetworkTrainBatchParallel(b *testing.B) {
 // BenchmarkNetworkTrainLargeBatch benchmarks training on a large batch.
 func BenchmarkNetworkTrainLargeBatch(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -182,9 +200,9 @@ func BenchmarkNetworkTrainLargeBatch(b *testing.B) {
 // BenchmarkNetworkParams benchmarks getting all network parameters.
 func BenchmarkNetworkParams(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -197,9 +215,9 @@ func BenchmarkNetworkParams(b *testing.B) {
 // BenchmarkNetworkGradients benchmarks getting all network gradients.
 func BenchmarkNetworkGradients(b *testing.B) {
 	layers := []layer.Layer{
-		layer.NewDense(784, 256, activations.Tanh{}),
-		layer.NewDense(256, 128, activations.Tanh{}),
-		layer.NewDense(128, 10, activations.Sigmoid{}),
+		mustDense(784, 256, activations.Tanh{}),
+		mustDense(256, 128, activations.Tanh{}),
+		mustDense(128, 10, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -223,7 +241,7 @@ func BenchmarkNetworkGradients(b *testing.B) {
 func BenchmarkNetworkLSTMTrainBatch(b *testing.B) {
 	layers := []layer.Layer{
 		layer.NewLSTM(10, 32),
-		layer.NewDense(32, 1, activations.Sigmoid{}),
+		mustDense(32, 1, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
@@ -256,7 +274,7 @@ func BenchmarkNetworkLSTMTrainBatch(b *testing.B) {
 func BenchmarkNetworkGRUTrainBatch(b *testing.B) {
 	layers := []layer.Layer{
 		layer.NewGRU(10, 32),
-		layer.NewDense(32, 1, activations.Sigmoid{}),
+		mustDense(32, 1, activations.Sigmoid{}),
 	}
 	network := New(layers, loss.MSE{}, &opt.SGD{LearningRate: 0.1})
 
