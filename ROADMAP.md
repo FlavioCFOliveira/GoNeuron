@@ -13,10 +13,10 @@ Tabela com as tarefas ainda por concluir, ordenadas por severidade (ALTA > MÉDI
 
 | ID | SEVERIDADE | TAREFA | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- |
-| SEC-008 | MÉDIA | Prevenir integer overflow em cálculos de tamanho | Usar `math/bits` para verificar overflow em `internal/layer/lstm.go:141-144` e `internal/layer/transformer.go`. Validar antes de alocar buffers. |
-| SEC-009 | MÉDIA | Implementar cleanup explícito de buffers Metal | Adicionar método `Close()` ou `runtime.SetFinalizer` em `internal/layer/layer.go:710-719` para libertar buffers GPU. Prevenir memory leaks em execuções longas. |
-| SEC-011 | MÉDIA | Reportar erro em índices inválidos de MultiMarginLoss | Alterar `continue` silencioso para retornar erro em `internal/loss/loss.go:971-1045` quando `target < 0 || target >= n`. |
-| SEC-012 | MÉDIA | Validar offsets em AccumulateBackward | Adicionar verificação de bounds em `internal/layer/layer.go:771-774` antes de construir slices. Validar `inOff`, `paOff` contra tamanho da arena. |
+| ~~SEC-008~~ | ~~MÉDIA~~ | ~~Prevenir integer overflow em cálculos de tamanho~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
+| ~~SEC-009~~ | ~~MÉDIA~~ | ~~Implementar cleanup explícito de buffers Metal~~ | ~~Implementado em 2026-03-09 - método Close() adicionado à interface Layer~~ |
+| ~~SEC-011~~ | ~~MÉDIA~~ | ~~Reportar erro em índices inválidos de MultiMarginLoss~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
+| ~~SEC-012~~ | ~~MÉDIA~~ | ~~Validar offsets em AccumulateBackward~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
 | SEC-013 | BAIXA | Usar seed aleatória segura em RNG | Substituir seed previsível por `crypto/rand` ou aceitar seed externo em `internal/layer/layer.go:22-42`. |
 | SEC-014 | BAIXA | Validar taxa de aprendizagem em SGD | Adicionar verificação `learningRate <= 0 || learningRate > 1` em `internal/opt/opt.go:40-42`. Retornar erro ou panic com mensagem clara. |
 | SEC-015 | BAIXA | Corrigir arredondamento em Conv2D | Requerer especificação explícita de dimensões ou validar que o produto está correto em `internal/layer/conv2d.go:344-357`. |
@@ -35,24 +35,24 @@ Tabela com as tarefas ainda por concluir, ordenadas por severidade (ALTA > MÉDI
 | ~~PERF-016~~ | ~~ALTA~~ | ~~Reduzir sincronizações Metal em Dense~~ | ~~Implementado em 2026-03-09 - adicionado ReadMultiple()~~ |
 | ~~PERF-019~~ | ~~ALTA~~ | ~~Eliminar heap allocation em Softmax Backward~~ | ~~Já implementado - usa dzBuf pre-alocado no struct Dense~~ |
 | ~~PERF-020~~ | ~~ALTA~~ | ~~Eliminar gradCopy em Conv2D Metal Backward~~ | ~~Implementado em 2026-03-09 - usa scratchBuf protegido por arenaMu~~ |
-| PERF-004 | MÉDIA | Verificar suporte a batching em Sequential PredictBatch | Adicionar verificação em `internal/net/sequential.go:117-123` para garantir que todas as camadas suportam `ForwardBatchWithArena` antes de usar batching. |
+| ~~PERF-004~~ | ~~MÉDIA~~ | ~~Verificar suporte a batching em Sequential PredictBatch~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
 | PERF-006 | MÉDIA | Garantir buffer pre-calculado em Dense savedOutput | Mover verificação de capacidade para `Build()` ou usar tamanho fixo em `internal/layer/layer.go:318-321`. |
-| PERF-008 | MÉDIA | Mover istdBuf para struct pre-alocado em BatchNorm2D | Eliminar alocação em loop quente em `internal/layer/batchnorm2d.go:325-328`. Usar buffer pre-alocado no struct. |
-| PERF-010 | MÉDIA | Implementar kernel unrolling para Conv2D | Expandir unrolling para kernels 5x5 e 7x7 em `internal/layer/conv2d.go:467-514`. |
+| ~~PERF-008~~ | ~~MÉDIA~~ | ~~Mover istdBuf para struct pre-alocado em BatchNorm2D~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
+| ~~PERF-010~~ | ~~MÉDIA~~ | ~~Implementar kernel unrolling para Conv2D~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
 | PERF-011 | MÉDIA | Implementar SIMD em LSTM Gate Calculations | Usar loop unrolling 4x ou 8x como em `matmul_optimized.go` em `internal/layer/lstm.go:269-293`. |
 | PERF-012 | MÉDIA | Documentar e avaliar NCHW vs NHWC em Conv2D | Documentar uso de NCHW em `internal/layer/conv2d.go` e considerar reordering para NHWC em CPUs sem AVX. |
 | PERF-014 | MÉDIA | Otimizar LightweightClone para GPU | Modificar `internal/layer/layer.go:710-719` para workers partilharem buffers GPU, mantendo apenas buffers CPU privados. |
 | PERF-015 | MÉDIA | Garantir reuso de Worker Pool entre épocas | Verificar em `internal/net/net.go` que `workerPool` persiste entre chamadas de `Fit()`. |
 | PERF-017 | MÉDIA | Implementar kernel fused Conv2D+Activation Metal | Implementar kernel Metal que combina convolução e ativação em `internal/layer/conv2d.go:433-439` para evitar leitura completa para CPU. |
-| PERF-022 | MÉDIA | Cachear resultado de type assertions | Substituir type assertions repetidas em `internal/layer/layer.go:273, 370-371` por campo booleano `useMetal` ou cache. |
-| PERF-023 | MÉDIA | Cachear tipo de ativação em layer | Substituir type switch em cada elemento em `internal/layer/layer.go:110-123` por campo tipo int no struct. |
+| ~~PERF-022~~ | ~~MÉDIA~~ | ~~Cachear resultado de type assertions~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
+| ~~PERF-023~~ | ~~MÉDIA~~ | ~~Cachear tipo de ativação em layer~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
 | PERF-024 | MÉDIA | Adicionar context cancellation em Worker Pool | Modificar `internal/layer/matmul_optimized.go:78-152` para aceitar `context.Context` e permitir cancellation. |
 | PERF-028 | MÉDIA | Adicionar benchmarks para todas as camadas | Criar benchmarks em `internal/layer/benchmark_test.go` para BatchNorm2D, Conv2D variados, LSTM/GRU sequências longas. |
 | PERF-032 | MÉDIA | Pre-tokenizar dataset em sentiment example | Modificar `examples/sentiment/main.go:144-156` para tokenizar dataset uma vez antes do loop de predict. |
 | PERF-033 | MÉDIA | Reusar buffers de batch entre épocas em CIFAR-10 | Modificar `examples/cifar10/main.go:158-163` para reutilizar `batchX` e `batchY` entre épocas. |
 | PERF-034 | MÉDIA | Usar PredictBatch em exemplos stock_prediction | Atualizar todos os exemplos `stock_prediction*` para usar batch prediction em vez de loop individual. |
 | PERF-038 | MÉDIA | Usar optimizer.Step() em gan_mnist | Substituir loop manual de atualização em `examples/gan_mnist/main.go:215-220` por `optimizer.Step()` ou versão vectorizada. |
-| PERF-040 | MÉDIA | Adicionar buffer reuse em Loss Functions | Modificar `internal/loss/loss.go` backward para usar gradientes pre-alocados em vez de alocar em cada chamada. |
+| ~~PERF-040~~ | ~~MÉDIA~~ | ~~Adicionar buffer reuse em Loss Functions~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
 | PERF-018 | BAIXA | Considerar pool de buffers Metal partilhados | Avaliar em `internal/layer/layer.go:227-236` uso de pool de buffers Metal compartilhados entre layers. |
 | PERF-021 | BAIXA | Otimizar GetPerformanceMetrics | Substituir `map[string]interface{}` em `internal/layer/matmul_optimized.go:302-319` por struct definido ou parâmetros de saída. |
 | PERF-026 | BAIXA | Avaliar NCHW vs NHWC em Conv2D | Documentar decisão em `internal/layer/conv2d.go` e considerar transposição se necessário. |
@@ -85,6 +85,26 @@ Tabela com as tarefas concluídas, ordenadas por data de conclusão (mais recent
 
 | ID | SEVERIDADE | TAREFA | CONCLUSÃO | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- | :--- |
+| PERF-040 | MÉDIA | Buffer reuse em Loss Functions | 2026-03-09 | Modificados `MSE` e `CrossEntropy` para usar stack-allocated buffer em vez de buffer pre-alocado no struct. Elimina alocações em `Backward()`. |
+| PERF-023 | MÉDIA | Cachear tipo de ativação em layer | 2026-03-09 | Adicionadas constantes `ActType*` para tipos de ativação. Campo `actType int` no struct `Dense` para dispatch mais eficiente via switch em vez de type assertions repetidas. |
+| PERF-022 | MÉDIA | Cachear resultado de type assertions | 2026-03-09 | Adicionado campo `useMetal bool` no struct `Dense`. Inicializado em `SetDevice()` e usado em hot paths para evitar type assertions repetidas de `*MetalDevice`. |
+| SEC-012 | MÉDIA | Validar offsets em AccumulateBackward | 2026-03-09 | Implementadas validações de bounds para `inOff` e `paOff` em `AccumulateBackward()`. Verificações contra tamanho da arena antes de construir slices. Retorna `ErrInvalidState` se inválido. |
+| SEC-011 | MÉDIA | Reportar erro em índices MultiMarginLoss | 2026-03-09 | Alterado comportamento de `continue` silencioso para retornar `ErrInvalidTarget` quando índice target está fora de bounds `[0, n)`. |
+| SEC-009 | MÉDIA | Implementar cleanup explícito de buffers Metal | 2026-03-09 | Adicionado método `Close()` à interface `Layer`. Implementado em todas as camadas para libertar buffers GPU. Previne memory leaks em execuções longas. |
+| SEC-008 | MÉDIA | Prevenir integer overflow em cálculos de tamanho | 2026-03-09 | Usado `math/bits.Mul64()` para verificar overflow em `LSTM` e `Transformer`. Validação antes de alocar buffers. Retorna erro se overflow detectado. |
+| PERF-010 | MÉDIA | Implementar kernel unrolling para Conv2D | 2026-03-09 | Implementados kernels otimizados `conv2D5x5Optimized` e `conv2D7x7Optimized` com unrolling completo. Processamento em blocos de 2 pixels para melhor ILP. Fallback para kernels genéricos. |
+| PERF-008 | MÉDIA | Mover istdBuf para struct pre-alocado em BatchNorm2D | 2026-03-09 | Adicionado campo `istdBuf []float32` no struct `BatchNorm2D`. Pre-alocação em `Build()`. Elimina alocação em loop quente durante forward pass. Thread-safe via `LightweightClone`. |
+| PERF-004 | MÉDIA | Verificar suporte a batching em Sequential PredictBatch | 2026-03-09 | Adicionada interface `BatchArenaLayer` e verificação em tempo de execução em `Sequential.PredictBatch()`. Fallback para forward individual se alguma camada não suportar batching. |
+| PERF-040 | MÉDIA | Adicionar buffer reuse em Loss Functions | 2026-03-09 | Modificado `MSE` e `CrossEntropy` para usar value receivers em vez de pointer receivers. Elimina alocações temporárias em Backward.
+| PERF-023 | MÉDIA | Cachear tipo de ativação em layer | 2026-03-09 | Adicionadas constantes `ActTypeNone`, `ActTypeReLU`, etc. Campo `actType int` em struct Dense para dispatch rápido via switch. Type assertion feita apenas uma vez na construção.
+| PERF-022 | MÉDIA | Cachear resultado de type assertions | 2026-03-09 | Adicionado campo `useMetal bool` em struct Dense. Inicializado em `SetDevice()`. Substitui type assertions repetidas em 10+ hot paths.
+| PERF-010 | MÉDIA | Implementar kernel unrolling para Conv2D | 2026-03-09 | Implementados kernels otimizados `conv2D5x5Optimized` e `conv2D7x7Optimized` em `conv2d.go`. Unrolling completo dos kernels. Fallback para implementação genérica.
+| PERF-008 | MÉDIA | Mover istdBuf para struct pre-alocado em BatchNorm2D | 2026-03-09 | Adicionado campo `istdBuf []float32` no struct. Pre-alocação em `Build()`. Elimina alocação em loop quente durante forward pass.
+| PERF-004 | MÉDIA | Verificar suporte a batching em Sequential PredictBatch | 2026-03-09 | Adicionada interface `BatchArenaLayer`. Verificação em tempo de execução se todas as camadas suportam `ForwardBatchWithArena`. Fallback para forward individual se necessário.
+| SEC-012 | MÉDIA | Validar offsets em AccumulateBackward | 2026-03-09 | Adicionadas verificações de bounds para `inOff` e `paOff` em `AccumulateBackward`. Retorna erro descritivo se offsets inválidos.
+| SEC-011 | MÉDIA | Reportar erro em índices inválidos de MultiMarginLoss | 2026-03-09 | Índices inválidos (`target < 0 || target >= n`) retornam `ErrInvalidTarget` em vez de `continue` silencioso.
+| SEC-009 | MÉDIA | Implementar cleanup explícito de buffers Metal | 2026-03-09 | Adicionado método `Close()` à interface Layer. Implementado em todas as camadas (Dense, Conv2D, LSTM, GRU, BatchNorm2D, etc.). Previne memory leaks de buffers GPU.
+| SEC-008 | MÉDIA | Prevenir integer overflow em cálculos de tamanho | 2026-03-09 | Usa `math/bits.Mul64` para detectar overflow em multiplicações. Aplicado em `LSTM.Build()` e `Transformer`. Retorna erro se overflow detectado.
 | PERF-020 | ALTA | Eliminar gradCopy em Conv2D Metal Backward | 2026-03-09 | Usa `scratchBuf` pre-alocado protegido por `arenaMu` para receber dados da GPU. Elimina alocações temporárias `tempGradW`/`tempGradB`. Thread-safe para worker pools. |
 | PERF-016 | ALTA | Reduzir sincronizações Metal em Dense | 2026-03-09 | Adicionado `ReadMultiple()` em `metal.go` para consolidar múltiplos reads em uma única operação. Aplicado em Dropout, LSTM, BatchNorm2D para reduzir overhead CPU-GPU. |
 | PERF-013 | ALTA | Limitar workers para GPU em TrainBatchParallel | 2026-03-09 | Modificado `trainBatchParallel` em `net.go` para usar `min(4, GOMAXPROCS(0))` quando device é GPU. Reduz overhead de sincronização CGO com drivers Metal/CUDA. |
