@@ -9,9 +9,30 @@ import (
 
 // GGUF Constants
 const (
-	GGUFMagic   = 0x46554747 // "GGUF" in little-endian
-	GGUFVersion = 3
+	GGUFMagic          = 0x46554747 // "GGUF" in little-endian
+	GGUFVersion        = 3
+	GGUFMinVersion     = 3 // Minimum supported version
+	GGUFMaxVersion     = 3 // Maximum supported version
 )
+
+// GGUF Errors
+var (
+	ErrInvalidMagic         = fmt.Errorf("invalid GGUF magic number")
+	ErrUnsupportedGGUFVersion = fmt.Errorf("unsupported GGUF version")
+	ErrVersionTooOld        = fmt.Errorf("GGUF version too old (minimum supported: %d)", GGUFMinVersion)
+	ErrVersionTooNew        = fmt.Errorf("GGUF version too new (maximum supported: %d)", GGUFMaxVersion)
+)
+
+// ValidateGGUFVersion checks if the given version is supported.
+func ValidateGGUFVersion(version uint32) error {
+	if version < GGUFMinVersion {
+		return ErrVersionTooOld
+	}
+	if version > GGUFMaxVersion {
+		return ErrVersionTooNew
+	}
+	return nil
+}
 
 // GGUF Value Types
 type GGUFType uint32
@@ -186,4 +207,58 @@ func Float32ToFloat16(f float32) uint16 {
 	}
 
 	return s | uint16(e<<10) | uint16(m>>13)
+}
+
+// GGUFReader helps reading GGUF files
+type GGUFReader struct {
+	r         io.Reader
+	version   uint32
+	alignment uint64
+}
+
+// NewGGUFReader creates a new GGUF reader.
+func NewGGUFReader(r io.Reader) *GGUFReader {
+	return &GGUFReader{
+		r:         r,
+		alignment: 32, // Default alignment
+	}
+}
+
+// ReadHeader reads and validates the GGUF header.
+// Returns version, tensorCount, kvCount, and error.
+func (gr *GGUFReader) ReadHeader() (version uint32, tensorCount uint64, kvCount uint64, err error) {
+	// Read magic
+	var magic uint32
+	if err := binary.Read(gr.r, binary.LittleEndian, &magic); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read magic: %w", err)
+	}
+	if magic != GGUFMagic {
+		return 0, 0, 0, ErrInvalidMagic
+	}
+
+	// Read version
+	if err := binary.Read(gr.r, binary.LittleEndian, &version); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read version: %w", err)
+	}
+	if err := ValidateGGUFVersion(version); err != nil {
+		return 0, 0, 0, err
+	}
+	gr.version = version
+
+	// Read tensor count
+	if err := binary.Read(gr.r, binary.LittleEndian, &tensorCount); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read tensor count: %w", err)
+	}
+
+	// Read KV count
+	if err := binary.Read(gr.r, binary.LittleEndian, &kvCount); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read KV count: %w", err)
+	}
+
+	return version, tensorCount, kvCount, nil
+}
+
+// Version returns the GGUF version read from the header.
+func (gr *GGUFReader) Version() uint32 {
+	return gr.version
 }

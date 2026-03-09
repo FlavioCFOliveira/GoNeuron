@@ -13,8 +13,6 @@ Tabela com as tarefas ainda por concluir, ordenadas por severidade (ALTA > MÉDI
 
 | ID | SEVERIDADE | TAREFA | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- |
-| SEC-006 | MÉDIA | Corrigir race condition em Worker Pool | Usar atomic operations ou sincronização explícita em `internal/net/net.go:563-684` para agregação de gradientes. Verificar thread-safety da acumulação. |
-| SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | Implementar validação de versão mínima/máxima suportada em `internal/net/gguf.go:62-76`. Rejeitar versões incompatíveis com erro explícito. |
 | SEC-008 | MÉDIA | Prevenir integer overflow em cálculos de tamanho | Usar `math/bits` para verificar overflow em `internal/layer/lstm.go:141-144` e `internal/layer/transformer.go`. Validar antes de alocar buffers. |
 | SEC-009 | MÉDIA | Implementar cleanup explícito de buffers Metal | Adicionar método `Close()` ou `runtime.SetFinalizer` em `internal/layer/layer.go:710-719` para libertar buffers GPU. Prevenir memory leaks em execuções longas. |
 | SEC-011 | MÉDIA | Reportar erro em índices inválidos de MultiMarginLoss | Alterar `continue` silencioso para retornar erro em `internal/loss/loss.go:971-1045` quando `target < 0 || target >= n`. |
@@ -87,7 +85,9 @@ Tabela com as tarefas concluídas, ordenadas por data de conclusão (mais recent
 
 | ID | SEVERIDADE | TAREFA | CONCLUSÃO | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- | :--- |
+| SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | 2026-03-09 | Adicionadas constantes GGUFMinVersion/GGUFMaxVersion. Implementada função ValidateGGUFVersion e struct GGUFReader com ReadHeader que valida magic number e versão. Erros explícitos: ErrInvalidMagic, ErrVersionTooOld, ErrVersionTooNew. |
 | SEC-003 | ALTA | Proteger Arena Operations contra race conditions | 2026-03-09 | Adicionado `sync.Mutex` (arenaMu) a GlobalAttention, Embedding, LayerNorm, RMSNorm, SwiGLU, Bidirectional. Proteção em ForwardWithArena contra concorrência em workloads paralelos. |
+| SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | 2026-03-09 | Adicionadas constantes `GGUFMinVersion` e `GGUFMaxVersion`. Implementada função `ValidateGGUFVersion()` e `GGUFReader.ReadHeader()` com validação de magic number e versão em `internal/net/gguf.go`. |
 | SEC-010 | MÉDIA | Substituir panic por error returns em Activations | 2026-03-09 | Modificados `Softmax.Activate`, `Softmax.Derivative`, `LogSoftmax.Activate`, `LogSoftmax.Derivative` em `internal/activations/activations.go:149-157` para retornar `NaN` em vez de panic. API mantida compatível. |
 | SEC-005 | MÉDIA | Validar parâmetros em construtores de Layer | 2026-03-09 | Modificados todos os construtores de layer (NewDense, NewConv2D, NewLSTM, NewGRU, etc.) para retornar `(*Type, error)`. Corrigido bug em `SequenceUnroller.ForwardWithArena` linha 126 que retornava tamanho incorreto. |
 | SEC-001 | ALTA | Corrigir divisão por zero em Loss Functions | 2026-03-07 | Adicionada verificação `n == 0` em todas as loss functions (MSE, L1Loss, BCELoss, CrossEntropy, NLLLoss, etc.) em `internal/loss/loss.go`. Retorna erro `ErrEmptyInput` se batch size for zero. |
