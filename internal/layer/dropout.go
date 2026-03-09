@@ -128,8 +128,11 @@ func (d *Dropout) ForwardWithArena(x []float32, arena *[]float32, offset *int) (
 		defer mBuf.Free()
 
 		m.DropoutPersistent(inBuf, outBuf, mBuf, inSize, d.p, true, d.rng.RandUint64())
-		outBuf.Read(d.outputBuf[:inSize])
-		mBuf.Read(mask)
+		// PERF-016: Consolidate 2 reads into single synchronization point
+		ReadMultiple(
+			[]*MetalBuffer{outBuf, mBuf},
+			[][]float32{d.outputBuf[:inSize], mask},
+		)
 		return d.outputBuf[:inSize], nil
 	}
 
@@ -210,8 +213,11 @@ func (d *Dropout) ForwardBatchWithArena(x []float32, batchSize int, arena *[]flo
 		defer mBuf.Free()
 
 		m.DropoutPersistent(inBuf, outBuf, mBuf, requiredSize, d.p, true, d.rng.RandUint64())
-		outBuf.Read(d.outputBuf[:requiredSize])
-		mBuf.Read(mask)
+		// PERF-016: Consolidate 2 reads into single synchronization point
+		ReadMultiple(
+			[]*MetalBuffer{outBuf, mBuf},
+			[][]float32{d.outputBuf[:requiredSize], mask},
+		)
 		return d.outputBuf[:requiredSize], nil
 	}
 

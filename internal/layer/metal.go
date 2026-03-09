@@ -164,6 +164,47 @@ func (b *MetalBuffer) Read(data []float32) {
 	}
 }
 
+// ReadMultiple reads multiple Metal buffers with a single synchronization point.
+// This reduces CPU-GPU synchronization overhead when reading multiple buffers.
+// Each buffer must have a matching destination slice in the same order.
+func ReadMultiple(buffers []*MetalBuffer, destinations [][]float32) {
+	if len(buffers) == 0 || len(buffers) != len(destinations) {
+		return
+	}
+
+	// Get device from first buffer
+	device := buffers[0].device
+	if device == nil || device.ptr == nil {
+		return
+	}
+
+	// Validate all buffers belong to the same device
+	for _, buf := range buffers {
+		if buf == nil || buf.device != device {
+			return
+		}
+	}
+
+	device.mu.Lock()
+	defer device.mu.Unlock()
+
+	// Single synchronization point for all reads
+	C.waitForMetal(device.ptr)
+
+	// Read all buffers
+	for i, buf := range buffers {
+		dest := destinations[i]
+		if len(dest) == 0 {
+			continue
+		}
+		readLen := len(dest)
+		if readLen > buf.length {
+			readLen = buf.length
+		}
+		C.readMetalBuffer(buf.ptr, (*C.float)(unsafe.Pointer(&dest[0])), C.int(readLen))
+	}
+}
+
 func (d *MetalDevice) CreateIntBuffer(data []int32) *MetalBuffer {
 	if d.ptr == nil || len(data) == 0 {
 		return nil

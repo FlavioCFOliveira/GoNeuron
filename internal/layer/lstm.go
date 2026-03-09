@@ -290,13 +290,11 @@ func (l *LSTM) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]f
 			l.bufI, l.bufF, l.bufG, l.bufO, l.outSize)
 
 		// 5. Read results back for Go state management and backprop
-		l.bufC.Read(l.cellBuf)
-		l.bufH.Read(l.hiddenBuf)
-		l.bufI.Read(l.inputGateOut)
-		l.bufF.Read(l.forgetGateOut)
-		l.bufG.Read(l.cellGateOut)
-		l.bufO.Read(l.outputGateOut)
-		l.bufPreAct.Read(l.preActBuf)
+		// PERF-016: Consolidate 7 reads into single synchronization point
+		ReadMultiple(
+			[]*MetalBuffer{l.bufC, l.bufH, l.bufI, l.bufF, l.bufG, l.bufO, l.bufPreAct},
+			[][]float32{l.cellBuf, l.hiddenBuf, l.inputGateOut, l.forgetGateOut, l.cellGateOut, l.outputGateOut, l.preActBuf},
+		)
 
 		goto storeState
 	} else {

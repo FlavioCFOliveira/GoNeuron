@@ -8,10 +8,32 @@ Padrões de performance e anti-patterns identificados no GoNeuron. Ver AUDIT/per
 
 ## Padrões Implementados (Bons)
 
-### Arena-Based State Saving
-- **Localização:** `internal/layer/layer.go:ForwardWithArena()`
+### Arena-Based State Saving (PERF-005 - IMPLEMENTADO)
+- **Localização:** `internal/layer/layer.go:ForwardWithArena()`, `internal/net/net.go:CalculateTotalArenaSize()`
 - Usa `arena *[]float32` e `offset *int` para salvar estados sem alocações
-- Atenção: Resize pode ser otimizado com pre-cálculo
+- **PERF-005:** Pre-cálculo de capacidade elimina redimensionamentos dinâmicos
+- **Implementação:**
+  ```go
+  // Network pre-calcula tamanho total necessário
+  func (n *Network) CalculateTotalArenaSize() int {
+      total := 0
+      for _, l := range n.layers {
+          total += l.ArenaSize()
+      }
+      return total
+  }
+
+  // initBuffers() pre-aloca com capacidade exata
+  totalArenaSize := n.CalculateTotalArenaSize()
+  if totalArenaSize > 0 {
+      n.arena = make([]float32, 0, totalArenaSize)
+  }
+
+  // Forward() reseta apenas o length, mantém capacity
+  n.arena = n.arena[:0]
+  ```
+- **Benefícios:** Zero alocações durante forward pass, GC pressure eliminada
+- **Thread-safety:** Cada worker tem sua própria arena (via LightweightClone)
 
 ### LightweightClone para Workers
 - **Localização:** `internal/net/net.go:initWorkers()`
@@ -23,6 +45,23 @@ Padrões de performance e anti-patterns identificados no GoNeuron. Ver AUDIT/per
 - Três níveis: simple < 1024, unrolled < 65536, parallel_blocked > 65536
 - Block size 64 para L1 cache
 - Unrolling 4x para ILP
+
+### Conv2D Metal Backward Zero-Allocation (PERF-020)
+- **Localização:** `internal/layer/conv2d.go:693-712`
+- **Problema:** Alocação de `tempGradW` e `tempGradB` em cada backward pass
+- **Solução:** Reusar `scratchBuf` pre-alocado + proteção com `arenaMu`
+- **Pattern:**
+```go
+// Thread-safe buffer reuse for multi-worker training
+c.arenaMu.Lock()
+if cap(c.scratchBuf) < needSize {
+    c.scratchBuf = make([]float32, needSize)
+}
+scratch := c.scratchBuf[:needSize]
+c.arenaMu.Unlock()
+// Usar scratch para leitura GPU e acumulação
+```
+- **Benefícios:** Zero alocações em hot path, thread-safe para worker pools
 
 ---
 
@@ -171,6 +210,7 @@ if n.device.Type() == layer.GPU {
 | PERF-011 | MEDIA | BatchNorm2D normalization sem blocking | batchnorm2d.go:333 |
 | PERF-012 | MEDIA | Conv2D Metal activation não fused | conv2d.go:433 |
 | PERF-013 | BAIXA | savedOutput realocado | layer.go:318 |
+| PERF-020 | ALTA | gradCopy allocation em Metal backward | conv2d.go:692 |
 
 ### Total: 41 issues (7 críticas, 18 altas, 12 médias, 5 baixas)
 
@@ -180,4 +220,4 @@ if n.device.Type() == layer.GPU {
 ---
 
 *Para detalhes completos, ver AUDIT/performance_audit.md*
-*Última atualização: 2026-03-07*
+*Última atualização: 2026-03-09*

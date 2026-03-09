@@ -93,10 +93,10 @@ func NewConv2D(inChannels, outChannels, kernelSize, stride, padding int,
 	}
 
 	c := &Conv2D{
-		inChannels:  inChannels,
-		outChannels: outChannels,
-		kernelSize:  kernelSize,
-		stride:      stride,
+		inChannels:        inChannels,
+		outChannels:       outChannels,
+		kernelSize:        kernelSize,
+		stride:            stride,
 		padding:           padding,
 		activation:        activation,
 		device:            &CPUDevice{},
@@ -174,8 +174,8 @@ func (c *Conv2D) SetDevice(device Device) {
 // computeOutputSize calculates the output spatial dimensions
 func (c *Conv2D) computeOutputSize(inputHeight, inputWidth int) (int, int) {
 	// Output size: (input + 2*padding - kernel) / stride + 1
-	outH := (inputHeight + 2*c.padding - c.kernelSize) / c.stride + 1
-	outW := (inputWidth + 2*c.padding - c.kernelSize) / c.stride + 1
+	outH := (inputHeight+2*c.padding-c.kernelSize)/c.stride + 1
+	outW := (inputWidth+2*c.padding-c.kernelSize)/c.stride + 1
 	return outH, outW
 }
 
@@ -402,14 +402,20 @@ func (c *Conv2D) ForwardWithArena(input []float32, arena *[]float32, offset *int
 		c.gradInBuf = make([]float32, totalInput)
 	}
 
-	// Save input for backward pass - protegido por mutex quando usando arena
+	// Save input for backward pass - assumes arena is pre-allocated with sufficient capacity
 	if arena != nil && offset != nil {
 		c.arenaMu.Lock()
 		c.arenaPtr = arena
+		// Assert: arena must have sufficient capacity
+		if cap(*arena) < *offset+len(input) {
+			c.arenaMu.Unlock()
+			return nil, fmt.Errorf("%w: arena capacity %d insufficient for Conv2D offset %d + input %d; "+
+				"ensure Network pre-allocates arena using CalculateTotalArenaSize()",
+				ErrInvalidDimensions, cap(*arena), *offset, len(input))
+		}
+		// Extend length if needed (no allocation, just reslice)
 		if len(*arena) < *offset+len(input) {
-			newArena := make([]float32, (*offset+len(input))*2)
-			copy(newArena, *arena)
-			*arena = newArena
+			*arena = (*arena)[:*offset+len(input)]
 		}
 		saved := (*arena)[*offset : *offset+len(input)]
 		copy(saved, input)
@@ -612,7 +618,6 @@ func (c *Conv2D) ForwardBatchWithArena(input []float32, batchSize int, arena *[]
 	return c.outputBuf[:batchSize*outSize], nil
 }
 
-
 // Backward performs backpropagation through the convolutional layer.
 // grad: gradient of loss w.r.t. activated output (shape: [outChannels, outH, outW] flattened)
 // Returns: gradient of loss w.r.t. input
@@ -675,10 +680,13 @@ func (c *Conv2D) Backward(grad []float32) ([]float32, error) {
 		// Apply activation derivative using pre-allocated scratch buffer
 		// dL/dz = dL/d(output) * activation'(z)
 		// Since we didn't fuse, we do it here using scratch buffer
+		// PERF-020: Protected by arenaMu to prevent race conditions in multi-worker training
+		c.arenaMu.Lock()
 		if cap(c.scratchBuf) < len(grad) {
 			c.scratchBuf = make([]float32, len(grad))
 		}
 		scratch := c.scratchBuf[:len(grad)]
+		c.arenaMu.Unlock()
 		for i := range grad {
 			scratch[i] = grad[i] * c.activation.Derivative(c.preActBuf[i])
 		}
@@ -688,24 +696,35 @@ func (c *Conv2D) Backward(grad []float32) ([]float32, error) {
 
 		c.bufGradIn.Read(gradInput)
 
-		// Accumulate gradients back to Go
-		tempGradW := make([]float32, len(c.gradWeights))
-		tempGradB := make([]float32, len(c.gradBiases))
-		c.bufGradW.Read(tempGradW)
-		c.bufGradB.Read(tempGradB)
+		// Accumulate gradients back to Go using scratchBuf to avoid allocation (PERF-020)
+		// Reuse scratchBuf if it has enough capacity for both weight and bias gradients
+		// Thread-safety: Protected by arenaMu to prevent race conditions in multi-worker training
+		c.arenaMu.Lock()
+		needSize := len(c.gradWeights) + len(c.gradBiases)
+		if cap(c.scratchBuf) < needSize {
+			c.scratchBuf = make([]float32, needSize)
+		}
+		gradScratch := c.scratchBuf[:needSize]
+		c.arenaMu.Unlock()
+
+		// PERF-016: Consolidate 2 reads into single synchronization point
+		ReadMultiple(
+			[]*MetalBuffer{c.bufGradW, c.bufGradB},
+			[][]float32{gradScratch[:len(c.gradWeights)], gradScratch[len(c.gradWeights):]},
+		)
 
 		for i := range c.gradWeights {
-			c.gradWeights[i] += tempGradW[i]
+			c.gradWeights[i] += gradScratch[i]
 		}
 		for i := range c.gradBiases {
-			c.gradBiases[i] += tempGradB[i]
+			c.gradBiases[i] += gradScratch[len(c.gradWeights)+i]
 		}
 
 		// Pop the last saved input offset
 		c.savedInputOffsets = c.savedInputOffsets[:ts]
 
 		return gradInput, nil
-}
+	}
 
 	// Clear input gradient buffer
 	for i := range gradInput {
@@ -907,7 +926,7 @@ func (c *Conv2D) LightweightClone(params []float32, grads []float32) Layer {
 		savedInputOffsets: make([]int, 0, 128),
 		training:          c.training,
 		device:            c.device,
-		metalState:       c.metalState,
+		metalState:        c.metalState,
 	}
 
 	if len(params) >= weightSize {

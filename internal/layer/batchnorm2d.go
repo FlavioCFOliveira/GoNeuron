@@ -546,10 +546,14 @@ func (b *BatchNorm2D) Backward(grad []float32) ([]float32, error) {
 		b.bufSavedStd.Update(savedStd)
 
 		md.BatchNorm2DBackwardPersistent(b.bufOut, b.bufIn, b.bufGradIn, b.bufSavedMean, b.bufSavedStd, b.bufGamma, b.bufGradGamma, b.bufGradBeta, batchSize, b.numFeatures, spatialSize, b.eps, b.momentum, b.affine)
-		b.bufGradIn.Read(gradIn)
+		// PERF-016: Consolidate reads into single synchronization point
 		if b.affine {
-			b.bufGradGamma.Read(b.gradGammaBuf)
-			b.bufGradBeta.Read(b.gradBetaBuf)
+			ReadMultiple(
+				[]*MetalBuffer{b.bufGradIn, b.bufGradGamma, b.bufGradBeta},
+				[][]float32{gradIn, b.gradGammaBuf, b.gradBetaBuf},
+			)
+		} else {
+			b.bufGradIn.Read(gradIn)
 		}
 		b.savedInputOffsets = b.savedInputOffsets[:ts]
 		b.savedMeanOffsets = b.savedMeanOffsets[:ts]

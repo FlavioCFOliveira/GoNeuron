@@ -291,16 +291,23 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 
 	copy(d.inputBuf, x)
 
-	// Save input to arena - protegido por mutex quando usando arena
+	// Save input to arena - assumes arena is pre-allocated with sufficient capacity
+	// The caller (Network) must pre-calculate total arena size using ArenaSize() before forward pass
 	if arena != nil && offset != nil {
 		d.arenaMu.Lock()
 		d.arenaPtr = arena
 		inSize := len(x)
+		// Assert: arena must have sufficient capacity - this is a programming error if triggered
+		// The Network should pre-allocate arena using CalculateTotalArenaSize()
+		if cap(*arena) < *offset+inSize {
+			d.arenaMu.Unlock()
+			return nil, fmt.Errorf("%w: arena capacity %d insufficient for offset %d + inSize %d; "+
+				"ensure Network pre-allocates arena using CalculateTotalArenaSize()",
+				ErrInvalidDimensions, cap(*arena), *offset, inSize)
+		}
+		// Extend length if needed (no allocation, just reslice)
 		if len(*arena) < *offset+inSize {
-			// Grow arena if needed
-			newArena := make([]float32, (*offset+inSize)*2)
-			copy(newArena, *arena)
-			*arena = newArena
+			*arena = (*arena)[:*offset+inSize]
 		}
 		saved := (*arena)[*offset : *offset+inSize]
 		copy(saved, x)
@@ -337,13 +344,19 @@ func (d *Dense) ForwardWithArena(x []float32, arena *[]float32, offset *int) ([]
 		matMulOptimized(input, weights, biases, preAct, 1, inSize, outSize)
 	}
 
-	// Save pre-activation to arena - protegido por mutex
+	// Save pre-activation to arena - assumes arena is pre-allocated with sufficient capacity
 	if arena != nil && offset != nil {
 		d.arenaMu.Lock()
+		// Assert: arena must have sufficient capacity
+		if cap(*arena) < *offset+outSize {
+			d.arenaMu.Unlock()
+			return nil, fmt.Errorf("%w: arena capacity %d insufficient for offset %d + outSize %d; "+
+				"ensure Network pre-allocates arena using CalculateTotalArenaSize()",
+				ErrInvalidDimensions, cap(*arena), *offset, outSize)
+		}
+		// Extend length if needed (no allocation, just reslice)
 		if len(*arena) < *offset+outSize {
-			newArena := make([]float32, (*offset+outSize)*2)
-			copy(newArena, *arena)
-			*arena = newArena
+			*arena = (*arena)[:*offset+outSize]
 		}
 		saved := (*arena)[*offset : *offset+outSize]
 		copy(saved, preAct)

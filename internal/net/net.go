@@ -74,7 +74,20 @@ func New(layers []layer.Layer, loss loss.Loss, optimizer opt.Optimizer) *Network
 	return n
 }
 
+// CalculateTotalArenaSize returns the total size needed for the activation arena
+// to avoid dynamic reallocations during forward pass. This sums ArenaSize() from all layers.
+// Returns 0 if no layers need arena storage (e.g., all layers return ArenaSize() == 0).
+func (n *Network) CalculateTotalArenaSize() int {
+	total := 0
+	for _, l := range n.layers {
+		total += l.ArenaSize()
+	}
+	return total
+}
+
 // initBuffers initializes the global contiguous buffers and re-binds layers.
+// This pre-allocates the activation arena with the exact size needed to avoid
+// dynamic reallocations during forward/backward passes (zero-allocation pattern).
 func (n *Network) initBuffers() {
 	totalSize := 0
 	for _, l := range n.layers {
@@ -88,13 +101,12 @@ func (n *Network) initBuffers() {
 	n.params = make([]float32, totalSize)
 	n.grads = make([]float32, totalSize)
 
-	// Pre-calculate arena size to avoid dynamic reallocations during forward pass
-	totalArenaSize := 0
-	for _, l := range n.layers {
-		totalArenaSize += l.ArenaSize()
-	}
+	// Pre-calculate and pre-allocate arena with exact size needed.
+	// This avoids dynamic reallocations (make+copy) during forward pass,
+	// improving performance by eliminating GC pressure in hot paths.
+	totalArenaSize := n.CalculateTotalArenaSize()
 	if totalArenaSize > 0 {
-		n.arena = make([]float32, totalArenaSize)
+		n.arena = make([]float32, 0, totalArenaSize)
 	}
 
 	offset := 0
@@ -198,8 +210,12 @@ func (n *Network) Clone() *Network {
 
 // Forward performs a forward pass through all layers.
 func (n *Network) Forward(x []float32) ([]float32, error) {
-	// Reset arena index for forward pass if in training
+	// Reset arena index and slice length for forward pass
+	// The capacity remains pre-allocated, only the active length is reset
 	n.arenaIndex = 0
+	if n.arena != nil {
+		n.arena = n.arena[:0]
+	}
 
 	curr := x
 	var err error
@@ -571,14 +587,19 @@ func (n *Network) accumulateBackward(grad []float32) ([]float32, error) {
 // It uses a pool of worker networks to avoid allocations and aggregates gradients sequentially.
 func (n *Network) trainBatchParallel(batchX [][]float32, batchY [][]float32) float32 {
 	batchSize := len(batchX)
-	numWorkers := runtime.NumCPU()
+	// Use GOMAXPROCS instead of NumCPU to respect runtime CPU limits
+	// This is important for containerized environments where CPU quota may be restricted
+	numWorkers := runtime.GOMAXPROCS(0)
 
 	isGPU := n.device != nil && n.device.Type() == layer.GPU
 	if isGPU {
-		// Reduce workers for GPU to avoid excessive CGO context switching and signals
-		// 4 workers is usually enough to saturate the command queue without overwhelming the driver
-		if numWorkers > 4 {
-			numWorkers = 4
+		// Reduce workers for GPU to avoid excessive CGO synchronization overhead.
+		// GPU operations involve CGO calls to Metal/CUDA drivers, and too many concurrent
+		// workers can overwhelm the driver with synchronization points.
+		// 4 workers is usually enough to saturate the GPU command queue without
+		// creating excessive contention. We also respect GOMAXPROCS in case it's lower.
+		if maxGPUWorkers := 4; numWorkers > maxGPUWorkers {
+			numWorkers = maxGPUWorkers
 		}
 	}
 
