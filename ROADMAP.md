@@ -27,14 +27,14 @@ Tabela com as tarefas ainda por concluir, ordenadas por severidade (ALTA > MÉDI
 
 | ID | SEVERIDADE | TAREFA | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- |
-| PERF-003 | ALTA | Usar PredictBatch em funções evaluate | Atualizar `examples/cifar10/main.go:188-193`, `examples/stock_prediction/main.go:122-126`, `examples/stock_prediction_bilstm/main.go:184-188` para usar batch prediction em vez de loop individual. |
-| PERF-005 | ALTA | Pre-calcular capacidade da Arena | Evitar redimensionamentos dinâmicos em `internal/layer/layer.go:250-254`. Pre-calcular tamanho máximo necessário baseado na arquitetura da rede antes do forward pass. |
-| PERF-007 | ALTA | Implementar pooling de buffers Metal para Conv2D | Pre-alocar buffers GPU para tamanho máximo esperado em `internal/layer/conv2d.go:410-424` ou usar pool de buffers. Reduzir overhead de sincronização CPU-GPU. |
-| PERF-009 | ALTA | Implementar blocking em Dense Backward | Aplicar blocking 64x64 similar a `matmul_optimized.go` em `internal/layer/layer.go:447-461` para melhorar localidade de cache. |
-| PERF-013 | ALTA | Limitar workers para GPU em TrainBatchParallel | Modificar `internal/net/net.go` para usar `numWorkers = min(4, runtime.GOMAXPROCS(0))` quando device for GPU. Reduzir overhead de sincronização CGO. |
-| PERF-016 | ALTA | Reduzir sincronizações Metal em Dense | Consolidar múltiplas operações de read em `internal/layer/layer.go:273-287` para single read ou usar memória persistente mapeada. |
-| PERF-019 | ALTA | Eliminar heap allocation em Softmax Backward | Substituir `make([]float32, outSize)` por buffer pre-alocado ou stack array em `internal/layer/layer.go:399-406`. |
-| PERF-020 | ALTA | Eliminar gradCopy em Conv2D Metal Backward | Usar `bufDZ` como buffer temporário ou aplicar in-place em `internal/layer/conv2d.go:640-645` para evitar alocação duplicada. |
+| ~~PERF-003~~ | ~~ALTA~~ | ~~Usar PredictBatch em funções evaluate~~ | ~~Já implementado - exemplos cifar10, stock_prediction, stock_prediction_bilstm usam PredictBatch~~ |
+| ~~PERF-005~~ | ~~ALTA~~ | ~~Pre-calcular capacidade da Arena~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
+| ~~PERF-007~~ | ~~ALTA~~ | ~~Implementar pooling de buffers Metal para Conv2D~~ | ~~Já implementado - usa maxGradOutSize/maxGradInSize para pooling~~ |
+| ~~PERF-009~~ | ~~ALTA~~ | ~~Implementar blocking em Dense Backward~~ | ~~Já implementado - blocking 64x64 com loop unrolling 4x~~ |
+| ~~PERF-013~~ | ~~ALTA~~ | ~~Limitar workers para GPU em TrainBatchParallel~~ | ~~Implementado em 2026-03-09 - ver TAREFAS TERMINADAS~~ |
+| ~~PERF-016~~ | ~~ALTA~~ | ~~Reduzir sincronizações Metal em Dense~~ | ~~Implementado em 2026-03-09 - adicionado ReadMultiple()~~ |
+| ~~PERF-019~~ | ~~ALTA~~ | ~~Eliminar heap allocation em Softmax Backward~~ | ~~Já implementado - usa dzBuf pre-alocado no struct Dense~~ |
+| ~~PERF-020~~ | ~~ALTA~~ | ~~Eliminar gradCopy em Conv2D Metal Backward~~ | ~~Implementado em 2026-03-09 - usa scratchBuf protegido por arenaMu~~ |
 | PERF-004 | MÉDIA | Verificar suporte a batching em Sequential PredictBatch | Adicionar verificação em `internal/net/sequential.go:117-123` para garantir que todas as camadas suportam `ForwardBatchWithArena` antes de usar batching. |
 | PERF-006 | MÉDIA | Garantir buffer pre-calculado em Dense savedOutput | Mover verificação de capacidade para `Build()` ou usar tamanho fixo em `internal/layer/layer.go:318-321`. |
 | PERF-008 | MÉDIA | Mover istdBuf para struct pre-alocado em BatchNorm2D | Eliminar alocação em loop quente em `internal/layer/batchnorm2d.go:325-328`. Usar buffer pre-alocado no struct. |
@@ -85,6 +85,15 @@ Tabela com as tarefas concluídas, ordenadas por data de conclusão (mais recent
 
 | ID | SEVERIDADE | TAREFA | CONCLUSÃO | DESCRIÇÃO TÉCNICA ACIONÁVEL |
 | :--- | :--- | :--- | :--- | :--- |
+| PERF-020 | ALTA | Eliminar gradCopy em Conv2D Metal Backward | 2026-03-09 | Usa `scratchBuf` pre-alocado protegido por `arenaMu` para receber dados da GPU. Elimina alocações temporárias `tempGradW`/`tempGradB`. Thread-safe para worker pools. |
+| PERF-016 | ALTA | Reduzir sincronizações Metal em Dense | 2026-03-09 | Adicionado `ReadMultiple()` em `metal.go` para consolidar múltiplos reads em uma única operação. Aplicado em Dropout, LSTM, BatchNorm2D para reduzir overhead CPU-GPU. |
+| PERF-013 | ALTA | Limitar workers para GPU em TrainBatchParallel | 2026-03-09 | Modificado `trainBatchParallel` em `net.go` para usar `min(4, GOMAXPROCS(0))` quando device é GPU. Reduz overhead de sincronização CGO com drivers Metal/CUDA. |
+| PERF-005 | ALTA | Pre-calcular capacidade da Arena | 2026-03-09 | Implementado `CalculateTotalArenaSize()` que percorre camadas e soma `ArenaSize()`. Arena pre-alocada em `initBuffers()` com capacidade exata. Elimina redimensionamentos dinâmicos. Assertions verificam capacidade em `ForwardWithArena`. |
+| PERF-003 | ALTA | Usar PredictBatch em funções evaluate | 2026-03-09 | Verificação concluída. Exemplos cifar10, stock_prediction, stock_prediction_bilstm já usam `PredictBatch()`. Nenhuma alteração necessária. |
+| PERF-009 | ALTA | Implementar blocking em Dense Backward | 2026-03-09 | Verificação concluída. Já implementado blocking 64x64 com loop unrolling 4x em `layer.go:510-540` para melhorar cache locality. |
+| PERF-019 | ALTA | Eliminar heap allocation em Softmax Backward | 2026-03-09 | Verificação concluída. Já usa `dzBuf` pre-alocado no struct Dense, eliminando alocações em cada backward. |
+| PERF-007 | ALTA | Implementar pooling de buffers Metal para Conv2D | 2026-03-09 | Verificação concluída. Já implementado com `maxGradOutSize` e `maxGradInSize` para reter buffers GPU entre passos. |
+| ROAD-005 | ALTA | Adicionar bounds checking em funções críticas | 2026-03-09 | Verificação concluída. `argmax` em exemplos verifica slice vazio. `Embedding.ForwardWithArena` valida índices contra `[0, num_embeddings)`. |
 | SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | 2026-03-09 | Adicionadas constantes GGUFMinVersion/GGUFMaxVersion. Implementada função ValidateGGUFVersion e struct GGUFReader com ReadHeader que valida magic number e versão. Erros explícitos: ErrInvalidMagic, ErrVersionTooOld, ErrVersionTooNew. |
 | SEC-003 | ALTA | Proteger Arena Operations contra race conditions | 2026-03-09 | Adicionado `sync.Mutex` (arenaMu) a GlobalAttention, Embedding, LayerNorm, RMSNorm, SwiGLU, Bidirectional. Proteção em ForwardWithArena contra concorrência em workloads paralelos. |
 | SEC-007 | MÉDIA | Validar versão GGUF em Load/Save | 2026-03-09 | Adicionadas constantes `GGUFMinVersion` e `GGUFMaxVersion`. Implementada função `ValidateGGUFVersion()` e `GGUFReader.ReadHeader()` com validação de magic number e versão em `internal/net/gguf.go`. |
